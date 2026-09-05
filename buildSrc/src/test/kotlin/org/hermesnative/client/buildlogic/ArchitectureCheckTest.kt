@@ -147,10 +147,12 @@ class ArchitectureCheckTest {
     private fun runArchitectureCheck(): ProcessResult {
         val process =
             ProcessBuilder(
-                repositoryRoot.resolve("gradlew").absolutePath,
-                "architectureCheck",
-                "--no-daemon",
-                "--console=plain",
+                gradleWrapperCommand(repositoryRoot) +
+                    listOf(
+                        "architectureCheck",
+                        "--no-daemon",
+                        "--console=plain",
+                    ),
             ).directory(repositoryRoot)
                 .redirectErrorStream(true)
                 .start()

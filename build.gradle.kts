@@ -1,3 +1,4 @@
+import org.hermesnative.client.buildlogic.gradleWrapperCommand
 import org.gradle.kotlin.dsl.register
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -31,7 +32,8 @@ val architectureModuleBuildFiles = listOf(
 val architectureRuleTestSource =
     file("buildSrc/src/test/kotlin/org/hermesnative/client/buildlogic/ArchitectureCheckTest.kt")
 val architectureRuleTestClass = "org.hermesnative.client.buildlogic.ArchitectureCheckTest"
-val architectureRuleTestResults = file("buildSrc/build/test-results/test")
+val architectureRuleTestBuildDir = file("build/architecture-rule-tests/buildSrc")
+val architectureRuleTestResults = architectureRuleTestBuildDir.resolve("test-results/test")
 var architectureRuleTestsExecuted = false
 
 val forbiddenQualifiedPackages = listOf(
@@ -188,19 +190,22 @@ tasks.register("architectureRuleTests") {
     dependsOn("architectureCheck")
     doLast {
         requireArchitectureRuleTestSource()
-        architectureRuleTestResults.deleteRecursively()
+        architectureRuleTestBuildDir.deleteRecursively()
         val result =
             ProcessBuilder(
-                file("gradlew").absolutePath,
-                "-p",
-                "buildSrc",
-                "test",
-                "--tests",
-                architectureRuleTestClass,
-                "--rerun-tasks",
-                "--no-build-cache",
-                "--no-daemon",
-                "--console=plain",
+                *(gradleWrapperCommand(projectDir) +
+                    listOf(
+                        "-p",
+                        "buildSrc",
+                        "-Parchitecture.testBuildDir=${architectureRuleTestBuildDir.absolutePath}",
+                        "test",
+                        "--tests",
+                        architectureRuleTestClass,
+                        "--rerun-tasks",
+                        "--no-build-cache",
+                        "--no-daemon",
+                        "--console=plain",
+                    )).toTypedArray(),
             ).directory(projectDir)
                 .inheritIO()
                 .start()

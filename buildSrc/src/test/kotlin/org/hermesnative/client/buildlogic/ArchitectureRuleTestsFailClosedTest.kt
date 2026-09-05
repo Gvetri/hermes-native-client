@@ -1,7 +1,9 @@
 package org.hermesnative.client.buildlogic
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ArchitectureRuleTestsFailClosedTest {
@@ -81,7 +83,7 @@ class ArchitectureRuleTestsFailClosedTest {
 
                     tasks.test {
                         doLast {
-                            file("build/test-results/test").deleteRecursively()
+                            project.layout.buildDirectory.dir("test-results/test").get().asFile.deleteRecursively()
                         }
                     }
                     """.trimIndent() + "\n",
@@ -107,7 +109,7 @@ class ArchitectureRuleTestsFailClosedTest {
 
                     tasks.test {
                         doLast {
-                            file("build/test-results/test")
+                            project.layout.buildDirectory.dir("test-results/test").get().asFile
                                 .walkTopDown()
                                 .filter { it.isFile && it.extension == "xml" }
                                 .forEach { it.writeText("") }
@@ -131,15 +133,42 @@ class ArchitectureRuleTestsFailClosedTest {
         val originalSource = focusedTestSource.readText()
         val originalBuildScript = buildSrcBuildScript.readText()
         try {
+            val classBodyEnd = originalSource.lastIndexOf('}')
+            check(classBodyEnd >= 0) { "Could not locate the focused class body in $focusedTestSource" }
             focusedTestSource.writeText(
-                originalSource +
+                originalSource.substring(0, classBodyEnd) +
                     """
 
                     @Test
                     fun focused_failure_fixture() {
                         throw AssertionError("synthetic focused failure")
                     }
-                    """.trimIndent() + "\n",
+                    """.trimIndent() + "\n}\n",
+            )
+            val focusedTestResult =
+                runGradle(
+                    "-p",
+                    "buildSrc",
+                    "test",
+                    "--tests",
+                    "org.hermesnative.client.buildlogic.ArchitectureCheckTest",
+                    "--rerun-tasks",
+                    "--no-build-cache",
+                )
+            assertNotEquals(
+                "The focused failure fixture passed unexpectedly:\n${focusedTestResult.output}",
+                0,
+                focusedTestResult.exitCode,
+            )
+            assertTrue(
+                "The focused failure fixture did not execute:\n${focusedTestResult.output}",
+                focusedTestResult.output.contains("ArchitectureCheckTest > focused_failure_fixture FAILED"),
+            )
+            val result = runArchitectureRuleTests()
+            assertNotEquals(
+                "architectureRuleTests accepted the focused failure:\n${result.output}",
+                0,
+                result.exitCode,
             )
             buildSrcBuildScript.writeText(
                 originalBuildScript +
@@ -148,19 +177,14 @@ class ArchitectureRuleTestsFailClosedTest {
                     tasks.test {
                         ignoreFailures = true
                         doLast {
-                            file("build/test-results/test/TEST-org.hermesnative.client.buildlogic.ArchitectureCheckTest-synthetic.xml")
+                            project.layout.buildDirectory.dir("test-results/test").get().asFile
+                                .resolve("TEST-org.hermesnative.client.buildlogic.ArchitectureCheckTest-synthetic.xml")
                                 .writeText(
                                     "<testsuite name=\"org.hermesnative.client.buildlogic.ArchitectureCheckTest\" tests=\"1\" skipped=\"0\" failures=\"1\" errors=\"0\"><testcase name=\"synthetic\"><failure message=\"synthetic failure\" /></testcase></testsuite>",
                                 )
                         }
                     }
                     """.trimIndent() + "\n",
-            )
-            val result = runArchitectureRuleTests()
-            assertNotEquals(
-                "architectureRuleTests accepted focused failure evidence when Gradle ignored test failures:\n${result.output}",
-                0,
-                result.exitCode,
             )
             val qualityGateResult =
                 runGradle(
@@ -292,6 +316,33 @@ class ArchitectureRuleTestsFailClosedTest {
         )
     }
 
+    @Test
+    fun architecture_rule_tests_isolate_nested_results_from_parent_build_src_test() {
+        val parentResultsDirectory = repositoryRoot.resolve("buildSrc/build/test-results/test")
+        val sentinel = parentResultsDirectory.resolve("parent-test-sentinel.xml")
+        val originalSentinel = sentinel.takeIf(File::exists)?.readText()
+        try {
+            parentResultsDirectory.mkdirs()
+            sentinel.writeText("<testsuite name=\"parent\" tests=\"1\" />")
+            val result = runArchitectureRuleTests()
+            assertEquals(
+                "architectureRuleTests failed while checking nested-result isolation:\n${result.output}",
+                0,
+                result.exitCode,
+            )
+            assertTrue(
+                "architectureRuleTests deleted the parent buildSrc:test evidence.",
+                sentinel.isFile,
+            )
+        } finally {
+            if (originalSentinel == null) {
+                sentinel.delete()
+            } else {
+                sentinel.writeText(originalSentinel)
+            }
+        }
+    }
+
     private fun runArchitectureRuleTests(): ProcessResult {
         return runGradle("architectureRuleTests")
     }
@@ -299,7 +350,7 @@ class ArchitectureRuleTestsFailClosedTest {
     private fun runGradle(vararg arguments: String): ProcessResult {
         val process =
             ProcessBuilder(
-                listOf(repositoryRoot.resolve("gradlew").absolutePath) +
+                gradleWrapperCommand(repositoryRoot) +
                     arguments.toList() +
                     listOf("--no-daemon", "--console=plain"),
             ).directory(repositoryRoot)
