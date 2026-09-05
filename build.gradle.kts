@@ -88,9 +88,10 @@ val forbiddenDependencyTokens = listOf(
     "project(\":feature:entry:data\")",
     "project(\":feature:entry:presentation\")",
     "project(\":feature:entry:wiring\")",
-    "project(path = \":feature:entry:data\")",
-    "project(path = \":feature:entry:presentation\")",
-    "project(path = \":feature:entry:wiring\")",
+)
+
+val forbiddenNamedProjectDependency = Regex(
+    """project\s*\([^)]*\bpath\s*=\s*["']:(?:feature:entry:(?:data|presentation|wiring))["'][^)]*\)""",
 )
 
 fun requireArchitectureRuleTestSource() {
@@ -122,6 +123,12 @@ fun requireArchitectureRuleTestEvidence() {
     check(focusedReports.isNotEmpty()) {
         "Architecture rule tests found no focused test result report."
     }
+    check(focusedReports.all { document ->
+        document.getElementsByTagName("failure").length == 0 &&
+            document.getElementsByTagName("error").length == 0
+    }) {
+        "Architecture rule tests found failed focused test evidence."
+    }
     val executedTests = focusedReports.sumOf { document ->
         val testCases = document.getElementsByTagName("testcase")
         (0 until testCases.length).count { index ->
@@ -148,7 +155,7 @@ tasks.register("architectureCheck") {
 
         val sourceViolations = sourceFiles.flatMap { sourceFile ->
             sourceFile.readLines().mapIndexedNotNull { index, line ->
-                if (forbiddenQualifiedReference.containsMatchIn(line)) {
+                if (forbiddenQualifiedReference.containsMatchIn(line.replace("`", ""))) {
                     "${sourceFile.relativeTo(projectDir)}:${index + 1}: forbidden qualified dependency: $line"
                 } else {
                     null
@@ -156,13 +163,19 @@ tasks.register("architectureCheck") {
             }
         }
         val dependencyViolations = architectureModuleBuildFiles.flatMap { buildFile ->
-            buildFile.readLines().mapIndexedNotNull { index, line ->
+            val content = buildFile.readText()
+            val tokenViolations = content.lines().mapIndexedNotNull { index, line ->
                 if (forbiddenDependencyTokens.any(line::contains)) {
                     "${buildFile.relativeTo(projectDir)}:${index + 1}: forbidden module dependency: $line"
                 } else {
                     null
                 }
             }
+            val namedProjectViolations = forbiddenNamedProjectDependency.findAll(content).map { match ->
+                val lineNumber = content.substring(0, match.range.first).count { it == '\n' } + 1
+                "${buildFile.relativeTo(projectDir)}:$lineNumber: forbidden named project dependency: ${match.value}"
+            }
+            tokenViolations + namedProjectViolations
         }
         val violations = sourceViolations + dependencyViolations
         check(violations.isEmpty()) { "Architecture violations:\n${violations.joinToString("\n")}" }

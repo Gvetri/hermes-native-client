@@ -127,6 +127,69 @@ class ArchitectureRuleTestsFailClosedTest {
     }
 
     @Test
+    fun architecture_rule_tests_reject_focused_failure_when_gradle_ignores_test_failures() {
+        val originalSource = focusedTestSource.readText()
+        val originalBuildScript = buildSrcBuildScript.readText()
+        try {
+            focusedTestSource.writeText(
+                originalSource +
+                    """
+
+                    @Test
+                    fun focused_failure_fixture() {
+                        throw AssertionError("synthetic focused failure")
+                    }
+                    """.trimIndent() + "\n",
+            )
+            buildSrcBuildScript.writeText(
+                originalBuildScript +
+                    """
+
+                    tasks.test {
+                        ignoreFailures = true
+                        doLast {
+                            file("build/test-results/test/TEST-org.hermesnative.client.buildlogic.ArchitectureCheckTest-synthetic.xml")
+                                .writeText(
+                                    "<testsuite name=\"org.hermesnative.client.buildlogic.ArchitectureCheckTest\" tests=\"1\" skipped=\"0\" failures=\"1\" errors=\"0\"><testcase name=\"synthetic\"><failure message=\"synthetic failure\" /></testcase></testsuite>",
+                                )
+                        }
+                    }
+                    """.trimIndent() + "\n",
+            )
+            val result = runArchitectureRuleTests()
+            assertNotEquals(
+                "architectureRuleTests accepted focused failure evidence when Gradle ignored test failures:\n${result.output}",
+                0,
+                result.exitCode,
+            )
+            val qualityGateResult =
+                runGradle(
+                    "qualityGate",
+                    "-x",
+                    "formatCheck",
+                    "-x",
+                    "verifyNoMocks",
+                    "-x",
+                    "verifyRequiredUnitTests",
+                    "-x",
+                    ":app:lintDebug",
+                    "-x",
+                    ":app:assembleDebug",
+                    "-x",
+                    ":app:assembleRelease",
+                )
+            assertNotEquals(
+                "qualityGate accepted focused failure evidence when Gradle ignored test failures:\n${qualityGateResult.output}",
+                0,
+                qualityGateResult.exitCode,
+            )
+        } finally {
+            focusedTestSource.writeText(originalSource)
+            buildSrcBuildScript.writeText(originalBuildScript)
+        }
+    }
+
+    @Test
     fun architecture_rule_tests_reject_skipped_focused_tests() {
         val original = focusedTestSource.readText()
         try {

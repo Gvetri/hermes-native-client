@@ -1,6 +1,7 @@
 package org.hermesnative.client.buildlogic
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -67,6 +68,57 @@ class ArchitectureCheckTest {
             relativePath = "feature/entry/application/src/main/kotlin/org/hermesnative/client/feature/entry/application/LoadEntryState.kt",
             content = "\nval forbiddenConcreteLayerValue = org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository\n",
         )
+    }
+
+    @Test
+    fun rejects_escaped_fully_qualified_concrete_data_reference_in_application() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/application/src/main/kotlin/org/hermesnative/client/feature/entry/application/LoadEntryState.kt",
+            content = "\nval forbiddenEscapedConcreteLayerValue = org.hermesnative.client.feature.entry.`data`.DefaultGatewayConnectionRepository\n",
+        )
+    }
+
+    @Test
+    fun rejects_named_forbidden_project_dependency_with_configuration_in_domain() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/domain/build.gradle.kts",
+            content = "\ndependencies { implementation(project(path = \":feature:entry:data\", configuration = \"default\")) }\n",
+        )
+    }
+
+    @Test
+    fun accepts_fully_qualified_domain_port_reference_in_application() {
+        assertArchitectureAccepted(
+            relativePath = "feature/entry/application/src/main/kotlin/org/hermesnative/client/feature/entry/application/LoadEntryState.kt",
+            content = "\nval allowedPort: org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository? = null\n",
+        )
+    }
+
+    @Test
+    fun accepts_named_allowed_domain_project_dependency_in_application() {
+        assertArchitectureAccepted(
+            relativePath = "feature/entry/application/build.gradle.kts",
+            content = "\ndependencies { implementation(project(path = \":feature:entry:domain\", configuration = \"default\")) }\n",
+        )
+    }
+
+    private fun assertArchitectureAccepted(
+        relativePath: String,
+        content: String,
+    ) {
+        val target = repositoryRoot.resolve(relativePath)
+        val original = target.readText()
+        try {
+            target.writeText(original + content)
+            val result = runArchitectureCheck()
+            assertEquals(
+                "architectureCheck rejected the allowed fixture in $relativePath:\n${result.output}",
+                0,
+                result.exitCode,
+            )
+        } finally {
+            target.writeText(original)
+        }
     }
 
     private fun assertArchitectureViolation(
