@@ -72,10 +72,10 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew architectureCheck verifyNoMocks --no-daemon
+      - run: ./gradlew architectureCheck architectureRuleTests verifyNoMocks --no-daemon
 
   compose_test:
-    name: compose-test
+    name: api24-launch-themes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +93,9 @@ jobs:
           force-avd-creation: true
           emulator-options: -no-window -no-audio -no-boot-anim
           disable-animations: true
-          script: ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests :app:verifyConnectedAndroidTests --no-daemon
+          script: |
+            ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests --no-daemon
+            ./gradlew :app:verifyConnectedAndroidTests --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=org.hermesnative.client.MainActivityTest,org.hermesnative.client.MainActivitySystemLightThemeTest,org.hermesnative.client.MainActivitySystemDarkThemeTest
 
   quality-gate:
     name: quality-gate

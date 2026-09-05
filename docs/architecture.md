@@ -46,6 +46,6 @@ Wiring selects concrete datasource and repository implementations and creates th
 
 ## Architecture checks
 
-`./gradlew architectureCheck` scans domain and application Kotlin imports and fails on forbidden framework, transport, serialization, dependency-injection, and concrete-data dependencies. `./gradlew verifyNoMocks` rejects mock framework names and mock construction in main, unit-test, and instrumentation source.
+`./gradlew architectureCheck` scans domain and application Kotlin source for forbidden framework, transport, serialization, dependency-injection, and concrete-data references, including fully qualified references. It also scans both module build scripts and fails on forbidden dependency declarations. `./gradlew architectureRuleTests` runs focused failure tests for these rules. `./gradlew verifyNoMocks` rejects mock framework names and mock construction in main, unit-test, and instrumentation source.
 
 These checks are intentionally simple and visible. A future feature must extend the declared checks when it introduces a new boundary.

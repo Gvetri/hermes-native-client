@@ -18,50 +18,126 @@ subprojects {
     }
 }
 
-val sourceRoots = listOf(
+val architectureSourceRoots = listOf(
     file("feature/entry/domain/src/main/kotlin"),
     file("feature/entry/application/src/main/kotlin"),
 )
 
-val forbiddenDomainImports = listOf(
-    "import android.",
-    "import androidx.",
-    "import androidx.compose.",
-    "import com.google.gson.",
-    "import com.squareup.moshi.",
-    "import dagger.",
-    "import io.ktor.",
-    "import javax.inject.",
-    "import kotlinx.serialization.",
-    "import okhttp3.",
-    "import org.json.",
-    "import retrofit2.",
-    "import java.net.",
-    "import java.net.http.",
-    "import org.hermesnative.client.feature.entry.data.",
-    "import org.hermesnative.client.feature.entry.presentation.",
-    "import org.hermesnative.client.feature.entry.wiring.",
+val architectureModuleBuildFiles = listOf(
+    file("feature/entry/domain/build.gradle.kts"),
+    file("feature/entry/application/build.gradle.kts"),
+)
+
+val forbiddenQualifiedPackages = listOf(
+    "android",
+    "androidx",
+    "com.google.gson",
+    "com.squareup.moshi",
+    "dagger",
+    "hilt",
+    "io.ktor",
+    "jakarta.inject",
+    "javax.inject",
+    "kotlinx.serialization",
+    "okhttp3",
+    "org.json",
+    "org.koin",
+    "retrofit2",
+    "java.net",
+    "org.hermesnative.client.feature.entry.data",
+    "org.hermesnative.client.feature.entry.presentation",
+    "org.hermesnative.client.feature.entry.wiring",
+)
+
+val forbiddenQualifiedReference = Regex(
+    "(?<![A-Za-z0-9_])(?:${forbiddenQualifiedPackages.joinToString(separator = "|", transform = Regex::escape)})\\.[A-Za-z_][A-Za-z0-9_.]*",
+)
+
+val forbiddenDependencyTokens = listOf(
+    "android.",
+    "androidx",
+    "androidx.",
+    "com.android.",
+    "compose",
+    "com.google.gson",
+    "com.squareup.moshi",
+    "dagger",
+    "hilt",
+    "io.ktor",
+    "gson",
+    "jakarta.inject",
+    "javax.inject",
+    "kotlinx.serialization",
+    "serialization",
+    "ktor",
+    "moshi",
+    "okhttp3",
+    "okhttp",
+    "org.json",
+    "org.koin",
+    "koin",
+    "retrofit2",
+    "retrofit",
+    "java.net",
+    "project(\":feature:entry:data\")",
+    "project(\":feature:entry:presentation\")",
+    "project(\":feature:entry:wiring\")",
 )
 
 tasks.register("architectureCheck") {
     group = "verification"
     description = "Checks the inward dependency rules for domain and application code."
     doLast {
-        val sourceFiles = sourceRoots.flatMap { root ->
+        val sourceFiles = architectureSourceRoots.flatMap { root ->
             if (root.isDirectory) root.walkTopDown().filter { it.extension == "kt" }.toList() else emptyList()
         }
         check(sourceFiles.isNotEmpty()) { "Architecture check found no domain/application Kotlin sources." }
+        check(architectureModuleBuildFiles.all { it.isFile }) {
+            "Architecture check found a missing domain/application build script."
+        }
 
-        val violations = sourceFiles.flatMap { sourceFile ->
+        val sourceViolations = sourceFiles.flatMap { sourceFile ->
             sourceFile.readLines().mapIndexedNotNull { index, line ->
-                if (forbiddenDomainImports.any(line::contains)) {
-                    "${sourceFile.relativeTo(projectDir)}:${index + 1}: forbidden dependency: $line"
+                if (forbiddenQualifiedReference.containsMatchIn(line)) {
+                    "${sourceFile.relativeTo(projectDir)}:${index + 1}: forbidden qualified dependency: $line"
                 } else {
                     null
                 }
             }
         }
+        val dependencyViolations = architectureModuleBuildFiles.flatMap { buildFile ->
+            buildFile.readLines().mapIndexedNotNull { index, line ->
+                if (forbiddenDependencyTokens.any(line::contains)) {
+                    "${buildFile.relativeTo(projectDir)}:${index + 1}: forbidden module dependency: $line"
+                } else {
+                    null
+                }
+            }
+        }
+        val violations = sourceViolations + dependencyViolations
         check(violations.isEmpty()) { "Architecture violations:\n${violations.joinToString("\n")}" }
+    }
+}
+
+tasks.register("architectureRuleTests") {
+    group = "verification"
+    description = "Runs focused failure tests for architecture enforcement."
+    dependsOn("architectureCheck")
+    doLast {
+        val result =
+            ProcessBuilder(
+                file("gradlew").absolutePath,
+                "-p",
+                "buildSrc",
+                "test",
+                "--rerun-tasks",
+                "--no-daemon",
+                "--console=plain",
+            ).directory(projectDir)
+                .inheritIO()
+                .start()
+                .waitFor()
+        check(result == 0) { "Architecture rule tests failed with exit code $result." }
     }
 }
 
@@ -145,6 +221,7 @@ tasks.register("qualityGate") {
     dependsOn(
         "formatCheck",
         "architectureCheck",
+        "architectureRuleTests",
         "verifyNoMocks",
         "verifyRequiredUnitTests",
         ":app:lintDebug",

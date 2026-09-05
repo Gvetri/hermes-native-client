@@ -44,7 +44,7 @@ The gate runs Kotlin formatting, Android lint, unit tests, architecture checks, 
 ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests :app:verifyConnectedAndroidTests
 ```
 
-The repository workflow runs these checks on GitHub-hosted runners. Its emulator job uses an API 24-compatible x86_64 image and fails when instrumentation results are missing, empty, skipped, or unsuccessful.
+The repository workflow runs these checks on GitHub-hosted runners. Its `api24-launch-themes` emulator job uses an API 24-compatible x86_64 image and explicitly runs the light- and dark-system-theme `MainActivity` launch tests. It fails when instrumentation results are missing, empty, skipped, or unsuccessful.
 
 ## Architecture
 
@@ -64,7 +64,7 @@ app
 - `wiring`: concrete implementation selection for one feature.
 - `app`: thin Android composition root and launcher activity.
 
-`architectureCheck` rejects Android, Compose, HTTP/SSE, serialization, dependency-injection, and concrete-data imports from domain and application source. Tests use deterministic fakes. No mocking framework is part of production or test code.
+`architectureCheck` rejects Android, Compose, HTTP/SSE, serialization, dependency-injection, and concrete-data imports or fully qualified references from domain and application source. It also rejects forbidden dependency declarations in the domain and application module build scripts. Tests use deterministic fakes. No mocking framework is part of production or test code.
 
 ## Public connection boundary
 
