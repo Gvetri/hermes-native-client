@@ -1,0 +1,6 @@
+formatting
+static_analysis
+unit_tests
+android_build
+architecture_check
+compose_test
