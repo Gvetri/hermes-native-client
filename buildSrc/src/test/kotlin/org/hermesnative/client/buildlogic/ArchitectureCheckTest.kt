@@ -45,6 +45,30 @@ class ArchitectureCheckTest {
         )
     }
 
+    @Test
+    fun rejects_named_forbidden_project_dependency_declaration_in_domain() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/domain/build.gradle.kts",
+            content = "\ndependencies { implementation(project(path = \":feature:entry:data\")) }\n",
+        )
+    }
+
+    @Test
+    fun rejects_named_forbidden_project_dependency_declaration_in_application() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/application/build.gradle.kts",
+            content = "\ndependencies { implementation(project(path = \":feature:entry:presentation\")) }\n",
+        )
+    }
+
+    @Test
+    fun rejects_fully_qualified_concrete_data_reference_in_application() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/application/src/main/kotlin/org/hermesnative/client/feature/entry/application/LoadEntryState.kt",
+            content = "\nval forbiddenConcreteLayerValue = org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository\n",
+        )
+    }
+
     private fun assertArchitectureViolation(
         relativePath: String,
         content: String,

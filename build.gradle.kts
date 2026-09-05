@@ -28,6 +28,12 @@ val architectureModuleBuildFiles = listOf(
     file("feature/entry/application/build.gradle.kts"),
 )
 
+val architectureRuleTestSource =
+    file("buildSrc/src/test/kotlin/org/hermesnative/client/buildlogic/ArchitectureCheckTest.kt")
+val architectureRuleTestClass = "org.hermesnative.client.buildlogic.ArchitectureCheckTest"
+val architectureRuleTestResults = file("buildSrc/build/test-results/test")
+var architectureRuleTestsExecuted = false
+
 val forbiddenQualifiedPackages = listOf(
     "android",
     "androidx",
@@ -82,7 +88,51 @@ val forbiddenDependencyTokens = listOf(
     "project(\":feature:entry:data\")",
     "project(\":feature:entry:presentation\")",
     "project(\":feature:entry:wiring\")",
+    "project(path = \":feature:entry:data\")",
+    "project(path = \":feature:entry:presentation\")",
+    "project(path = \":feature:entry:wiring\")",
 )
+
+fun requireArchitectureRuleTestSource() {
+    check(architectureRuleTestSource.isFile && architectureRuleTestSource.readText().isNotBlank()) {
+        "Architecture rule tests found no focused architecture test source."
+    }
+}
+
+fun requireArchitectureRuleTestEvidence() {
+    requireArchitectureRuleTestSource()
+    check(architectureRuleTestResults.isDirectory) {
+        "Architecture rule tests found no test result directory."
+    }
+    val reports = architectureRuleTestResults.walkTopDown()
+        .filter { it.isFile && it.extension == "xml" }
+        .toList()
+    check(reports.isNotEmpty()) {
+        "Architecture rule tests found no test result reports."
+    }
+    check(reports.all { it.length() > 0 }) {
+        "Architecture rule tests found an empty test result report."
+    }
+
+    val documentBuilderFactory = DocumentBuilderFactory.newInstance()
+    val focusedReports = reports.mapNotNull { report ->
+        val document = documentBuilderFactory.newDocumentBuilder().parse(report)
+        document.takeIf { it.documentElement.getAttribute("name") == architectureRuleTestClass }
+    }
+    check(focusedReports.isNotEmpty()) {
+        "Architecture rule tests found no focused test result report."
+    }
+    val executedTests = focusedReports.sumOf { document ->
+        val testCases = document.getElementsByTagName("testcase")
+        (0 until testCases.length).count { index ->
+            val testCase = testCases.item(index) as org.w3c.dom.Element
+            testCase.getElementsByTagName("skipped").length == 0
+        }
+    }
+    check(executedTests > 0) {
+        "Architecture rule tests found no executed test evidence."
+    }
+}
 
 tasks.register("architectureCheck") {
     group = "verification"
@@ -124,13 +174,18 @@ tasks.register("architectureRuleTests") {
     description = "Runs focused failure tests for architecture enforcement."
     dependsOn("architectureCheck")
     doLast {
+        requireArchitectureRuleTestSource()
+        architectureRuleTestResults.deleteRecursively()
         val result =
             ProcessBuilder(
                 file("gradlew").absolutePath,
                 "-p",
                 "buildSrc",
                 "test",
+                "--tests",
+                architectureRuleTestClass,
                 "--rerun-tasks",
+                "--no-build-cache",
                 "--no-daemon",
                 "--console=plain",
             ).directory(projectDir)
@@ -138,6 +193,8 @@ tasks.register("architectureRuleTests") {
                 .start()
                 .waitFor()
         check(result == 0) { "Architecture rule tests failed with exit code $result." }
+        requireArchitectureRuleTestEvidence()
+        architectureRuleTestsExecuted = true
     }
 }
 
@@ -228,4 +285,10 @@ tasks.register("qualityGate") {
         ":app:assembleDebug",
         ":app:assembleRelease",
     )
+    doLast {
+        check(architectureRuleTestsExecuted) {
+            "qualityGate requires architectureRuleTests to execute in this invocation."
+        }
+        requireArchitectureRuleTestEvidence()
+    }
 }
