@@ -141,7 +141,7 @@ class ArchitectureCheckTest {
             )
             assertTrue(
                 "architectureCheck did not report the forbidden fixture path $relativePath:\n${result.output}",
-                result.output.contains("$relativePath:"),
+                result.output.contains("${target.relativeTo(repositoryRoot)}:"),
             )
             assertTrue(
                 "architectureCheck did not report the forbidden fixture $expectedViolation:\n${result.output}",
