@@ -48,14 +48,20 @@ class QualityGateConfigurationTest {
     }
 
     @Test
-    fun checkout_steps_disable_persisted_credentials() {
+    fun checkout_steps_are_immutable_and_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->
-            lines[index].trim() == "- uses: actions/checkout@v4"
+            lines[index].trim().startsWith("- uses: actions/checkout@")
         }
+        val immutableReference = Regex("[0-9a-fA-F]{40}")
 
-        assertEquals("The workflow must keep all seven checkout steps explicit.", 7, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all eight checkout steps explicit.", 8, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
+            val reference = lines[index].trim().substringAfter("actions/checkout@")
+            assertTrue(
+                "Checkout action at line ${index + 1} must use an immutable commit SHA.",
+                reference.matches(immutableReference),
+            )
             val stepEnd =
                 (index + 1 until lines.size).firstOrNull { nextIndex ->
                     lines[nextIndex].startsWith("      - ")

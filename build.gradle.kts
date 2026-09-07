@@ -1,3 +1,4 @@
+import org.hermesnative.client.buildlogic.FixtureDescriptorValidator
 import org.hermesnative.client.buildlogic.gradleWrapperCommand
 import org.gradle.kotlin.dsl.register
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -35,6 +36,12 @@ val architectureRuleTestClass = "org.hermesnative.client.buildlogic.Architecture
 val architectureRuleTestBuildDir = file("build/architecture-rule-tests/buildSrc")
 val architectureRuleTestResults = architectureRuleTestBuildDir.resolve("test-results/test")
 var architectureRuleTestsExecuted = false
+val fixtureDescriptorFile = file("fixtures/hermes/pinned-fixture.properties")
+val fixtureDescriptorTestSource =
+    file("buildSrc/src/test/kotlin/org/hermesnative/client/buildlogic/FixtureDescriptorValidatorTest.kt")
+val fixtureDescriptorTestClass = "org.hermesnative.client.buildlogic.FixtureDescriptorValidatorTest"
+val fixtureDescriptorTestBuildDir = file("build/fixture-descriptor-tests/buildSrc")
+val fixtureDescriptorTestResults = fixtureDescriptorTestBuildDir.resolve("test-results/test")
 
 val forbiddenQualifiedPackages = listOf(
     "android",
@@ -102,34 +109,41 @@ fun requireArchitectureRuleTestSource() {
     }
 }
 
-fun requireArchitectureRuleTestEvidence() {
-    requireArchitectureRuleTestSource()
-    check(architectureRuleTestResults.isDirectory) {
-        "Architecture rule tests found no test result directory."
+fun requireFocusedTestEvidence(
+    testSource: File,
+    testResults: File,
+    testClass: String,
+    label: String,
+) {
+    check(testSource.isFile && testSource.readText().isNotBlank()) {
+        "$label found no focused test source."
     }
-    val reports = architectureRuleTestResults.walkTopDown()
+    check(testResults.isDirectory) {
+        "$label found no test result directory."
+    }
+    val reports = testResults.walkTopDown()
         .filter { it.isFile && it.extension == "xml" }
         .toList()
     check(reports.isNotEmpty()) {
-        "Architecture rule tests found no test result reports."
+        "$label found no test result reports."
     }
     check(reports.all { it.length() > 0 }) {
-        "Architecture rule tests found an empty test result report."
+        "$label found an empty test result report."
     }
 
     val documentBuilderFactory = DocumentBuilderFactory.newInstance()
     val focusedReports = reports.mapNotNull { report ->
         val document = documentBuilderFactory.newDocumentBuilder().parse(report)
-        document.takeIf { it.documentElement.getAttribute("name") == architectureRuleTestClass }
+        document.takeIf { it.documentElement.getAttribute("name") == testClass }
     }
     check(focusedReports.isNotEmpty()) {
-        "Architecture rule tests found no focused test result report."
+        "$label found no focused test result report."
     }
     check(focusedReports.all { document ->
         document.getElementsByTagName("failure").length == 0 &&
             document.getElementsByTagName("error").length == 0
     }) {
-        "Architecture rule tests found failed focused test evidence."
+        "$label found failed focused test evidence."
     }
     val executedTests = focusedReports.sumOf { document ->
         val testCases = document.getElementsByTagName("testcase")
@@ -139,8 +153,27 @@ fun requireArchitectureRuleTestEvidence() {
         }
     }
     check(executedTests > 0) {
-        "Architecture rule tests found no executed test evidence."
+        "$label found no executed test evidence."
     }
+}
+
+fun requireArchitectureRuleTestEvidence() {
+    requireArchitectureRuleTestSource()
+    requireFocusedTestEvidence(
+        testSource = architectureRuleTestSource,
+        testResults = architectureRuleTestResults,
+        testClass = architectureRuleTestClass,
+        label = "Architecture rule tests",
+    )
+}
+
+fun requireFixtureDescriptorTestEvidence() {
+    requireFocusedTestEvidence(
+        testSource = fixtureDescriptorTestSource,
+        testResults = fixtureDescriptorTestResults,
+        testClass = fixtureDescriptorTestClass,
+        label = "Fixture descriptor tests",
+    )
 }
 
 tasks.register("architectureCheck") {
@@ -290,6 +323,47 @@ tasks.register("verifyRequiredUnitTests") {
     }
 }
 
+tasks.register("fixtureDescriptorTests") {
+    group = "verification"
+    description = "Runs focused tests for the deterministic Hermes fixture descriptor."
+    doLast {
+        check(fixtureDescriptorTestSource.isFile) {
+            "Fixture descriptor test source is missing."
+        }
+        fixtureDescriptorTestBuildDir.deleteRecursively()
+        val result =
+            ProcessBuilder(
+                *(gradleWrapperCommand(projectDir) +
+                    listOf(
+                        "-p",
+                        "buildSrc",
+                        "-PfixtureDescriptor.testBuildDir=${fixtureDescriptorTestBuildDir.absolutePath}",
+                        "test",
+                        "--tests",
+                        fixtureDescriptorTestClass,
+                        "--rerun-tasks",
+                        "--no-build-cache",
+                        "--no-daemon",
+                        "--console=plain",
+                    )).toTypedArray(),
+            ).directory(projectDir)
+                .inheritIO()
+                .start()
+                .waitFor()
+        check(result == 0) { "Fixture descriptor tests failed with exit code $result." }
+        requireFixtureDescriptorTestEvidence()
+    }
+}
+
+tasks.register("verifyFixtureDescriptor") {
+    group = "verification"
+    description = "Validates the immutable Hermes fixture provenance and lifecycle contract."
+    inputs.file(fixtureDescriptorFile)
+    doLast {
+        FixtureDescriptorValidator.validate(fixtureDescriptorFile)
+    }
+}
+
 tasks.register("qualityGate") {
     group = "verification"
     description = "Runs all deterministic local quality checks for the initial public project."
@@ -298,6 +372,8 @@ tasks.register("qualityGate") {
         "architectureCheck",
         "architectureRuleTests",
         "verifyNoMocks",
+        "fixtureDescriptorTests",
+        "verifyFixtureDescriptor",
         "verifyRequiredUnitTests",
         ":app:lintDebug",
         ":app:assembleDebug",

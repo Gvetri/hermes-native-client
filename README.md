@@ -46,6 +46,10 @@ The gate runs Kotlin formatting, Android lint, unit tests, architecture checks, 
 
 The repository workflow runs these checks on GitHub-hosted runners. Its `api24-launch-themes` emulator job uses an API 24-compatible x86_64 image and explicitly runs the light- and dark-system-theme `MainActivity` launch tests. It fails when instrumentation results are missing, empty, skipped, or unsuccessful.
 
+## Deterministic fixture provenance
+
+The repository validates one immutable Hermes fixture provenance value and its deterministic lifecycle contract. See [Deterministic Hermes fixture](docs/deterministic-fixture.md). Changing the pinned revision or image digest is a compatibility change that requires fixture, contract, and integration verification. Mutable `main`, `latest`, and other mutable references are not compatibility or release evidence.
+
 ## Architecture
 
 The project uses feature-first vertical slices with inward dependencies:
