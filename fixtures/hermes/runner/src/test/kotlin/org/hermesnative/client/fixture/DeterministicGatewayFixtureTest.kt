@@ -6,6 +6,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.net.URI
 
 class DeterministicGatewayFixtureTest {
     private val repositoryRoot =
@@ -122,6 +123,66 @@ class DeterministicGatewayFixtureTest {
 
         assertTrue(error.message.orEmpty().contains("startup failed"))
         assertEquals(FixtureLifecycleState.TORN_DOWN, fixture.lifecycleState)
+    }
+
+    @Test
+    fun setup_validation_failure_stops_a_started_process() {
+        var isRunning = true
+        val startedProcess =
+            object : GatewayProcess {
+                override val endpoint = URI.create("http://127.0.0.1:12345")
+                override val provenanceValue = "mismatched-provenance"
+                override val isRunning: Boolean
+                    get() = isRunning
+
+                override fun stop() {
+                    isRunning = false
+                }
+            }
+        val fixture =
+            DeterministicGatewayFixture(
+                descriptorFile = descriptorFile(),
+                processFactory = GatewayProcessFactory { startedProcess },
+            )
+
+        val error = assertThrows(FixtureStartupException::class.java) { fixture.setup() }
+
+        assertTrue(error.suppressed.isEmpty())
+        assertTrue(!startedProcess.isRunning)
+        fixture.teardown()
+        assertEquals(FixtureLifecycleState.TORN_DOWN, fixture.lifecycleState)
+    }
+
+    @Test
+    fun setup_stop_failure_is_retried_by_teardown() {
+        var stopAttempts = 0
+        var isRunning = true
+        val startedProcess =
+            object : GatewayProcess {
+                override val endpoint = URI.create("http://127.0.0.1:12345")
+                override val provenanceValue = "mismatched-provenance"
+                override val isRunning: Boolean
+                    get() = isRunning
+
+                override fun stop() {
+                    if (stopAttempts++ == 0) {
+                        throw IllegalStateException("simulated startup cleanup failure")
+                    }
+                    isRunning = false
+                }
+            }
+        val fixture =
+            DeterministicGatewayFixture(
+                descriptorFile = descriptorFile(),
+                processFactory = GatewayProcessFactory { startedProcess },
+            )
+
+        val error = assertThrows(FixtureStartupException::class.java) { fixture.setup() }
+
+        assertTrue(error.suppressed.any { it.message == "simulated startup cleanup failure" })
+        fixture.teardown()
+        assertEquals(2, stopAttempts)
+        assertTrue(!startedProcess.isRunning)
     }
 
     @Test

@@ -111,10 +111,30 @@ class DeterministicGatewayFixture(
             requireLocalEndpoint(startedProcess.endpoint)
             lifecycleState = FixtureLifecycleState.STARTED
         } catch (error: Throwable) {
-            if (error is FixtureStartupException) {
-                throw error
+            val startupFailure =
+                if (error is FixtureStartupException) {
+                    error
+                } else {
+                    FixtureStartupException("Deterministic Gateway fixture startup failed.", error)
+                }
+            val startedProcess = process
+            if (startedProcess != null) {
+                var stopFailed = false
+                try {
+                    startedProcess.stop()
+                } catch (stopError: Throwable) {
+                    stopFailed = true
+                    startupFailure.addSuppressed(stopError)
+                }
+                if (!stopFailed && !startedProcess.isRunning) {
+                    process = null
+                } else if (startedProcess.isRunning) {
+                    startupFailure.addSuppressed(
+                        IllegalStateException("Deterministic Gateway process did not stop after startup failure."),
+                    )
+                }
             }
-            throw FixtureStartupException("Deterministic Gateway fixture startup failed.", error)
+            throw startupFailure
         }
     }
 
@@ -194,7 +214,7 @@ class DeterministicGatewayFixture(
     }
 
     fun teardown() {
-        if (lifecycleState == FixtureLifecycleState.TORN_DOWN) {
+        if (lifecycleState == FixtureLifecycleState.TORN_DOWN && process == null && syntheticState.snapshot().isEmpty()) {
             return
         }
 
@@ -206,15 +226,19 @@ class DeterministicGatewayFixture(
         }
 
         val activeProcess = process
-        process = null
         if (activeProcess != null) {
+            var stopFailed = false
             try {
                 activeProcess.stop()
             } catch (error: Throwable) {
+                stopFailed = true
                 cleanupFailures += error
             }
             if (activeProcess.isRunning) {
                 cleanupFailures += IllegalStateException("Deterministic Gateway process did not stop.")
+            }
+            if (!stopFailed && !activeProcess.isRunning) {
+                process = null
             }
         }
         lifecycleState = FixtureLifecycleState.TORN_DOWN
