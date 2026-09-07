@@ -15,6 +15,10 @@ providers.gradleProperty("architecture.testBuildDir").orNull?.let { testBuildDir
     layout.buildDirectory.set(file(testBuildDir))
 }
 
+providers.gradleProperty("fixtureDescriptor.testBuildDir").orNull?.let { testBuildDir ->
+    layout.buildDirectory.set(file(testBuildDir))
+}
+
 tasks.test {
     useJUnit()
     maxParallelForks = 1

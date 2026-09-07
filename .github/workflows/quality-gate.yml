@@ -56,6 +56,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew verifyRequiredUnitTests --no-daemon
 
+  fixture_descriptor:
+    name: fixture-descriptor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew fixtureDescriptorTests verifyFixtureDescriptor --no-daemon
+
   android_build:
     name: android-build
     runs-on: ubuntu-latest
@@ -121,6 +135,7 @@ jobs:
       - formatting
       - static_analysis
       - unit_tests
+      - fixture_descriptor
       - android_build
       - architecture_check
       - compose_test
@@ -134,6 +149,7 @@ jobs:
           FORMATTING_RESULT: ${{ needs.formatting.result }}
           STATIC_ANALYSIS_RESULT: ${{ needs.static_analysis.result }}
           UNIT_TESTS_RESULT: ${{ needs.unit_tests.result }}
+          FIXTURE_DESCRIPTOR_RESULT: ${{ needs.fixture_descriptor.result }}
           ANDROID_BUILD_RESULT: ${{ needs.android_build.result }}
           ARCHITECTURE_CHECK_RESULT: ${{ needs.architecture_check.result }}
           COMPOSE_TEST_RESULT: ${{ needs.compose_test.result }}
@@ -142,6 +158,7 @@ jobs:
           expected='formatting
           static_analysis
           unit_tests
+          fixture_descriptor
           android_build
           architecture_check
           compose_test'
@@ -154,6 +171,7 @@ jobs:
             "$FORMATTING_RESULT" \
             "$STATIC_ANALYSIS_RESULT" \
             "$UNIT_TESTS_RESULT" \
+            "$FIXTURE_DESCRIPTOR_RESULT" \
             "$ANDROID_BUILD_RESULT" \
             "$ARCHITECTURE_CHECK_RESULT" \
             "$COMPOSE_TEST_RESULT"; do

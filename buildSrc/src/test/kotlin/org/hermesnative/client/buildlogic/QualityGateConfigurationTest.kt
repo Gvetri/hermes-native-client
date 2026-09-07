@@ -54,7 +54,7 @@ class QualityGateConfigurationTest {
             lines[index].trim() == "- uses: actions/checkout@v4"
         }
 
-        assertEquals("The workflow must keep all seven checkout steps explicit.", 7, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all eight checkout steps explicit.", 8, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
             val stepEnd =
                 (index + 1 until lines.size).firstOrNull { nextIndex ->
