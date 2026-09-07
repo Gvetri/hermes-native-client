@@ -355,6 +355,12 @@ tasks.register("fixtureDescriptorTests") {
     }
 }
 
+tasks.register("fixtureLifecycleTests") {
+    group = "verification"
+    description = "Runs deterministic local Gateway fixture lifecycle tests without provider access."
+    dependsOn(":fixtures:hermes:runner:test")
+}
+
 tasks.register("verifyFixtureDescriptor") {
     group = "verification"
     description = "Validates the immutable Hermes fixture provenance and lifecycle contract."
@@ -373,6 +379,7 @@ tasks.register("qualityGate") {
         "architectureRuleTests",
         "verifyNoMocks",
         "fixtureDescriptorTests",
+        "fixtureLifecycleTests",
         "verifyFixtureDescriptor",
         "verifyRequiredUnitTests",
         ":app:lintDebug",

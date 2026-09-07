@@ -48,6 +48,20 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun fixture_lifecycle_is_a_deterministic_required_check() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val requiredChecks = repositoryRoot.resolve(".github/quality-gate/required-checks.txt").readLines()
+
+        assertTrue("The workflow must define a fixture lifecycle job.", workflow.contains("  fixture_lifecycle:"))
+        assertTrue("The fixture lifecycle job must be named explicitly.", workflow.contains("    name: fixture-lifecycle"))
+        assertTrue(
+            "The required job must run only the local fixture lifecycle tests.",
+            workflow.contains("      - run: ./gradlew fixtureLifecycleTests --no-daemon"),
+        )
+        assertTrue("The aggregate declaration must include fixture_lifecycle.", requiredChecks.contains("fixture_lifecycle"))
+    }
+
+    @Test
     fun checkout_steps_are_immutable_and_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->
@@ -55,7 +69,7 @@ class QualityGateConfigurationTest {
         }
         val immutableReference = Regex("[0-9a-fA-F]{40}")
 
-        assertEquals("The workflow must keep all eight checkout steps explicit.", 8, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all nine checkout steps explicit.", 9, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
             val reference = lines[index].trim().substringAfter("actions/checkout@")
             assertTrue(

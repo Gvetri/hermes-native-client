@@ -24,6 +24,27 @@ The deterministic runner added by later integration work must honor these declar
 
 The descriptor validator and focused unit tests run as `fixtureDescriptorTests verifyFixtureDescriptor`. They are dependencies of the local `qualityGate`, and hosted CI runs the same validation as a required quality check.
 
+## Local fixture runner
+
+The deterministic runner is a plain JVM module at [`fixtures/hermes/runner`](../fixtures/hermes/runner). It consumes the pinned descriptor, starts a loopback-only synthetic Gateway, and never reads provider credentials or contacts a public endpoint. Its HTTP behavior is limited to deterministic `/health` and `/v1/capabilities` responses.
+
+Use the explicit lifecycle hooks when an integration test needs more than one test case:
+
+1. `setup()` validates the descriptor and starts the local fixture.
+2. `awaitReady()` performs the health and capability checks. A failed check throws and cannot be skipped.
+3. `runTest { ... }` resets synthetic state before and after the test.
+4. `teardown()` resets state, stops the process, and verifies process exit.
+
+`execute { ... }` runs these hooks as one failure-safe operation. Teardown runs after setup, readiness, or test failure. A cleanup problem is reported as `FixtureCleanupException`; when the test itself fails, that cleanup exception is attached as a suppressed failure so the two causes remain distinct.
+
+The local validation command is:
+
+```text
+./gradlew fixtureLifecycleTests
+```
+
+The hosted `fixture-lifecycle` quality check runs this same command. It is deterministic lifecycle validation, not a live-provider smoke test.
+
 ## Compatibility changes
 
 Changing `hermes_revision` or `image_digest` is a compatibility change. Every such change requires all of the following:
