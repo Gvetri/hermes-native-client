@@ -182,6 +182,26 @@ class DeterministicGatewayFixtureTest {
         assertTrue(fixture.lastSyntheticState.isEmpty())
     }
 
+    @Test
+    fun teardown_reports_state_reset_failure_when_state_remains() {
+        val fixture = fixtureWithResetFailure()
+        fixture.setup()
+        fixture.awaitReady()
+
+        var state: SyntheticTestState? = null
+        fixture.runTest { context -> state = context.syntheticState }
+        state!!.put("leaked-state", "synthetic-only")
+
+        val error =
+            assertThrows(FixtureCleanupException::class.java) {
+                fixture.teardown()
+            }
+
+        assertTrue(error.message.orEmpty().contains("cleanup failed"))
+        assertEquals(FixtureLifecycleState.TORN_DOWN, fixture.lifecycleState)
+        assertEquals("synthetic-only", fixture.lastSyntheticState["leaked-state"])
+    }
+
     private fun fixtureWithBehavior(behavior: SyntheticGatewayBehavior): DeterministicGatewayFixture =
         DeterministicGatewayFixture(
             descriptorFile = descriptorFile(),
@@ -218,6 +238,26 @@ class DeterministicGatewayFixtureTest {
                     }
                 },
         )
+
+    private fun fixtureWithResetFailure(): DeterministicGatewayFixture {
+        var resetCount = 0
+        return DeterministicGatewayFixture(
+            descriptorFile = descriptorFile(),
+            processFactory =
+                GatewayProcessFactory { descriptor ->
+                    LocalSyntheticGatewayProcess.start(
+                        descriptor = descriptor,
+                        pinnedProvenance = descriptor.provenance,
+                    )
+                },
+            syntheticState =
+                SyntheticTestState { values ->
+                    if (resetCount++ < 2) {
+                        values.clear()
+                    }
+                },
+        )
+    }
 
     private fun descriptorFile(): File = repositoryRoot.resolve("fixtures/hermes/pinned-fixture.properties")
 }

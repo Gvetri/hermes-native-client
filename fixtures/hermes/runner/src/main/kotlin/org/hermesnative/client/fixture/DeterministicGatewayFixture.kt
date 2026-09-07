@@ -47,7 +47,9 @@ class FixtureCleanupException(
 }
 
 /** Mutable synthetic state that is scoped to one fixture test and never leaves the process. */
-class SyntheticTestState internal constructor() {
+class SyntheticTestState internal constructor(
+    private val resetFunction: (MutableMap<String, String>) -> Unit = { it.clear() },
+) {
     private val values = linkedMapOf<String, String>()
 
     fun put(
@@ -64,9 +66,7 @@ class SyntheticTestState internal constructor() {
 
     fun snapshot(): Map<String, String> = values.toMap()
 
-    internal fun reset() {
-        values.clear()
-    }
+    internal fun reset() = resetFunction(values)
 }
 
 data class FixtureTestContext(
@@ -81,10 +81,10 @@ class DeterministicGatewayFixture(
     private val processFactory: GatewayProcessFactory =
         GatewayProcessFactory { descriptor -> PinnedHermesFixtureLauncher.start(descriptor) },
     private val readinessChecker: FixtureReadinessChecker = HttpFixtureReadinessChecker,
+    private val syntheticState: SyntheticTestState = SyntheticTestState(),
 ) {
     private var descriptor: PinnedFixtureDescriptor? = null
     private var process: GatewayProcess? = null
-    private val syntheticState = SyntheticTestState()
 
     var lifecycleState: FixtureLifecycleState = FixtureLifecycleState.NEW
         private set
@@ -140,7 +140,7 @@ class DeterministicGatewayFixture(
         check(lifecycleState == FixtureLifecycleState.READY) {
             "Fixture test execution requires an explicitly ready fixture."
         }
-        syntheticState.reset()
+        resetAndVerifySyntheticState()
         lifecycleState = FixtureLifecycleState.TESTING
         var testFailure: Throwable? = null
         return try {
@@ -152,7 +152,7 @@ class DeterministicGatewayFixture(
         } finally {
             var cleanupFailure: FixtureCleanupException? = null
             try {
-                syntheticState.reset()
+                resetAndVerifySyntheticState()
             } catch (error: Throwable) {
                 cleanupFailure =
                     FixtureCleanupException(
@@ -200,7 +200,7 @@ class DeterministicGatewayFixture(
 
         val cleanupFailures = mutableListOf<Throwable>()
         try {
-            syntheticState.reset()
+            resetAndVerifySyntheticState()
         } catch (error: Throwable) {
             cleanupFailures += error
         }
@@ -225,6 +225,13 @@ class DeterministicGatewayFixture(
     }
 
     private fun requireProcess(): GatewayProcess = requireNotNull(process) { "Deterministic Gateway fixture is not started." }
+
+    private fun resetAndVerifySyntheticState() {
+        syntheticState.reset()
+        check(syntheticState.snapshot().isEmpty()) {
+            "Deterministic Gateway synthetic state did not reset."
+        }
+    }
 
     private fun requireLocalEndpoint(endpoint: URI) {
         require(endpoint.scheme == "http") { "Deterministic Gateway fixture must use HTTP on loopback." }
