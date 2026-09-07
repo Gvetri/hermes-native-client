@@ -34,15 +34,12 @@ class LocalSyntheticGatewayProcess private constructor(
         if (!isRunning) {
             return
         }
-        try {
-            server.stop(0)
-            executor.shutdownNow()
-            check(executor.awaitTermination(1, TimeUnit.SECONDS)) {
-                "Synthetic Gateway executor did not stop."
-            }
-        } finally {
-            isRunning = false
+        server.stop(0)
+        executor.shutdownNow()
+        check(executor.awaitTermination(1, TimeUnit.SECONDS)) {
+            "Synthetic Gateway executor did not stop."
         }
+        isRunning = false
     }
 
     companion object {
