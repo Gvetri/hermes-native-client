@@ -46,12 +46,16 @@ class LocalSyntheticGatewayProcess private constructor(
     }
 
     companion object {
-        fun start(
+        internal fun start(
             descriptor: PinnedFixtureDescriptor,
+            pinnedProvenance: PinnedFixtureProvenance,
             behavior: SyntheticGatewayBehavior = SyntheticGatewayBehavior(),
         ): LocalSyntheticGatewayProcess {
             require(descriptor.name == "hermes-deterministic-gateway") {
                 "Unsupported deterministic Gateway descriptor '${descriptor.name}'."
+            }
+            require(pinnedProvenance == descriptor.provenance) {
+                "Synthetic Gateway provenance does not match the pinned descriptor."
             }
             val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
             val executor = Executors.newSingleThreadExecutor()
@@ -75,7 +79,7 @@ class LocalSyntheticGatewayProcess private constructor(
                 server = server,
                 executor = executor,
                 endpoint = URI.create("http://127.0.0.1:${server.address.port}"),
-                provenanceValue = descriptor.provenanceValue,
+                provenanceValue = pinnedProvenance.value,
             )
         }
 

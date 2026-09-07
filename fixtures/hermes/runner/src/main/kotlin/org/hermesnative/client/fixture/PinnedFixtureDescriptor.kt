@@ -2,6 +2,11 @@ package org.hermesnative.client.fixture
 
 import java.io.File
 
+internal data class PinnedFixtureProvenance(
+    val field: String,
+    val value: String,
+)
+
 /** The validated repository-owned descriptor used to start a deterministic fixture. */
 class PinnedFixtureDescriptor internal constructor(
     val fields: Map<String, String>,
@@ -10,6 +15,9 @@ class PinnedFixtureDescriptor internal constructor(
 ) {
     val name: String
         get() = fields.getValue("name")
+
+    internal val provenance: PinnedFixtureProvenance
+        get() = PinnedFixtureProvenance(provenanceField, provenanceValue)
 
     fun value(key: String): String = fields.getValue(key)
 

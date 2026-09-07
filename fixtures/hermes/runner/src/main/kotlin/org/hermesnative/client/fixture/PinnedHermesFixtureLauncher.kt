@@ -17,6 +17,9 @@ internal object PinnedHermesFixtureLauncher {
         require(descriptor.value("startup.supervisor") == "disabled") {
             "Deterministic fixture startup must disable restart supervision."
         }
-        return LocalSyntheticGatewayProcess.start(descriptor)
+        return LocalSyntheticGatewayProcess.start(
+            descriptor = descriptor,
+            pinnedProvenance = descriptor.provenance,
+        )
     }
 }

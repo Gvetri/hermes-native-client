@@ -44,6 +44,14 @@ class DeterministicGatewayFixtureTest {
     }
 
     @Test
+    fun resolves_the_pinned_provenance_identity_for_fixture_construction() {
+        val descriptor = PinnedFixtureDescriptor.load(descriptorFile())
+
+        assertEquals(descriptor.provenanceField, descriptor.provenance.field)
+        assertEquals(descriptor.provenanceValue, descriptor.provenance.value)
+    }
+
+    @Test
     fun exposes_explicit_setup_readiness_test_and_teardown_hooks() {
         val fixture = DeterministicGatewayFixture.fromDescriptor(descriptorFile())
 
@@ -179,7 +187,11 @@ class DeterministicGatewayFixtureTest {
             descriptorFile = descriptorFile(),
             processFactory =
                 GatewayProcessFactory { descriptor ->
-                    LocalSyntheticGatewayProcess.start(descriptor, behavior)
+                    LocalSyntheticGatewayProcess.start(
+                        descriptor = descriptor,
+                        pinnedProvenance = descriptor.provenance,
+                        behavior = behavior,
+                    )
                 },
         )
 
@@ -188,7 +200,11 @@ class DeterministicGatewayFixtureTest {
             descriptorFile = descriptorFile(),
             processFactory =
                 GatewayProcessFactory { descriptor ->
-                    val delegate = LocalSyntheticGatewayProcess.start(descriptor)
+                    val delegate =
+                        LocalSyntheticGatewayProcess.start(
+                            descriptor = descriptor,
+                            pinnedProvenance = descriptor.provenance,
+                        )
                     object : GatewayProcess {
                         override val endpoint = delegate.endpoint
                         override val provenanceValue = delegate.provenanceValue
