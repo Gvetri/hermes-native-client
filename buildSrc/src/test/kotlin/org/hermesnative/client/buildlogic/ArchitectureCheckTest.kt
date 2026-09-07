@@ -51,6 +51,7 @@ class ArchitectureCheckTest {
         assertArchitectureViolation(
             relativePath = "feature/entry/domain/build.gradle.kts",
             content = "\ndependencies { implementation(project(path = \":feature:entry:data\")) }\n",
+            expectedViolation = "project(path = \":feature:entry:data\")",
         )
     }
 
@@ -59,6 +60,7 @@ class ArchitectureCheckTest {
         assertArchitectureViolation(
             relativePath = "feature/entry/application/build.gradle.kts",
             content = "\ndependencies { implementation(project(path = \":feature:entry:presentation\")) }\n",
+            expectedViolation = "project(path = \":feature:entry:presentation\")",
         )
     }
 
@@ -83,6 +85,7 @@ class ArchitectureCheckTest {
         assertArchitectureViolation(
             relativePath = "feature/entry/domain/build.gradle.kts",
             content = "\ndependencies { implementation(project(path = \":feature:entry:data\", configuration = \"default\")) }\n",
+            expectedViolation = "project(path = \":feature:entry:data\", configuration = \"default\")",
         )
     }
 
@@ -124,6 +127,7 @@ class ArchitectureCheckTest {
     private fun assertArchitectureViolation(
         relativePath: String,
         content: String,
+        expectedViolation: String = content.trim(),
     ) {
         val target = repositoryRoot.resolve(relativePath)
         val original = target.readText()
@@ -136,8 +140,12 @@ class ArchitectureCheckTest {
                 result.exitCode,
             )
             assertTrue(
-                "architectureCheck did not report architecture violations:\n${result.output}",
-                result.output.contains("Architecture violations"),
+                "architectureCheck did not report the forbidden fixture path $relativePath:\n${result.output}",
+                result.output.contains("$relativePath:"),
+            )
+            assertTrue(
+                "architectureCheck did not report the forbidden fixture $expectedViolation:\n${result.output}",
+                result.output.contains(expectedViolation),
             )
         } finally {
             target.writeText(original)
