@@ -79,7 +79,7 @@ data class FixtureTestContext(
 class DeterministicGatewayFixture(
     private val descriptorFile: File,
     private val processFactory: GatewayProcessFactory =
-        GatewayProcessFactory { descriptor -> LocalSyntheticGatewayProcess.start(descriptor) },
+        GatewayProcessFactory { descriptor -> PinnedHermesFixtureLauncher.start(descriptor) },
     private val readinessChecker: FixtureReadinessChecker = HttpFixtureReadinessChecker,
 ) {
     private var descriptor: PinnedFixtureDescriptor? = null

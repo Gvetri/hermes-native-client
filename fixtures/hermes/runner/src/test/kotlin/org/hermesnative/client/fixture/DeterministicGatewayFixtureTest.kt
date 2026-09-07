@@ -76,6 +76,20 @@ class DeterministicGatewayFixtureTest {
     }
 
     @Test
+    fun resolves_the_pinned_startup_action_to_the_local_fixture() {
+        val descriptor = PinnedFixtureDescriptor.load(descriptorFile())
+        val process = PinnedHermesFixtureLauncher.start(descriptor)
+
+        try {
+            assertEquals(descriptor.provenanceValue, process.provenanceValue)
+            assertEquals("127.0.0.1", process.endpoint.host)
+            assertTrue(process.isRunning)
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
     fun startup_failure_fails_the_invoking_fixture_job() {
         val fixture =
             DeterministicGatewayFixture(

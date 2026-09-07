@@ -16,7 +16,7 @@ The descriptor uses a small properties format so the build can validate it witho
 
 The deterministic runner added by later integration work must honor these declarations:
 
-1. Build and run the pinned Hermes revision in an ephemeral, isolated fixture with no restart supervisor.
+1. Resolve the descriptor's immutable provenance and execute its startup action in an ephemeral, isolated fixture with no restart supervisor. The public startup action uses the repository-owned synthetic fixture and does not fetch or invoke a live provider.
 2. Require `GET /health` to return HTTP 200 before tests start.
 3. Require `GET /v1/capabilities` to succeed and satisfy the client capability manifest.
 4. Create only client-owned synthetic state. Reset it before and after each test.
@@ -26,7 +26,7 @@ The descriptor validator and focused unit tests run as `fixtureDescriptorTests v
 
 ## Local fixture runner
 
-The deterministic runner is a plain JVM module at [`fixtures/hermes/runner`](../fixtures/hermes/runner). It consumes the pinned descriptor, starts a loopback-only synthetic Gateway, and never reads provider credentials or contacts a public endpoint. Its HTTP behavior is limited to deterministic `/health` and `/v1/capabilities` responses.
+The deterministic runner is a plain JVM module at [`fixtures/hermes/runner`](../fixtures/hermes/runner). It consumes the pinned descriptor, resolves its `build-and-run-pinned-hermes` action, starts a loopback-only synthetic Gateway, and never reads provider credentials or contacts a public endpoint. The public action is intentionally repository-owned and local-only: it provides the pinned compatibility boundary without downloading or invoking a live Hermes runtime. Its HTTP behavior is limited to deterministic `/health` and `/v1/capabilities` responses.
 
 Use the explicit lifecycle hooks when an integration test needs more than one test case:
 
