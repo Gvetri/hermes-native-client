@@ -62,6 +62,31 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun fixture_lifecycle_requires_fresh_runner_test_execution() {
+        val buildScript = repositoryRoot.resolve("build.gradle.kts").readText()
+
+        assertTrue(
+            "The lifecycle task must reject cached or up-to-date runner tests.",
+            buildScript.contains("lifecycleTests.state.didWork"),
+        )
+    }
+
+    @Test
+    fun fixture_lifecycle_setup_actions_use_immutable_references() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val lifecycleJob = workflow.substringAfter("  fixture_lifecycle:").substringBefore("  android_build:")
+
+        assertTrue(
+            "The lifecycle job must pin setup-java to the repository-approved commit.",
+            lifecycleJob.contains("actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3"),
+        )
+        assertTrue(
+            "The lifecycle job must pin setup-gradle to the repository-approved commit.",
+            lifecycleJob.contains("gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a"),
+        )
+    }
+
+    @Test
     fun checkout_steps_are_immutable_and_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->

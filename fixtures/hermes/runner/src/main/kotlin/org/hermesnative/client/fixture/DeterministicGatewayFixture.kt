@@ -252,7 +252,11 @@ private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
         )
 
         val capabilities = get(process.endpoint.resolve(descriptor.value("capability_check.path")))
-        requireStatus("capability", capabilities, 200)
+        requireStatus(
+            checkName = "capability",
+            response = capabilities,
+            expectedStatus = descriptor.value("capability_check.expected_status").toInt(),
+        )
         val requiredCapability = descriptor.value("capability_check.required_capabilities")
         require(capabilities.body.contains("\"$requiredCapability\"")) {
             "Capability check did not report required capability '$requiredCapability'."

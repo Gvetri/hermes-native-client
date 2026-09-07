@@ -30,6 +30,7 @@ class PinnedFixtureDescriptor internal constructor(
                 "health_check.expected_status",
                 "capability_check.method",
                 "capability_check.path",
+                "capability_check.expected_status",
                 "capability_check.required_capabilities",
                 "synthetic_test_data.setup",
                 "synthetic_test_data.reset_before_test",
@@ -115,6 +116,7 @@ class PinnedFixtureDescriptor internal constructor(
             requireValue(fields, "health_check.expected_status", "200")
             requireValue(fields, "capability_check.method", "GET")
             requireValue(fields, "capability_check.path", "/v1/capabilities")
+            requireValue(fields, "capability_check.expected_status", "200")
             requireValue(fields, "capability_check.required_capabilities", "client-manifest")
             requireValue(fields, "synthetic_test_data.setup", "client-owned-synthetic-state")
             requireValue(fields, "teardown.on_success", "required")

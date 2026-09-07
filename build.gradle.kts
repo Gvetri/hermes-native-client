@@ -359,6 +359,12 @@ tasks.register("fixtureLifecycleTests") {
     group = "verification"
     description = "Runs deterministic local Gateway fixture lifecycle tests without provider access."
     dependsOn(":fixtures:hermes:runner:test")
+    doLast {
+        val lifecycleTests = project(":fixtures:hermes:runner").tasks.named("test").get()
+        check(lifecycleTests.state.didWork) {
+            "fixtureLifecycleTests requires the fixture runner tests to execute in this invocation."
+        }
+    }
 }
 
 tasks.register("verifyFixtureDescriptor") {

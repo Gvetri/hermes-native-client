@@ -37,6 +37,13 @@ class DeterministicGatewayFixtureTest {
     }
 
     @Test
+    fun reads_the_capability_expected_status_from_the_pinned_descriptor() {
+        val descriptor = PinnedFixtureDescriptor.load(descriptorFile())
+
+        assertEquals("200", descriptor.value("capability_check.expected_status"))
+    }
+
+    @Test
     fun exposes_explicit_setup_readiness_test_and_teardown_hooks() {
         val fixture = DeterministicGatewayFixture.fromDescriptor(descriptorFile())
 
