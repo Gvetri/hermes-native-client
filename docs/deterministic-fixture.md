@@ -29,8 +29,7 @@ The descriptor validator and focused unit tests run as `fixtureDescriptorTests v
 Changing `hermes_revision` or `image_digest` is a compatibility change. Every such change requires all of the following:
 
 - verify the fixture startup, health, capability, synthetic-data, and teardown contract;
-- update and verify the client-owned request, response, and SSE contract fixtures;
-- run deterministic integration tests against the new provenance value; and
-- review the published compatibility statement.
+- verify the client contract used by deterministic integration tests;
+- run deterministic integration tests against the new provenance value;
 
 Do not use `main`, `latest`, or another mutable reference as compatibility or release evidence.
