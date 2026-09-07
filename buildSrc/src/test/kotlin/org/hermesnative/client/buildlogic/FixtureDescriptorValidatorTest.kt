@@ -56,6 +56,14 @@ class FixtureDescriptorValidatorTest {
             validDescriptor("image_digest=latest"),
             "image_digest must be an immutable sha256 digest",
         )
+        assertValidationFails(
+            validDescriptor("hermes_revision=${hermesRevision.dropLast(1)}"),
+            "hermes_revision must be a full 40-character immutable Git revision",
+        )
+        assertValidationFails(
+            validDescriptor("image_digest=sha256:${"0".repeat(63)}"),
+            "image_digest must be an immutable sha256 digest",
+        )
     }
 
     @Test

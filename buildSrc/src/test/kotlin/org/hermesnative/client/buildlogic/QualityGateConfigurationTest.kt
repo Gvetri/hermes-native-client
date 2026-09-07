@@ -51,7 +51,7 @@ class QualityGateConfigurationTest {
     fun checkout_steps_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->
-            lines[index].trim() == "- uses: actions/checkout@v4"
+            lines[index].trim().startsWith("- uses: actions/checkout@")
         }
 
         assertEquals("The workflow must keep all eight checkout steps explicit.", 8, checkoutStepIndices.size)
