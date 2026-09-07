@@ -355,6 +355,12 @@ tasks.register("fixtureDescriptorTests") {
     }
 }
 
+gradle.projectsEvaluated {
+    project(":fixtures:hermes:runner").tasks.named("test").configure {
+        outputs.upToDateWhen { false }
+    }
+}
+
 tasks.register("fixtureLifecycleTests") {
     group = "verification"
     description = "Runs deterministic local Gateway fixture lifecycle tests without provider access."

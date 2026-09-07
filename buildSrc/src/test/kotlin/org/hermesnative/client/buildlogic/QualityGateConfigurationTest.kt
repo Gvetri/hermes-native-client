@@ -69,6 +69,10 @@ class QualityGateConfigurationTest {
             "The lifecycle task must reject cached or up-to-date runner tests.",
             buildScript.contains("lifecycleTests.state.didWork"),
         )
+        assertTrue(
+            "The lifecycle runner test task must execute on every invocation.",
+            buildScript.contains("outputs.upToDateWhen { false }"),
+        )
     }
 
     @Test
