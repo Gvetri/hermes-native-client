@@ -1,0 +1,29 @@
+# Gradle and Android build output
+.gradle/
+**/build/
+local.properties
+.externalNativeBuild/
+.cxx/
+
+# IDE and operating-system files
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Android signing and secret material
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+secrets/
+
+# Private planning and local evidence
+.scratch/
+coverage/
+reports/
+*.log

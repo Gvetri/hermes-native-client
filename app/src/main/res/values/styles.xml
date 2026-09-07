@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.HermesNativeClient" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">#4E5D8C</item>
+    </style>
+</resources>
