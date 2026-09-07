@@ -27,6 +27,9 @@ class LocalSyntheticGatewayProcess private constructor(
     override val provenanceValue: String,
 ) : GatewayProcess {
     @Volatile
+    private var serverStopped = false
+
+    @Volatile
     override var isRunning: Boolean = true
         private set
 
@@ -34,7 +37,10 @@ class LocalSyntheticGatewayProcess private constructor(
         if (!isRunning) {
             return
         }
-        server.stop(0)
+        if (!serverStopped) {
+            server.stop(0)
+            serverStopped = true
+        }
         executor.shutdownNow()
         check(executor.awaitTermination(1, TimeUnit.SECONDS)) {
             "Synthetic Gateway executor did not stop."
