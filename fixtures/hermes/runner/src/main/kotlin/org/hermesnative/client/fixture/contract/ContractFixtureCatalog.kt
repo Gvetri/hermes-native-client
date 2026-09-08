@@ -1,5 +1,7 @@
 package org.hermesnative.client.fixture.contract
 
+import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
+
 enum class ContractFixtureFormat {
     JSON,
     SSE,
@@ -49,18 +51,5 @@ object ContractFixtureCatalog {
 }
 
 object SupportedGatewayCapabilities {
-    val required =
-        listOf(
-            "session.list",
-            "session.create",
-            "session.open",
-            "session.history",
-            "session.rename",
-            "session.delete",
-            "session.pin",
-            "session.unpin",
-            "run.create",
-            "run.status",
-            "run.sse",
-        )
+    val required = PublicBetaGatewayCapabilityManifest.current.requirements.map { it.identifier }
 }
