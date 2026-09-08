@@ -11,16 +11,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
@@ -64,27 +68,101 @@ fun EntryScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = { onEvent(EntryUiEvent.AddGatewayConnectionClicked) },
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-            ) {
-                Text(text = state.actionLabel)
-            }
-            if (state.connectionSetupRequested) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Connection setup is ready for the next feature slice.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                    modifier =
-                        Modifier.semantics {
-                            liveRegion = LiveRegionMode.Polite
-                        },
-                )
+            when {
+                state.isConnected -> ConnectedGatewayContent()
+                state.connectionSetupRequested ->
+                    GatewayConnectionForm(
+                        state = state,
+                        onEvent = onEvent,
+                    )
+                else ->
+                    Button(
+                        onClick = { onEvent(EntryUiEvent.AddGatewayConnectionClicked) },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                    ) {
+                        Text(text = state.actionLabel)
+                    }
             }
         }
     }
+}
+
+@Composable
+private fun GatewayConnectionForm(
+    state: EntryUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    OutlinedTextField(
+        value = state.endpoint,
+        onValueChange = { onEvent(EntryUiEvent.EndpointChanged(it)) },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = !state.isVerifying,
+        label = { Text("Gateway HTTPS endpoint") },
+        singleLine = true,
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    OutlinedTextField(
+        value = state.bearerCredential,
+        onValueChange = { onEvent(EntryUiEvent.BearerCredentialChanged(it)) },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = !state.isVerifying,
+        label = { Text("Bearer credential") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+    Button(
+        onClick = {
+            onEvent(
+                if (state.errorCategory == null) {
+                    EntryUiEvent.VerifyGatewayConnectionClicked
+                } else {
+                    EntryUiEvent.TryAgainClicked
+                },
+            )
+        },
+        enabled = !state.isVerifying,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp),
+    ) {
+        Text(text = if (state.errorCategory == null) state.actionLabel else "Try again")
+    }
+    if (state.isVerifying) {
+        Spacer(modifier = Modifier.height(16.dp))
+        CircularProgressIndicator(
+            modifier =
+                Modifier.semantics {
+                    contentDescription = "Verifying Gateway connection"
+                },
+        )
+        Text(
+            text = "Verifying Gateway connection…",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    state.errorCategory?.let { category ->
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = category.safeMessage,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+}
+
+@Composable
+private fun ConnectedGatewayContent() {
+    Text(
+        text = "Connected to Gateway",
+        style = MaterialTheme.typography.titleMedium,
+        modifier =
+            Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+            },
+    )
 }

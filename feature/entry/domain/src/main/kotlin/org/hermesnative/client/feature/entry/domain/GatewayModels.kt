@@ -10,6 +10,10 @@ value class RunId(
     val value: String,
 )
 
+data class GatewayConnection(
+    val endpoint: String,
+)
+
 data class SessionListRequest(
     val limit: Int = 20,
     val cursor: String? = null,

@@ -13,6 +13,7 @@ dependencies {
     implementation(libs.okhttp)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit4)
+    testImplementation(project(":feature:entry:application"))
 }
 
 tasks.test {
