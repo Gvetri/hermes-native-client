@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
@@ -83,39 +84,38 @@ class EntryScreenTest {
 
     @Test
     fun loading_state_and_each_error_category_offer_clear_recovery() {
+        val loadingState =
+            EntryUiState(
+                title = "Verify a Hermes Gateway",
+                supportingText = "Checking the Gateway.",
+                actionLabel = "Verify Gateway Connection",
+                connectionSetupRequested = true,
+                isVerifying = true,
+            )
+        val state = mutableStateOf(loadingState)
+        val events = mutableListOf<EntryUiEvent>()
+
         composeTestRule.setContent {
             HermesTheme {
                 EntryScreen(
-                    state =
-                        EntryUiState(
-                            title = "Verify a Hermes Gateway",
-                            supportingText = "Checking the Gateway.",
-                            actionLabel = "Verify Gateway Connection",
-                            connectionSetupRequested = true,
-                            isVerifying = true,
-                        ),
-                    onEvent = {},
+                    state = state.value,
+                    onEvent = events::add,
                 )
             }
         }
         composeTestRule.onNodeWithText("Verifying Gateway connection…").assertIsDisplayed()
 
         GatewayErrorCategory.entries.forEach { category ->
-            val events = mutableListOf<EntryUiEvent>()
-            composeTestRule.setContent {
-                HermesTheme {
-                    EntryScreen(
-                        state =
-                            EntryUiState(
-                                title = "Verify a Hermes Gateway",
-                                supportingText = "Correct the details and try again.",
-                                actionLabel = "Verify Gateway Connection",
-                                connectionSetupRequested = true,
-                                errorCategory = category,
-                            ),
-                        onEvent = events::add,
+            events.clear()
+            composeTestRule.runOnIdle {
+                state.value =
+                    EntryUiState(
+                        title = "Verify a Hermes Gateway",
+                        supportingText = "Correct the details and try again.",
+                        actionLabel = "Verify Gateway Connection",
+                        connectionSetupRequested = true,
+                        errorCategory = category,
                     )
-                }
             }
 
             composeTestRule.onNodeWithText(category.safeMessage).assertIsDisplayed()
