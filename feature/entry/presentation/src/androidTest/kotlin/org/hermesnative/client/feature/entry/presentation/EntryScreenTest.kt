@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -193,7 +194,7 @@ class EntryScreenTest {
     }
 
     @Test
-    fun empty_session_list_has_create_and_refresh_actions_without_demo_content() {
+    fun empty_session_list_has_gateway_guidance_and_refresh_action_without_demo_content() {
         val events = mutableListOf<EntryUiEvent>()
         composeTestRule.setContent {
             HermesTheme {
@@ -215,12 +216,11 @@ class EntryScreenTest {
         }
 
         composeTestRule.onNodeWithText("No Sessions on this Gateway").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Create Session").assertHasClickAction().performClick()
+        composeTestRule
+            .onNodeWithText("The Gateway returned no Sessions. Create one in the Gateway, then refresh this list.")
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText("Refresh").assertHasClickAction().performClick()
-        assertEquals(
-            listOf(EntryUiEvent.CreateSessionClicked, EntryUiEvent.RefreshSessionsClicked),
-            events,
-        )
+        assertEquals(listOf(EntryUiEvent.RefreshSessionsClicked), events)
     }
 
     @Test
@@ -310,5 +310,38 @@ class EntryScreenTest {
         composeTestRule.onNodeWithText("Authoritative history").assertIsDisplayed()
         composeTestRule.onNodeWithText("Back to Sessions").assertHasClickAction().performClick()
         assertEquals(EntryUiEvent.ReturnToSessionListClicked, events.single())
+    }
+
+    @Test
+    fun refresh_is_disabled_while_a_session_is_opening() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    sessions =
+                                        listOf(
+                                            SessionItemUiState(
+                                                id = SessionId("session-one"),
+                                                title = "Session one",
+                                                preview = null,
+                                                pinned = false,
+                                            ),
+                                        ),
+                                    openingSessionId = SessionId("session-one"),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Refresh").assertIsNotEnabled()
     }
 }

@@ -94,7 +94,7 @@ class EntryStateHolderTest {
     }
 
     @Test
-    fun successful_connection_loads_the_first_page_with_pinned_sessions_first_and_no_creation() {
+    fun successful_connection_loads_the_first_page_with_pinned_sessions_first() {
         val repository = FakeGatewayConnectionRepository()
         val gateway = FakeSessionGateway()
         val unpinnedOlder = session("unpinned-older", pinned = false)
@@ -127,9 +127,6 @@ class EntryStateHolderTest {
         assertEquals(listOf(SessionListRequest()), gateway.listRequests)
         assertTrue(sessionList.showFirstUseGuidance)
 
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-
-        assertEquals(0, gateway.createCalls)
         holder.close()
     }
 
@@ -262,7 +259,6 @@ class EntryStateHolderTest {
         var openedSession: Session? = null
         var openedHistory: SessionHistory? = null
         var openFailure: GatewayException? = null
-        var createCalls = 0
 
         fun enqueueList(page: SessionPage) {
             listResults += Result.success(page)
@@ -278,7 +274,6 @@ class EntryStateHolderTest {
         }
 
         override fun createSession(title: String?): Session {
-            createCalls += 1
             error("Session creation is outside this issue")
         }
 

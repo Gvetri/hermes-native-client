@@ -62,10 +62,7 @@ internal fun SessionListContent(
         if (state.isLoading) {
             LoadingSessionsContent()
         } else if (state.sessions.isEmpty()) {
-            EmptySessionsContent(
-                state = state,
-                onEvent = onEvent,
-            )
+            EmptySessionsContent()
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -123,7 +120,7 @@ internal fun SessionListContent(
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
-            enabled = !state.isLoading && !state.isRefreshing,
+            enabled = !state.isLoading && !state.isRefreshing && state.openingSessionId == null,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = if (state.isUnavailable) "Try again" else "Refresh")
@@ -146,10 +143,7 @@ private fun LoadingSessionsContent() {
 }
 
 @Composable
-private fun EmptySessionsContent(
-    state: SessionListUiState,
-    onEvent: (EntryUiEvent) -> Unit,
-) {
+private fun EmptySessionsContent() {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -159,15 +153,7 @@ private fun EmptySessionsContent(
             style = MaterialTheme.typography.titleLarge,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "The Gateway returned no Sessions. Create a Session to begin.")
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = { onEvent(EntryUiEvent.CreateSessionClicked) },
-            enabled = !state.isUnavailable,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(text = "Create Session")
-        }
+        Text(text = "The Gateway returned no Sessions. Create one in the Gateway, then refresh this list.")
     }
 }
 

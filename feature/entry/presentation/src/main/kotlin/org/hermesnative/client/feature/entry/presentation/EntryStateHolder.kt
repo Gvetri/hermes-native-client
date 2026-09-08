@@ -36,8 +36,6 @@ sealed interface EntryUiEvent {
 
     data object RefreshSessionsClicked : EntryUiEvent
 
-    data object CreateSessionClicked : EntryUiEvent
-
     data class SessionClicked(
         val sessionId: SessionId,
     ) : EntryUiEvent
@@ -89,7 +87,6 @@ class EntryStateHolder(
             EntryUiEvent.TryAgainClicked,
             -> verifyConnection()
             EntryUiEvent.RefreshSessionsClicked -> refreshSessions()
-            EntryUiEvent.CreateSessionClicked -> Unit
             is EntryUiEvent.SessionClicked -> openSession(event.sessionId)
             EntryUiEvent.ReturnToSessionListClicked -> returnToSessionList()
         }
@@ -185,7 +182,7 @@ class EntryStateHolder(
         val gateway = sessionGateway ?: return
         val state = _uiState.value
         val sessionList = state.sessionList ?: return
-        if (sessionList.isLoading || sessionList.isRefreshing) return
+        if (sessionList.isLoading || sessionList.isRefreshing || sessionList.openingSessionId != null) return
 
         _uiState.value =
             state.copy(
