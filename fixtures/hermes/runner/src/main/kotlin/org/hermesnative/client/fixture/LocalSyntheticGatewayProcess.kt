@@ -29,6 +29,7 @@ data class SyntheticGatewayRequest(
     val method: String,
     val path: String,
     val query: String?,
+    val hasAuthorizationHeader: Boolean,
 )
 
 class SyntheticGatewayBehavior(
@@ -223,6 +224,7 @@ class LocalSyntheticGatewayProcess private constructor(
                     method = exchange.requestMethod,
                     path = exchange.requestURI.path,
                     query = exchange.requestURI.rawQuery,
+                    hasAuthorizationHeader = exchange.requestHeaders.getFirst("Authorization") != null,
                 )
         }
 

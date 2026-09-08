@@ -7,6 +7,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.fixture.DeterministicGatewayFixture
+import org.hermesnative.client.fixture.FixtureTestContext
 import org.hermesnative.client.fixture.GatewayProcessFactory
 import org.hermesnative.client.fixture.LocalSyntheticGatewayProcess
 import org.hermesnative.client.fixture.SyntheticGatewayBehavior
@@ -44,7 +45,7 @@ class GatewaySessionFixtureIntegrationTest {
         fixture(behavior).execute { context ->
             assertEquals("127.0.0.1", context.endpoint.host)
             assertEquals("http", context.endpoint.scheme)
-            val client = DefaultGatewayClient(context.endpoint.toString(), "fixture-token")
+            val client = client(context)
             behavior.requests.clear()
 
             client.discoverCapabilities()
@@ -64,6 +65,7 @@ class GatewaySessionFixtureIntegrationTest {
             assertTrue(behavior.requests.none { it.method == "POST" })
             assertTrue(behavior.requests.none { it.path.endsWith("/history") })
             assertTrue(behavior.requests.none { it.path.count { character -> character == '/' } > 2 })
+            assertNoCredentials(behavior)
 
             val openedA = OpenSession(client).execute(SessionId(PINNED_A))
             val openedB = OpenSession(client).execute(SessionId(PINNED_B))
@@ -73,6 +75,7 @@ class GatewaySessionFixtureIntegrationTest {
             assertEquals(PINNED_B, openedB.session.id.value)
             assertEquals("History B", openedB.history.messages.single().content)
             assertNotEquals(openedA.history.messages.single().content, openedB.history.messages.single().content)
+            assertNoCredentials(behavior)
         }
     }
 
@@ -81,7 +84,7 @@ class GatewaySessionFixtureIntegrationTest {
         val behavior = behavior(listOf(session(SERVER_A, "Initial title", "Initial preview", pinned = false)))
 
         fixture(behavior).execute { context ->
-            val client = DefaultGatewayClient(context.endpoint.toString(), "fixture-token")
+            val client = client(context)
             behavior.requests.clear()
 
             val initial = LoadSessionList(client).execute()
@@ -101,6 +104,7 @@ class GatewaySessionFixtureIntegrationTest {
             )
             assertTrue(behavior.requests.all { it.path == "/v1/sessions" })
             assertTrue(behavior.requests.none { it.method == "POST" })
+            assertNoCredentials(behavior)
         }
     }
 
@@ -108,20 +112,22 @@ class GatewaySessionFixtureIntegrationTest {
     fun empty_and_populated_lists_never_create_a_session_automatically() {
         val emptyBehavior = behavior(emptyList())
         fixture(emptyBehavior).execute { context ->
-            val client = DefaultGatewayClient(context.endpoint.toString(), "fixture-token")
+            val client = client(context)
             emptyBehavior.requests.clear()
 
             assertTrue(LoadSessionList(client).execute().sessions.isEmpty())
             assertTrue(emptyBehavior.requests.none { it.method == "POST" })
+            assertNoCredentials(emptyBehavior)
         }
 
         val populatedBehavior = behavior(listOf(session(SERVER_A, "Existing", "Existing preview", pinned = false)))
         fixture(populatedBehavior).execute { context ->
-            val client = DefaultGatewayClient(context.endpoint.toString(), "fixture-token")
+            val client = client(context)
             populatedBehavior.requests.clear()
 
             assertFalse(LoadSessionList(client).execute().sessions.isEmpty())
             assertTrue(populatedBehavior.requests.none { it.method == "POST" })
+            assertNoCredentials(populatedBehavior)
         }
     }
 
@@ -130,7 +136,7 @@ class GatewaySessionFixtureIntegrationTest {
         val behavior = behavior(listOf(session(SERVER_A, "Deletable", "Preview", pinned = false)))
 
         fixture(behavior).execute { context ->
-            val client = DefaultGatewayClient(context.endpoint.toString(), "fixture-token")
+            val client = client(context)
             LoadSessionList(client).execute()
             behavior.requests.clear()
             behavior.sessions.clear()
@@ -147,6 +153,39 @@ class GatewaySessionFixtureIntegrationTest {
             assertEquals(listOf("/v1/sessions/$SERVER_A"), behavior.requests.map { it.path })
             assertTrue(behavior.requests.none { it.path.endsWith("/history") })
             assertTrue(behavior.requests.none { it.method == "POST" })
+            assertNoCredentials(behavior)
+        }
+    }
+
+    private fun client(context: FixtureTestContext): DefaultGatewayClient =
+        DefaultGatewayClient(
+            endpoint = "https://127.0.0.1:${context.endpoint.port}",
+            bearerToken = "fixture-only-token",
+            transport = LoopbackFixtureTransport(),
+        )
+
+    private fun assertNoCredentials(behavior: SyntheticGatewayBehavior) {
+        assertTrue(behavior.requests.none { it.hasAuthorizationHeader })
+    }
+
+    private class LoopbackFixtureTransport : GatewayTransport {
+        private val delegate = OkHttpGatewayTransport()
+
+        override fun execute(request: GatewayHttpRequest): GatewayHttpResponse = delegate.execute(toLoopbackRequest(request))
+
+        override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream = delegate.openEventStream(toLoopbackRequest(request))
+
+        private fun toLoopbackRequest(request: GatewayHttpRequest): GatewayHttpRequest {
+            val secureUrl = request.url.removePrefix("https://")
+            require(secureUrl.startsWith("127.0.0.1:")) {
+                "Fixture transport accepts only the loopback fixture endpoint."
+            }
+            return GatewayHttpRequest(
+                method = request.method,
+                url = "http://$secureUrl",
+                headers = request.headers.filterKeys { it != "Authorization" },
+                body = request.body,
+            )
         }
     }
 
