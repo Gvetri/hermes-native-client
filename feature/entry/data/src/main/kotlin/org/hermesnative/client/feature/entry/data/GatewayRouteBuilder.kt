@@ -39,10 +39,15 @@ internal class GatewayRouteBuilder(
             } catch (_: Exception) {
                 throw invalidAddress()
             }
+        val scheme = uri.scheme?.lowercase()
+        val host = uri.host?.removePrefix("[")?.removeSuffix("]")
+        val loopbackFixture =
+            scheme == "http" &&
+                host in setOf("127.0.0.1", "localhost", "::1")
         if (
             uri.isOpaque ||
-            uri.scheme?.lowercase() != "https" ||
-            uri.host.isNullOrBlank() ||
+            (scheme != "https" && !loopbackFixture) ||
+            host.isNullOrBlank() ||
             uri.userInfo != null ||
             uri.query != null ||
             uri.fragment != null

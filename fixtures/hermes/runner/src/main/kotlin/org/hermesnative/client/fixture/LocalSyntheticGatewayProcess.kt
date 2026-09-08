@@ -2,21 +2,48 @@ package org.hermesnative.client.fixture
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import kotlinx.serialization.json.JsonPrimitive
 import java.net.InetSocketAddress
 import java.net.URI
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-data class SyntheticGatewayBehavior(
+data class SyntheticGatewayMessage(
+    val id: String,
+    val role: String,
+    val content: String,
+)
+
+data class SyntheticGatewaySession(
+    val id: String,
+    val title: String?,
+    val preview: String?,
+    val pinned: Boolean,
+    val updatedAt: String?,
+    val history: List<SyntheticGatewayMessage> = emptyList(),
+)
+
+data class SyntheticGatewayRequest(
+    val method: String,
+    val path: String,
+    val query: String?,
+)
+
+class SyntheticGatewayBehavior(
     val healthStatus: Int = 200,
     val capabilityStatus: Int = 200,
     val capabilities: Set<String> = setOf("client-manifest"),
+    initialSessions: List<SyntheticGatewaySession> = emptyList(),
 ) {
     init {
         require(healthStatus in 100..599) { "healthStatus must be an HTTP status." }
         require(capabilityStatus in 100..599) { "capabilityStatus must be an HTTP status." }
     }
+
+    val sessions = CopyOnWriteArrayList(initialSessions)
+    val requests = CopyOnWriteArrayList<SyntheticGatewayRequest>()
 }
 
 /** A loopback-only HTTP process with deterministic health, capability, and synthetic behavior. */
@@ -49,6 +76,16 @@ class LocalSyntheticGatewayProcess private constructor(
     }
 
     companion object {
+        fun start(
+            descriptor: PinnedFixtureDescriptor,
+            behavior: SyntheticGatewayBehavior = SyntheticGatewayBehavior(),
+        ): LocalSyntheticGatewayProcess =
+            start(
+                descriptor = descriptor,
+                pinnedProvenance = descriptor.provenance,
+                behavior = behavior,
+            )
+
         internal fun start(
             descriptor: PinnedFixtureDescriptor,
             pinnedProvenance: PinnedFixtureProvenance,
@@ -64,17 +101,26 @@ class LocalSyntheticGatewayProcess private constructor(
             val executor = Executors.newSingleThreadExecutor()
             server.executor = executor
             server.createContext("/health") { exchange ->
+                recordRequest(exchange, behavior)
                 respond(exchange, behavior.healthStatus, "{\"status\":\"synthetic\"}")
             }
             server.createContext("/v1/capabilities") { exchange ->
-                val capabilities = behavior.capabilities.sorted().joinToString(",") { "\"$it\"" }
+                recordRequest(exchange, behavior)
+                val capabilities = behavior.capabilities.sorted().joinToString(",") { quote(it) }
                 respond(
                     exchange,
                     behavior.capabilityStatus,
                     "{\"capabilities\":[$capabilities]}",
                 )
             }
+            server.createContext("/v1/sessions") { exchange ->
+                handleSessionListRequest(exchange, behavior)
+            }
+            server.createContext("/v1/sessions/") { exchange ->
+                handleSessionResourceRequest(exchange, behavior)
+            }
             server.createContext("/") { exchange ->
+                recordRequest(exchange, behavior)
                 respond(exchange, 404, "{\"error\":\"not-found\"}")
             }
             server.start()
@@ -84,6 +130,100 @@ class LocalSyntheticGatewayProcess private constructor(
                 endpoint = URI.create("http://127.0.0.1:${server.address.port}"),
                 provenanceValue = pinnedProvenance.value,
             )
+        }
+
+        private fun handleSessionListRequest(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+        ) {
+            recordRequest(exchange, behavior)
+            if (exchange.requestURI.path != "/v1/sessions") {
+                respond(exchange, 404, "{\"error\":\"not-found\"}")
+                return
+            }
+            if (exchange.requestMethod != "GET") {
+                respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
+                return
+            }
+            val sessions = behavior.sessions.joinToString(",") { sessionJson(it) }
+            respond(exchange, 200, "{\"sessions\":[$sessions],\"next_cursor\":null}")
+        }
+
+        private fun handleSessionResourceRequest(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+        ) {
+            recordRequest(exchange, behavior)
+            if (exchange.requestMethod != "GET") {
+                respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
+                return
+            }
+
+            val resource = exchange.requestURI.path.removePrefix("/v1/sessions/")
+            val segments = resource.split('/')
+            val sessionId = segments.firstOrNull().orEmpty()
+            val session = behavior.sessions.firstOrNull { it.id == sessionId }
+            if (session == null || segments.size !in 1..2) {
+                respond(exchange, 404, "{\"error\":\"session-not-found\"}")
+                return
+            }
+
+            when {
+                segments.size == 1 -> respond(exchange, 200, "{\"session\":${sessionJson(session)}}")
+                segments[1] == "history" -> respond(exchange, 200, historyJson(session))
+                else -> respond(exchange, 404, "{\"error\":\"not-found\"}")
+            }
+        }
+
+        private fun sessionJson(session: SyntheticGatewaySession): String =
+            buildString {
+                append("{\"id\":")
+                append(quote(session.id))
+                append(",\"title\":")
+                append(session.title.jsonValue())
+                append(",\"preview\":")
+                append(session.preview.jsonValue())
+                append(",\"pinned\":")
+                append(session.pinned)
+                append(",\"updated_at\":")
+                append(session.updatedAt.jsonValue())
+                append('}')
+            }
+
+        private fun historyJson(session: SyntheticGatewaySession): String =
+            buildString {
+                append("{\"session_id\":")
+                append(quote(session.id))
+                append(",\"messages\":[")
+                append(session.history.joinToString(",") { messageJson(it) })
+                append("],\"next_cursor\":null}")
+            }
+
+        private fun messageJson(message: SyntheticGatewayMessage): String =
+            buildString {
+                append("{\"id\":")
+                append(quote(message.id))
+                append(",\"role\":")
+                append(quote(message.role))
+                append(",\"content\":")
+                append(quote(message.content))
+                append('}')
+            }
+
+        private fun String?.jsonValue(): String = this?.let(::quote) ?: "null"
+
+        private fun quote(value: String): String = JsonPrimitive(value).toString()
+
+        private fun recordRequest(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+        ) {
+            behavior.requests +=
+                SyntheticGatewayRequest(
+                    method = exchange.requestMethod,
+                    path = exchange.requestURI.path,
+                    query = exchange.requestURI.rawQuery,
+                )
         }
 
         private fun respond(
