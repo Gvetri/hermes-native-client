@@ -48,7 +48,7 @@ The repository workflow runs these checks on GitHub-hosted runners. Its `api24-l
 
 ## Deterministic fixture provenance
 
-The repository validates one immutable Hermes fixture provenance value and its deterministic lifecycle contract. See [Deterministic Hermes fixture](docs/deterministic-fixture.md). Changing the pinned revision or image digest is a compatibility change that requires fixture, contract, and integration verification. Mutable `main`, `latest`, and other mutable references are not compatibility or release evidence.
+The repository validates one immutable Hermes fixture provenance value and its deterministic lifecycle contract. See [Deterministic Hermes fixture](docs/deterministic-fixture.md). Changing the pinned revision or image digest is a compatibility change that requires fixture, contract, and integration verification. See [Gateway contract fixtures](docs/gateway-contract-fixtures.md) for the client-owned request, response, and SSE boundary. Mutable `main`, `latest`, and other mutable references are not compatibility or release evidence.
 
 ## Architecture
 

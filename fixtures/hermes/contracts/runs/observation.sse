@@ -1,0 +1,14 @@
+event: fixture.metadata
+data: {"hermes_revision":"d9833c5615b80e199a174cd67d90ab430695a972"}
+
+event: run.started
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","status":"starting"}
+
+event: run.running
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","status":"running"}
+
+event: future.additive
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","future":true}
+
+event: run.completed
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","status":"succeeded"}
