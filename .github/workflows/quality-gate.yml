@@ -84,6 +84,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
       - run: ./gradlew fixtureLifecycleTests --no-daemon
 
+  fixture_contract:
+    name: fixture-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - run: ./gradlew fixtureContractTests --no-daemon
+
   android_build:
     name: android-build
     runs-on: ubuntu-latest
@@ -151,6 +165,7 @@ jobs:
       - unit_tests
       - fixture_descriptor
       - fixture_lifecycle
+      - fixture_contract
       - android_build
       - architecture_check
       - compose_test
@@ -166,6 +181,7 @@ jobs:
           UNIT_TESTS_RESULT: ${{ needs.unit_tests.result }}
           FIXTURE_DESCRIPTOR_RESULT: ${{ needs.fixture_descriptor.result }}
           FIXTURE_LIFECYCLE_RESULT: ${{ needs.fixture_lifecycle.result }}
+          FIXTURE_CONTRACT_RESULT: ${{ needs.fixture_contract.result }}
           ANDROID_BUILD_RESULT: ${{ needs.android_build.result }}
           ARCHITECTURE_CHECK_RESULT: ${{ needs.architecture_check.result }}
           COMPOSE_TEST_RESULT: ${{ needs.compose_test.result }}
@@ -176,6 +192,7 @@ jobs:
           unit_tests
           fixture_descriptor
           fixture_lifecycle
+          fixture_contract
           android_build
           architecture_check
           compose_test'
@@ -190,6 +207,7 @@ jobs:
             "$UNIT_TESTS_RESULT" \
             "$FIXTURE_DESCRIPTOR_RESULT" \
             "$FIXTURE_LIFECYCLE_RESULT" \
+            "$FIXTURE_CONTRACT_RESULT" \
             "$ANDROID_BUILD_RESULT" \
             "$ARCHITECTURE_CHECK_RESULT" \
             "$COMPOSE_TEST_RESULT"; do

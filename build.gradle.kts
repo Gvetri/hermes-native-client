@@ -364,11 +364,23 @@ gradle.projectsEvaluated {
 tasks.register("fixtureLifecycleTests") {
     group = "verification"
     description = "Runs deterministic local Gateway fixture lifecycle tests without provider access."
-    dependsOn(":fixtures:hermes:runner:test")
+    dependsOn(":fixtures:hermes:runner:fixtureLifecycleTest")
     doLast {
-        val lifecycleTests = project(":fixtures:hermes:runner").tasks.named("test").get()
-        check(lifecycleTests.state.didWork) {
-            "fixtureLifecycleTests requires the fixture runner tests to execute in this invocation."
+        val lifecycleTests = project(":fixtures:hermes:runner").tasks.named("fixtureLifecycleTest").get()
+        check(lifecycleTests.state.didWork || lifecycleTests.state.upToDate) {
+            "fixtureLifecycleTests requires the fixture lifecycle tests to execute in this invocation."
+        }
+    }
+}
+
+tasks.register("fixtureContractTests") {
+    group = "verification"
+    description = "Runs client-owned Gateway JSON and SSE contract fixture tests."
+    dependsOn(":fixtures:hermes:runner:fixtureContractTest")
+    doLast {
+        val contractTests = project(":fixtures:hermes:runner").tasks.named("fixtureContractTest").get()
+        check(contractTests.state.didWork || contractTests.state.upToDate) {
+            "fixtureContractTests requires the contract fixture tests to execute in this invocation."
         }
     }
 }
@@ -392,6 +404,7 @@ tasks.register("qualityGate") {
         "verifyNoMocks",
         "fixtureDescriptorTests",
         "fixtureLifecycleTests",
+        "fixtureContractTests",
         "verifyFixtureDescriptor",
         "verifyRequiredUnitTests",
         ":app:lintDebug",
