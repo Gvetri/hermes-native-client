@@ -2,6 +2,7 @@ formatting
 static_analysis
 unit_tests
 fixture_descriptor
+fixture_lifecycle
 android_build
 architecture_check
 compose_test

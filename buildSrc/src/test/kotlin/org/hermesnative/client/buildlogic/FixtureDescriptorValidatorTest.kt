@@ -98,6 +98,7 @@ class FixtureDescriptorValidatorTest {
 
         assertEquals("hermes_revision", descriptor.provenanceField)
         assertEquals(hermesRevision, descriptor.provenanceValue)
+        assertEquals("200", descriptor.fields["capability_check.expected_status"])
     }
 
     private fun assertValidationFails(
@@ -128,6 +129,7 @@ class FixtureDescriptorValidatorTest {
             "health_check.expected_status=200",
             "capability_check.method=GET",
             "capability_check.path=/v1/capabilities",
+            "capability_check.expected_status=200",
             "capability_check.required_capabilities=client-manifest",
             "synthetic_test_data.setup=client-owned-synthetic-state",
             "synthetic_test_data.reset_before_test=true",

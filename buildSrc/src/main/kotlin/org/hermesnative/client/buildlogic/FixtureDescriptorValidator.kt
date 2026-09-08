@@ -30,6 +30,7 @@ object FixtureDescriptorValidator {
             "health_check.expected_status",
             "capability_check.method",
             "capability_check.path",
+            "capability_check.expected_status",
             "capability_check.required_capabilities",
             "synthetic_test_data.setup",
             "synthetic_test_data.reset_before_test",
@@ -129,6 +130,9 @@ object FixtureDescriptorValidator {
         }
         require(fields.getValue("capability_check.path") == "/v1/capabilities") {
             "capability_check.path must be /v1/capabilities."
+        }
+        require(fields.getValue("capability_check.expected_status") == "200") {
+            "capability_check.expected_status must be 200."
         }
         require(fields.getValue("capability_check.required_capabilities") == "client-manifest") {
             "capability_check.required_capabilities must be client-manifest."
