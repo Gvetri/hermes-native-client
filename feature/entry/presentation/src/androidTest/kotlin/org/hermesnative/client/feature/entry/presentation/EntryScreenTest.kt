@@ -5,12 +5,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.application.EntryState
+import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -142,5 +144,204 @@ class EntryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Connected to Gateway").assertIsDisplayed()
+    }
+
+    @Test
+    fun session_list_renders_server_metadata_pinned_first_and_untitled_fallback() {
+        val events = mutableListOf<EntryUiEvent>()
+        val state =
+            EntryUiState(
+                title = "Gateway connected",
+                supportingText = "The Gateway contract was verified successfully.",
+                actionLabel = "Connected",
+                isConnected = true,
+                sessionList =
+                    SessionListUiState(
+                        sessions =
+                            listOf(
+                                SessionItemUiState(
+                                    id = SessionId("pinned"),
+                                    title = "Pinned title",
+                                    preview = "Pinned preview",
+                                    pinned = true,
+                                ),
+                                SessionItemUiState(
+                                    id = SessionId("untitled"),
+                                    title = "Untitled Session",
+                                    preview = null,
+                                    pinned = false,
+                                ),
+                            ),
+                        showFirstUseGuidance = true,
+                    ),
+            )
+
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(state = state, onEvent = events::add)
+            }
+        }
+
+        composeTestRule.onNodeWithText("Sessions").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Select a Session to open its Gateway history. Refresh to load the latest server state.")
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Pinned title").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Pinned preview").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Untitled Session").assertIsDisplayed().assertHasClickAction().performClick()
+        composeTestRule.onNodeWithText("Untitled Session").assertIsDisplayed()
+        assertEquals(EntryUiEvent.SessionClicked(SessionId("untitled")), events.single())
+    }
+
+    @Test
+    fun empty_session_list_has_gateway_guidance_and_refresh_action_without_demo_content() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    showFirstUseGuidance = true,
+                                ),
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("No Sessions on this Gateway").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("The Gateway returned no Sessions. Create one in the Gateway, then refresh this list.")
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Refresh").assertHasClickAction().performClick()
+        assertEquals(listOf(EntryUiEvent.RefreshSessionsClicked), events)
+    }
+
+    @Test
+    fun loading_stale_and_recoverable_session_states_have_clear_accessible_recovery() {
+        val state = mutableStateOf(SessionListUiState(isLoading = true))
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList = state.value,
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Loading Sessions…").assertIsDisplayed()
+        composeTestRule.runOnIdle {
+            state.value =
+                SessionListUiState(
+                    sessions =
+                        listOf(
+                            SessionItemUiState(
+                                id = SessionId("stale"),
+                                title = "Stale Session",
+                                preview = "Previous server preview",
+                                pinned = false,
+                            ),
+                        ),
+                    isStale = true,
+                    isUnavailable = true,
+                    errorCategory = SessionListErrorCategory.GATEWAY_UNAVAILABLE,
+                )
+        }
+
+        composeTestRule.onNodeWithText(SessionListErrorCategory.GATEWAY_UNAVAILABLE.safeMessage).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Try again").assertHasClickAction().performClick()
+        assertEquals(EntryUiEvent.RefreshSessionsClicked, events.single())
+    }
+
+    @Test
+    fun opened_session_displays_authoritative_history_and_has_a_local_return_action() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session =
+                                                SessionItemUiState(
+                                                    id = SessionId("session-one"),
+                                                    title = "Authoritative title",
+                                                    preview = "Authoritative preview",
+                                                    pinned = false,
+                                                ),
+                                            messages =
+                                                listOf(
+                                                    SessionMessageUiState(
+                                                        id = "message-one",
+                                                        role = "user",
+                                                        content = "Authoritative history",
+                                                    ),
+                                                ),
+                                        ),
+                                ),
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Authoritative title").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Authoritative history").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Back to Sessions").assertHasClickAction().performClick()
+        assertEquals(EntryUiEvent.ReturnToSessionListClicked, events.single())
+    }
+
+    @Test
+    fun refresh_is_disabled_while_a_session_is_opening() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    sessions =
+                                        listOf(
+                                            SessionItemUiState(
+                                                id = SessionId("session-one"),
+                                                title = "Session one",
+                                                preview = null,
+                                                pinned = false,
+                                            ),
+                                        ),
+                                    openingSessionId = SessionId("session-one"),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Refresh").assertIsNotEnabled()
     }
 }

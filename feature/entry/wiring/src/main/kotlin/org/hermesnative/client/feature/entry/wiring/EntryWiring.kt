@@ -16,6 +16,12 @@ object EntryWiring {
             VerifyGatewayConnection(repository) { endpoint, bearerCredential ->
                 DefaultGatewayClient(endpoint, bearerCredential).discoverCapabilities()
             }
-        return EntryStateHolder(initialState, verifyGatewayConnection)
+        return EntryStateHolder(
+            initialState = initialState,
+            verifyGatewayConnection = verifyGatewayConnection,
+            sessionGatewayFactory = { endpoint, bearerCredential ->
+                DefaultGatewayClient(endpoint, bearerCredential)
+            },
+        )
     }
 }
