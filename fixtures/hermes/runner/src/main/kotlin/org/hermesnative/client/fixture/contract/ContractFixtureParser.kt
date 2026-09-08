@@ -170,9 +170,9 @@ object ContractFixtureParser {
         root: JsonObject?,
         descriptor: PinnedFixtureDescriptor,
     ): String {
-        val selectedCount = countField(content, descriptor.provenanceField)
+        val selectedCount = countJsonMember(content, descriptor.provenanceField)
         val alternateField = provenanceFields.first { it != descriptor.provenanceField }
-        val alternateCount = countField(content, alternateField)
+        val alternateCount = countJsonMember(content, alternateField)
         if (selectedCount == 0 && alternateCount == 0) {
             fail(
                 ContractFixtureFailureCategory.MISSING_PROVENANCE,
@@ -207,10 +207,66 @@ object ContractFixtureParser {
         return value.content
     }
 
-    private fun countField(
+    internal fun countJsonMember(
         content: String,
         field: String,
-    ): Int = Regex("\\\"${Regex.escape(field)}\\\"\\s*:").findAll(content).count()
+    ): Int {
+        var objectDepth = 0
+        var index = 0
+        var count = 0
+        while (index < content.length) {
+            when (content[index]) {
+                '"' -> {
+                    val end = jsonStringEnd(content, index)
+                    val next = skipWhitespace(content, end)
+                    if (objectDepth == 1 && next < content.length && content[next] == ':') {
+                        val memberName =
+                            runCatching {
+                                (json.parseToJsonElement(content.substring(index, end)) as JsonPrimitive).content
+                            }.getOrNull()
+                        if (memberName == field) count++
+                    }
+                    index = end
+                }
+                '{' -> {
+                    objectDepth++
+                    index++
+                }
+                '}' -> {
+                    objectDepth = (objectDepth - 1).coerceAtLeast(0)
+                    index++
+                }
+                else -> index++
+            }
+        }
+        return count
+    }
+
+    private fun jsonStringEnd(
+        content: String,
+        start: Int,
+    ): Int {
+        var index = start + 1
+        var escaped = false
+        while (index < content.length) {
+            when {
+                escaped -> escaped = false
+                content[index] == '\\' -> escaped = true
+                content[index] == '"' -> return index + 1
+            }
+            index++
+        }
+        return content.length
+    }
+
+    private fun skipWhitespace(
+        content: String,
+        start: Int,
+    ): Int {
+        var index = start
+        while (index < content.length && content[index].isWhitespace()) index++
+        return index
+    }
 
     private fun fail(
         category: ContractFixtureFailureCategory,

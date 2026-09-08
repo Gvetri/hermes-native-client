@@ -34,14 +34,14 @@ class ContractFixtureParserTest {
 
     @Test
     fun every_checked_in_fixture_declares_one_matching_provenance_field() {
-        val provenancePattern = Regex("\\\"${descriptor.provenanceField}\\\"\\s*:")
         val otherField = if (descriptor.provenanceField == "hermes_revision") "image_digest" else "hermes_revision"
-        val otherPattern = Regex("\\\"$otherField\\\"\\s*:")
 
         ContractFixtureCatalog.definitions.forEach { definition ->
             val content = contractsRoot.resolve(definition.path).readText()
-            assertEquals("Unexpected provenance count in ${definition.path}", 1, provenancePattern.findAll(content).count())
-            assertEquals("Unexpected alternate provenance in ${definition.path}", 0, otherPattern.findAll(content).count())
+            val provenanceCount = ContractFixtureParser.countJsonMember(content, descriptor.provenanceField)
+            val otherCount = ContractFixtureParser.countJsonMember(content, otherField)
+            assertEquals("Unexpected provenance count in ${definition.path}", 1, provenanceCount)
+            assertEquals("Unexpected alternate provenance in ${definition.path}", 0, otherCount)
             assertTrue(content.contains(descriptor.provenanceValue))
         }
     }
@@ -236,6 +236,59 @@ class ContractFixtureParserTest {
 
         assertFailure(ContractFixtureFailureCategory.DUPLICATE_PROVENANCE) {
             ContractFixtureParser.parseJson("duplicate-provenance.json", content, descriptor)
+        }
+    }
+
+    @Test
+    fun escaped_provenance_name_is_decoded_for_json() {
+        val escapedField = "hermes" + "\\" + "u005frevision"
+        val content =
+            contractsRoot.resolve("capabilities/success.json").readText()
+                .replace("hermes_revision", escapedField)
+
+        val fixture = ContractFixtureParser.parseJson("escaped-provenance.json", content, descriptor)
+
+        assertEquals(PROVENANCE, fixture.provenanceValue)
+    }
+
+    @Test
+    fun escaped_duplicate_provenance_name_is_rejected_for_json() {
+        val escapedField = "hermes" + "\\" + "u005frevision"
+        val content =
+            """
+            {
+              "hermes_revision": "$PROVENANCE",
+              "$escapedField": "$PROVENANCE",
+              "response": {"status": 200, "body": {"capabilities": []}}
+            }
+            """.trimIndent()
+
+        assertFailure(ContractFixtureFailureCategory.DUPLICATE_PROVENANCE) {
+            ContractFixtureParser.parseJson("escaped-duplicate-provenance.json", content, descriptor)
+        }
+    }
+
+    @Test
+    fun escaped_provenance_name_is_decoded_for_sse() {
+        val escapedField = "hermes" + "\\" + "u005frevision"
+        val content =
+            contractsRoot.resolve("runs/observation.sse").readText()
+                .replace("hermes_revision", escapedField)
+
+        val fixture = ContractFixtureParser.parseSse("escaped-provenance.sse", content, descriptor)
+
+        assertEquals(PROVENANCE, fixture.provenanceValue)
+    }
+
+    @Test
+    fun escaped_duplicate_provenance_name_is_rejected_for_sse() {
+        val escapedField = "hermes" + "\\" + "u005frevision"
+        val original = "\"hermes_revision\":\"$PROVENANCE\""
+        val duplicate = "$original,\"$escapedField\":\"$PROVENANCE\""
+        val content = contractsRoot.resolve("runs/observation.sse").readText().replace(original, duplicate)
+
+        assertFailure(ContractFixtureFailureCategory.DUPLICATE_PROVENANCE) {
+            ContractFixtureParser.parseSse("escaped-duplicate-provenance.sse", content, descriptor)
         }
     }
 
