@@ -1,0 +1,5 @@
+event: fixture.metadata
+data: {"hermes_revision":"d9833c5615b80e199a174cd67d90ab430695a972"}
+
+event: run.started
+data: {"run_id":"b8f0b3e4-9d5b-4d31-8eb2-71c7fc5f4b26","status":"running"}

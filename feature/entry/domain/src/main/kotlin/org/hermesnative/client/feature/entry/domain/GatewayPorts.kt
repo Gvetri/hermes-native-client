@@ -35,7 +35,9 @@ interface RunGatewayPort {
 
     fun getRunStatus(runId: RunId): Run
 
-    fun observeRun(runId: RunId): Sequence<RunEvent>
+    fun observeRun(runId: RunId): RunEventObservation
 }
+
+interface RunEventObservation : Sequence<RunEvent>, AutoCloseable
 
 interface GatewayContractPort : GatewayCapabilityPort, SessionGatewayPort, RunGatewayPort

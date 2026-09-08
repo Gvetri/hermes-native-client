@@ -10,6 +10,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
+import org.hermesnative.client.feature.entry.domain.RunEventObservation
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -106,10 +107,13 @@ class DefaultGatewayClient(
                 path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session open")}",
                 expectedStatus = 200,
             )
-        return GatewayJsonParser.parseSession(
-            operation = "session open",
-            root = GatewayJsonParser.parseObject("session open", response.body),
-        )
+        val session =
+            GatewayJsonParser.parseSession(
+                operation = "session open",
+                root = GatewayJsonParser.parseObject("session open", response.body),
+            )
+        requireIdentity("session open", "session.id", sessionId.value, session.id.value)
+        return session
     }
 
     override fun loadSessionHistory(sessionId: SessionId): SessionHistory {
@@ -120,10 +124,13 @@ class DefaultGatewayClient(
                 path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session history")}/history",
                 expectedStatus = 200,
             )
-        return GatewayJsonParser.parseHistory(
-            operation = "session history",
-            root = GatewayJsonParser.parseObject("session history", response.body),
-        )
+        val history =
+            GatewayJsonParser.parseHistory(
+                operation = "session history",
+                root = GatewayJsonParser.parseObject("session history", response.body),
+            )
+        requireIdentity("session history", "session_id", sessionId.value, history.sessionId.value)
+        return history
     }
 
     override fun renameSession(
@@ -139,10 +146,13 @@ class DefaultGatewayClient(
                 body = body,
                 expectedStatus = 200,
             )
-        return GatewayJsonParser.parseSession(
-            operation = "session rename",
-            root = GatewayJsonParser.parseObject("session rename", response.body),
-        )
+        val session =
+            GatewayJsonParser.parseSession(
+                operation = "session rename",
+                root = GatewayJsonParser.parseObject("session rename", response.body),
+            )
+        requireIdentity("session rename", "session.id", sessionId.value, session.id.value)
+        return session
     }
 
     override fun deleteSession(sessionId: SessionId) {
@@ -162,10 +172,13 @@ class DefaultGatewayClient(
                 path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session pin")}/pin",
                 expectedStatus = 200,
             )
-        return GatewayJsonParser.parsePinResult(
-            operation = "session pin",
-            root = GatewayJsonParser.parseObject("session pin", response.body),
-        )
+        val result =
+            GatewayJsonParser.parsePinResult(
+                operation = "session pin",
+                root = GatewayJsonParser.parseObject("session pin", response.body),
+            )
+        requireIdentity("session pin", "session_id", sessionId.value, result.sessionId.value)
+        return result
     }
 
     override fun unpinSession(sessionId: SessionId): SessionPinResult {
@@ -176,10 +189,13 @@ class DefaultGatewayClient(
                 path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session unpin")}/pin",
                 expectedStatus = 200,
             )
-        return GatewayJsonParser.parsePinResult(
-            operation = "session unpin",
-            root = GatewayJsonParser.parseObject("session unpin", response.body),
-        )
+        val result =
+            GatewayJsonParser.parsePinResult(
+                operation = "session unpin",
+                root = GatewayJsonParser.parseObject("session unpin", response.body),
+            )
+        requireIdentity("session unpin", "session_id", sessionId.value, result.sessionId.value)
+        return result
     }
 
     override fun createRun(
@@ -195,10 +211,13 @@ class DefaultGatewayClient(
                 body = body,
                 expectedStatus = 202,
             )
-        return GatewayJsonParser.parseRun(
-            operation = "run create",
-            root = GatewayJsonParser.parseObject("run create", response.body),
-        )
+        val run =
+            GatewayJsonParser.parseRun(
+                operation = "run create",
+                root = GatewayJsonParser.parseObject("run create", response.body),
+            )
+        requireIdentity("run create", "session_id", sessionId.value, run.sessionId.value)
+        return run
     }
 
     override fun getRunStatus(runId: RunId): Run {
@@ -209,43 +228,48 @@ class DefaultGatewayClient(
                 path = "/v1/runs/${sessionPathSegment(runId.value, "run status")}",
                 expectedStatus = 200,
             )
-        return GatewayJsonParser.parseRun(
-            operation = "run status",
-            root = GatewayJsonParser.parseObject("run status", response.body),
-        )
+        val run =
+            GatewayJsonParser.parseRun(
+                operation = "run status",
+                root = GatewayJsonParser.parseObject("run status", response.body),
+            )
+        requireIdentity("run status", "run_id", runId.value, run.id.value)
+        return run
     }
 
-    override fun observeRun(runId: RunId): Sequence<org.hermesnative.client.feature.entry.domain.RunEvent> {
+    override fun observeRun(runId: RunId): RunEventObservation {
         val operation = "run observation"
-        val request =
+        val gatewayRequest =
             request(
                 method = "GET",
                 path = "/v1/runs/${sessionPathSegment(runId.value, operation)}/events",
                 accept = "text/event-stream",
             )
-        val stream = transportCall { transport.openEventStream(request) }
-        if (stream.statusCode == 401 || stream.statusCode == 403) {
-            stream.close()
-            throw GatewayException(GatewayErrorCategory.AUTHENTICATION_FAILED)
-        }
-        if (stream.statusCode != 200) {
-            stream.close()
-            throw requestFailure(operation)
-        }
-        return sequence {
-            try {
-                GatewaySseParser.frames(stream.lines, operation).forEach { frame ->
-                    val event = GatewayJsonParser.parseRunEvent(operation, frame)
-                    if (event != null) yield(event)
+        return GatewayRunEventObservation(
+            operation = operation,
+            openStream = {
+                val stream = transportCall { transport.openEventStream(gatewayRequest) }
+                when {
+                    stream.statusCode == 401 || stream.statusCode == 403 -> {
+                        stream.close()
+                        throw GatewayException(GatewayErrorCategory.AUTHENTICATION_FAILED)
+                    }
+
+                    stream.statusCode != 200 -> {
+                        stream.close()
+                        throw requestFailure(operation)
+                    }
+
+                    else -> stream
                 }
-            } catch (error: GatewayException) {
-                throw error
-            } catch (error: Exception) {
-                throw mapTransportFailure(error)
-            } finally {
-                stream.close()
-            }
-        }
+            },
+            parseFrame = { frame ->
+                GatewayJsonParser.parseRunEvent(operation, frame)?.also { event ->
+                    requireIdentity(operation, "run_id", runId.value, event.runId.value)
+                }
+            },
+            mapTransportFailure = ::mapTransportFailure,
+        )
     }
 
     private fun execute(
@@ -299,6 +323,20 @@ class DefaultGatewayClient(
             )
         }
         return value
+    }
+
+    private fun requireIdentity(
+        operation: String,
+        field: String,
+        expected: String,
+        actual: String,
+    ) {
+        if (actual != expected) {
+            throw GatewayException(
+                GatewayErrorCategory.INVALID_RESPONSE,
+                "Invalid Gateway response for $operation: field '$field' does not match the requested resource.",
+            )
+        }
     }
 
     private fun requestFailure(operation: String): GatewayException =

@@ -67,6 +67,7 @@ class DefaultGatewayClientTest {
             listOf(RunEventType.STARTED, RunEventType.RUNNING, RunEventType.COMPLETED),
             client.observeRun(RunId(RUN_ID)).toList().map { it.type },
         )
+        assertTrue(transport.eventStreamClosed)
 
         val expectedFixtures =
             listOf(
@@ -207,6 +208,70 @@ class DefaultGatewayClientTest {
         }
     }
 
+    @Test
+    fun resource_identity_mismatches_are_rejected_as_invalid_responses() {
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            clientForResponse("malformed/mismatched-session-response.json").openSession(SessionId(SESSION_ID))
+        }
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            clientForResponse("malformed/mismatched-session-response.json").renameSession(SessionId(SESSION_ID), "Renamed")
+        }
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            clientForResponse("malformed/mismatched-history-response.json").loadSessionHistory(SessionId(SESSION_ID))
+        }
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            clientForResponse("malformed/mismatched-pin-response.json").pinSession(SessionId(SESSION_ID))
+        }
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            clientForResponse("malformed/mismatched-pin-response.json").unpinSession(SessionId(SESSION_ID))
+        }
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            clientForResponse("malformed/mismatched-run-create-response.json").createRun(SessionId(SESSION_ID), "input")
+        }
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            clientForResponse("malformed/mismatched-run-status-response.json").getRunStatus(RunId(RUN_ID))
+        }
+
+        val mismatchedEventClient =
+            DefaultGatewayClient(
+                endpoint = "https://gateway.example",
+                bearerToken = "test-token",
+                transport =
+                    RecordingTransport(
+                        eventStream =
+                            GatewayEventStream(
+                                statusCode = 200,
+                                lines = sseLines("malformed/mismatched-run-event.sse"),
+                            ),
+                    ),
+            )
+        assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
+            mismatchedEventClient.observeRun(RunId(RUN_ID)).toList()
+        }
+    }
+
+    @Test
+    fun run_observation_opens_lazily_and_explicit_close_releases_partial_stream() {
+        val transport =
+            RecordingTransport(
+                eventStream = GatewayEventStream(statusCode = 200, lines = sseLines("runs/observation.sse")),
+            )
+        val observation =
+            DefaultGatewayClient("https://gateway.example", "test-token", transport)
+                .observeRun(RunId(RUN_ID))
+
+        assertTrue(transport.requests.isEmpty())
+        val iterator = observation.iterator()
+        assertTrue(transport.requests.isNotEmpty())
+        assertTrue(iterator.hasNext())
+        iterator.next()
+        assertFalse(transport.eventStreamClosed)
+
+        observation.close()
+
+        assertTrue(transport.eventStreamClosed)
+    }
+
     private fun clientForResponse(path: String): GatewayContractPort =
         DefaultGatewayClient(
             endpoint = "https://gateway.example",
@@ -283,6 +348,7 @@ class DefaultGatewayClientTest {
         private val failure: Exception? = null,
     ) : GatewayTransport {
         private val queuedResponses = ArrayDeque(responses)
+        var eventStreamClosed = false
         val requests = mutableListOf<GatewayHttpRequest>()
 
         override fun execute(request: GatewayHttpRequest): GatewayHttpResponse {
@@ -294,7 +360,11 @@ class DefaultGatewayClientTest {
         override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream {
             requests += request
             failure?.let { throw it }
-            return requireNotNull(eventStream)
+            val stream = requireNotNull(eventStream)
+            return GatewayEventStream(stream.statusCode, stream.lines) {
+                eventStreamClosed = true
+                stream.close()
+            }
         }
     }
 

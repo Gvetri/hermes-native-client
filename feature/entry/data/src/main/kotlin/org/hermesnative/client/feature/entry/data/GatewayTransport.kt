@@ -45,8 +45,16 @@ interface GatewayTransport {
 }
 
 class OkHttpGatewayTransport(
-    private val client: OkHttpClient = OkHttpClient(),
+    client: OkHttpClient = OkHttpClient(),
 ) : GatewayTransport {
+    private val client =
+        client
+            .newBuilder()
+            .retryOnConnectionFailure(false)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+
     override fun execute(request: GatewayHttpRequest): GatewayHttpResponse {
         client.newCall(request(request)).execute().use { response ->
             return GatewayHttpResponse(

@@ -47,6 +47,12 @@ object ContractFixtureCatalog {
             ContractFixtureDefinition("malformed/missing-required-field.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/invalid-required-field-type.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/invalid-sse-framing.sse", ContractFixtureFormat.SSE),
+            ContractFixtureDefinition("malformed/mismatched-session-response.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("malformed/mismatched-history-response.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("malformed/mismatched-pin-response.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("malformed/mismatched-run-create-response.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("malformed/mismatched-run-status-response.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("malformed/mismatched-run-event.sse", ContractFixtureFormat.SSE),
         )
 }
 
