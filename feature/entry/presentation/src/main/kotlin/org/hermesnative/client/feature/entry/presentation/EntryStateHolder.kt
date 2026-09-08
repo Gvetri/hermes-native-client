@@ -31,6 +31,16 @@ sealed interface EntryUiEvent {
     data object TryAgainClicked : EntryUiEvent
 }
 
+enum class EntryErrorCategory(
+    val safeMessage: String,
+) {
+    INVALID_ADDRESS("Invalid Gateway address. Enter one HTTPS Gateway endpoint."),
+    SECURE_CONNECTION_FAILED("Secure connection failed. Check the Gateway certificate and hostname."),
+    AUTHENTICATION_FAILED("Authentication failed. Check the Gateway credential."),
+    REQUIRED_FEATURE_UNAVAILABLE("Required feature unavailable. This Gateway does not support the client contract."),
+    GATEWAY_REQUEST_FAILED("Gateway request failed. Try again."),
+}
+
 data class EntryUiState(
     val title: String,
     val supportingText: String,
@@ -40,7 +50,7 @@ data class EntryUiState(
     val bearerCredential: String = "",
     val isVerifying: Boolean = false,
     val isConnected: Boolean = false,
-    val errorCategory: GatewayErrorCategory? = null,
+    val errorCategory: EntryErrorCategory? = null,
 )
 
 class EntryStateHolder(
@@ -113,12 +123,12 @@ class EntryStateHolder(
                 } catch (error: GatewayException) {
                     showFailure(error.category.toUserFacingCategory())
                 } catch (_: Exception) {
-                    showFailure(GatewayErrorCategory.GATEWAY_REQUEST_FAILED)
+                    showFailure(EntryErrorCategory.GATEWAY_REQUEST_FAILED)
                 }
             }
     }
 
-    private fun showFailure(category: GatewayErrorCategory) {
+    private fun showFailure(category: EntryErrorCategory) {
         _uiState.value =
             _uiState.value.copy(
                 isVerifying = false,
@@ -153,8 +163,13 @@ private fun EntryUiState.connectionSetupState(): EntryUiState =
         errorCategory = null,
     )
 
-private fun GatewayErrorCategory.toUserFacingCategory(): GatewayErrorCategory =
+private fun GatewayErrorCategory.toUserFacingCategory(): EntryErrorCategory =
     when (this) {
-        GatewayErrorCategory.INVALID_RESPONSE -> GatewayErrorCategory.GATEWAY_REQUEST_FAILED
-        else -> this
+        GatewayErrorCategory.INVALID_ADDRESS -> EntryErrorCategory.INVALID_ADDRESS
+        GatewayErrorCategory.SECURE_CONNECTION_FAILED -> EntryErrorCategory.SECURE_CONNECTION_FAILED
+        GatewayErrorCategory.AUTHENTICATION_FAILED -> EntryErrorCategory.AUTHENTICATION_FAILED
+        GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE -> EntryErrorCategory.REQUIRED_FEATURE_UNAVAILABLE
+        GatewayErrorCategory.GATEWAY_REQUEST_FAILED,
+        GatewayErrorCategory.INVALID_RESPONSE,
+        -> EntryErrorCategory.GATEWAY_REQUEST_FAILED
     }

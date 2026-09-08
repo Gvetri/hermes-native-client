@@ -17,8 +17,10 @@ import org.junit.Test
 import java.io.File
 import java.io.IOException
 import java.net.URI
+import java.security.cert.CertPathValidatorException
 import java.util.ArrayDeque
 import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLPeerUnverifiedException
 
 class DefaultGatewayClientTest {
     private val repositoryRoot =
@@ -149,17 +151,23 @@ class DefaultGatewayClientTest {
             DefaultGatewayClient("http://gateway.example", "test-token", RecordingTransport())
         }
 
-        val secureClient =
-            DefaultGatewayClient(
-                endpoint = "https://gateway.example",
-                bearerToken = "test-token",
-                transport = RecordingTransport(failure = SSLHandshakeException("certificate detail")),
-            )
+        listOf(
+            SSLHandshakeException("certificate detail"),
+            SSLPeerUnverifiedException("hostname mismatch"),
+            CertPathValidatorException("unknown certificate authority"),
+        ).forEach { failure ->
+            val secureClient =
+                DefaultGatewayClient(
+                    endpoint = "https://gateway.example",
+                    bearerToken = "test-token",
+                    transport = RecordingTransport(failure = failure),
+                )
 
-        val error = captureFailure { secureClient.discoverCapabilities() }
+            val error = captureFailure { secureClient.discoverCapabilities() }
 
-        assertEquals(GatewayErrorCategory.SECURE_CONNECTION_FAILED, error.category)
-        assertFalse(error.message.orEmpty().contains("certificate detail"))
+            assertEquals(GatewayErrorCategory.SECURE_CONNECTION_FAILED, error.category)
+            assertFalse(error.message.orEmpty().contains(failure.message.orEmpty()))
+        }
     }
 
     @Test
