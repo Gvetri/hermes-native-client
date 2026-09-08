@@ -18,7 +18,7 @@ import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionPage
 import org.hermesnative.client.feature.entry.domain.SessionPinResult
-import java.security.cert.CertificateException
+import java.security.GeneralSecurityException
 import javax.net.ssl.SSLException
 
 class DefaultGatewayClient(
@@ -355,7 +355,7 @@ class DefaultGatewayClient(
         }
 
     private fun mapTransportFailure(error: Exception): GatewayException =
-        if (error is SSLException || error is CertificateException) {
+        if (error is SSLException || error is GeneralSecurityException) {
             GatewayException(GatewayErrorCategory.SECURE_CONNECTION_FAILED)
         } else {
             GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED)

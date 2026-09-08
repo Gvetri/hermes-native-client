@@ -72,7 +72,7 @@ class EntryStateHolderTest {
         holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
         holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
 
-        assertEquals(GatewayErrorCategory.GATEWAY_REQUEST_FAILED, holder.uiState.value.errorCategory)
+        assertEquals(EntryErrorCategory.GATEWAY_REQUEST_FAILED, holder.uiState.value.errorCategory)
         assertEquals("https://gateway.example/profile", holder.uiState.value.endpoint)
         assertEquals("memory-only-token", holder.uiState.value.bearerCredential)
         assertFalse(holder.uiState.value.isVerifying)

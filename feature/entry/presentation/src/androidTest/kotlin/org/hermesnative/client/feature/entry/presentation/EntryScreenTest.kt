@@ -11,7 +11,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.application.EntryState
-import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -105,7 +104,7 @@ class EntryScreenTest {
         }
         composeTestRule.onNodeWithText("Verifying Gateway connection…").assertIsDisplayed()
 
-        GatewayErrorCategory.entries.forEach { category ->
+        EntryErrorCategory.entries.forEach { category ->
             events.clear()
             composeTestRule.runOnIdle {
                 state.value =

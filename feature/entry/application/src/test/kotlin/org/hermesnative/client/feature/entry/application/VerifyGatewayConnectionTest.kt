@@ -60,6 +60,37 @@ class VerifyGatewayConnectionTest {
         )
     }
 
+    @Test
+    fun rejects_insecure_or_malformed_endpoints_before_verification() {
+        val repository = FakeGatewayConnectionRepository()
+        var verificationCalls = 0
+        val verifier =
+            VerifyGatewayConnection(repository) { _, _ ->
+                verificationCalls += 1
+                error("must not verify")
+            }
+
+        listOf(
+            "http://gateway.example",
+            "https://",
+            "https://gateway.example:0",
+            "https://gateway.example:65536",
+            "https://user@gateway.example",
+            "https://gateway.example?profile=one",
+            "https://gateway.example#profile",
+            "https://gateway.example/%",
+        ).forEach { endpoint ->
+            assertEquals(
+                "endpoint=$endpoint",
+                GatewayErrorCategory.INVALID_ADDRESS,
+                captureFailure { verifier.execute(endpoint, "token") }.category,
+            )
+        }
+
+        assertNull(repository.saved)
+        assertEquals(0, verificationCalls)
+    }
+
     private fun captureFailure(block: () -> Unit): GatewayException {
         try {
             block()
