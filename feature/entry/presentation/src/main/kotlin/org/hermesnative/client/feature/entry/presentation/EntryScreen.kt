@@ -38,53 +38,61 @@ fun EntryScreen(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "Hermes Native Client",
-                style = MaterialTheme.typography.headlineMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.semantics { heading() },
+        if (state.sessionList != null) {
+            SessionListContent(
+                state = state.sessionList,
+                onEvent = onEvent,
+                modifier = Modifier.fillMaxSize().padding(24.dp),
             )
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = state.title,
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.semantics { heading() },
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = state.supportingText,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            when {
-                state.isConnected -> ConnectedGatewayContent()
-                state.connectionSetupRequested ->
-                    GatewayConnectionForm(
-                        state = state,
-                        onEvent = onEvent,
-                    )
-                else ->
-                    Button(
-                        onClick = { onEvent(EntryUiEvent.AddGatewayConnectionClicked) },
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp),
-                    ) {
-                        Text(text = state.actionLabel)
-                    }
+        } else {
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "Hermes Native Client",
+                    style = MaterialTheme.typography.headlineMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = state.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.semantics { heading() },
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = state.supportingText,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                when {
+                    state.isConnected -> ConnectedGatewayContent()
+                    state.connectionSetupRequested ->
+                        GatewayConnectionForm(
+                            state = state,
+                            onEvent = onEvent,
+                        )
+                    else ->
+                        Button(
+                            onClick = { onEvent(EntryUiEvent.AddGatewayConnectionClicked) },
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp),
+                        ) {
+                            Text(text = state.actionLabel)
+                        }
+                }
             }
         }
     }
