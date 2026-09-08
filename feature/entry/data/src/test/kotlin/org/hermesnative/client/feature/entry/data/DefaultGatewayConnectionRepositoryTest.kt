@@ -1,22 +1,19 @@
 package org.hermesnative.client.feature.entry.data
 
-import org.junit.Assert.assertTrue
+import org.hermesnative.client.feature.entry.domain.GatewayConnection
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DefaultGatewayConnectionRepositoryTest {
     @Test
-    fun reports_the_datasource_connection_state() {
-        val repository =
-            DefaultGatewayConnectionRepository(
-                FakeGatewayConnectionDataSource(isConfigured = true),
-            )
+    fun loads_and_saves_the_non_secret_gateway_connection() {
+        val dataSource = InMemoryGatewayConnectionDataSource()
+        val repository = DefaultGatewayConnectionRepository(dataSource)
+        val connection = GatewayConnection("https://gateway.example/profile")
 
-        assertTrue(repository.hasConfiguredConnection())
-    }
+        repository.save(connection)
 
-    private class FakeGatewayConnectionDataSource(
-        private val isConfigured: Boolean,
-    ) : GatewayConnectionDataSource {
-        override fun hasConfiguredConnection(): Boolean = isConfigured
+        assertEquals(connection, repository.load())
+        assertEquals("https://gateway.example/profile", dataSource.loadEndpoint())
     }
 }

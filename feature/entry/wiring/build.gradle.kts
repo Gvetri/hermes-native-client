@@ -22,4 +22,5 @@ dependencies {
     implementation(project(":feature:entry:data"))
     implementation(project(":feature:entry:domain"))
     implementation(project(":feature:entry:presentation"))
+    implementation(libs.kotlinx.coroutines.core)
 }

@@ -34,6 +34,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.kotlinx.coroutines.core)
     implementation(project(":feature:entry:application"))
+    implementation(project(":feature:entry:domain"))
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit4)

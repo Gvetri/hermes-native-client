@@ -10,6 +10,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.application.EntryState
+import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -50,5 +52,96 @@ class EntryScreenTest {
         composeTestRule.runOnIdle {
             assertTrue(stateHolder.uiState.value.connectionSetupRequested)
         }
+    }
+
+    @Test
+    fun connection_form_has_accessible_fields_and_requires_explicit_verification() {
+        val events = mutableListOf<EntryUiEvent>()
+        val state =
+            EntryUiState(
+                title = "Verify a Hermes Gateway",
+                supportingText = "Enter one profile-specific HTTPS endpoint and bearer credential.",
+                actionLabel = "Verify Gateway Connection",
+                connectionSetupRequested = true,
+            )
+
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(state = state, onEvent = events::add)
+            }
+        }
+
+        composeTestRule.onNodeWithText("Gateway HTTPS endpoint").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Bearer credential").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Verify Gateway Connection")
+            .assertHasClickAction()
+            .performClick()
+
+        assertEquals(EntryUiEvent.VerifyGatewayConnectionClicked, events.single())
+    }
+
+    @Test
+    fun loading_state_and_each_error_category_offer_clear_recovery() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Verify a Hermes Gateway",
+                            supportingText = "Checking the Gateway.",
+                            actionLabel = "Verify Gateway Connection",
+                            connectionSetupRequested = true,
+                            isVerifying = true,
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("Verifying Gateway connection…").assertIsDisplayed()
+
+        GatewayErrorCategory.entries.forEach { category ->
+            val events = mutableListOf<EntryUiEvent>()
+            composeTestRule.setContent {
+                HermesTheme {
+                    EntryScreen(
+                        state =
+                            EntryUiState(
+                                title = "Verify a Hermes Gateway",
+                                supportingText = "Correct the details and try again.",
+                                actionLabel = "Verify Gateway Connection",
+                                connectionSetupRequested = true,
+                                errorCategory = category,
+                            ),
+                        onEvent = events::add,
+                    )
+                }
+            }
+
+            composeTestRule.onNodeWithText(category.safeMessage).assertIsDisplayed()
+            composeTestRule.onNodeWithText("Try again").performClick()
+            assertEquals(EntryUiEvent.TryAgainClicked, events.single())
+        }
+    }
+
+    @Test
+    fun connected_state_is_rendered_without_a_second_connection_action() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            connectionSetupRequested = true,
+                            isConnected = true,
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Connected to Gateway").assertIsDisplayed()
     }
 }

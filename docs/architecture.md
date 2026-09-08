@@ -34,7 +34,7 @@ Application source is plain Kotlin/JVM. It coordinates domain ports and returns 
 
 ### Data
 
-Data owns transport DTO parsing, the authenticated HTTP and SSE adapter, and concrete repository implementations. `DefaultGatewayClient` uses one configured HTTPS Gateway endpoint and the versioned Public Beta capability manifest. It does not discover profiles, use desktop or dashboard routes, append a server extension, or move transport types into domain/application. A deterministic in-memory datasource remains available for the bootstrap entry wiring.
+Data owns transport DTO parsing, the authenticated HTTP and SSE adapter, and concrete repository implementations. `DefaultGatewayClient` uses one configured HTTPS Gateway endpoint and the versioned Public Beta capability manifest. It does not discover profiles, use desktop or dashboard routes, append a server extension, or move transport types into domain/application. A deterministic in-memory datasource remains available for tests, while wiring provides endpoint-only Android persistence.
 
 ### Presentation
 
