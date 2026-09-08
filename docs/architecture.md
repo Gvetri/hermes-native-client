@@ -34,7 +34,7 @@ Application source is plain Kotlin/JVM. It coordinates domain ports and returns 
 
 ### Data
 
-Data owns datasource boundaries and concrete repository adapters. A deterministic in-memory datasource is used by the bootstrap wiring. A future Gateway adapter belongs here; it must not move transport types into domain or application.
+Data owns transport DTO parsing, the authenticated HTTP and SSE adapter, and concrete repository implementations. `DefaultGatewayClient` uses one configured HTTPS Gateway endpoint and the versioned Public Beta capability manifest. It does not discover profiles, use desktop or dashboard routes, append a server extension, or move transport types into domain/application. A deterministic in-memory datasource remains available for the bootstrap entry wiring.
 
 ### Presentation
 
@@ -47,5 +47,7 @@ Wiring selects concrete datasource and repository implementations and creates th
 ## Architecture checks
 
 `./gradlew architectureCheck` scans domain and application Kotlin source for forbidden framework, transport, serialization, dependency-injection, and concrete-data references, including fully qualified references. It also scans both module build scripts and fails on forbidden dependency declarations. `./gradlew architectureRuleTests` runs focused failure tests for these rules. `./gradlew verifyNoMocks` rejects mock framework names and mock construction in main, unit-test, and instrumentation source.
+
+The typed Gateway contract adapter is verified by deterministic data-layer tests against the checked-in JSON and SSE fixtures. These tests assert the versioned capability manifest, exact profile routes, bearer authentication, all supported Session/Run operations, additive fields and events, malformed responses, and safe transport error categories.
 
 These checks are intentionally simple and visible. A future feature must extend the declared checks when it introduces a new boundary.

@@ -10,6 +10,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":feature:entry:domain"))
     implementation(libs.kotlinx.serialization.json)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit4)
