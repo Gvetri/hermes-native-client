@@ -14,6 +14,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit4)
     testImplementation(project(":feature:entry:application"))
+    testImplementation(project(":fixtures:hermes:runner"))
 }
 
 tasks.test {
