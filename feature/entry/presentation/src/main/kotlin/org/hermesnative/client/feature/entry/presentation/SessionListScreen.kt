@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -40,6 +41,14 @@ internal fun SessionListContent(
         )
         return
     }
+    state.createSession?.let { createSession ->
+        CreateSessionContent(
+            state = createSession,
+            onEvent = onEvent,
+            modifier = modifier,
+        )
+        return
+    }
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -58,6 +67,19 @@ internal fun SessionListContent(
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
+
+        Button(
+            onClick = { onEvent(EntryUiEvent.CreateSessionClicked) },
+            enabled =
+                !state.isLoading &&
+                    !state.isRefreshing &&
+                    !state.isUnavailable &&
+                    state.openingSessionId == null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Create Session")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (state.isLoading) {
             LoadingSessionsContent()
@@ -153,7 +175,70 @@ private fun EmptySessionsContent() {
             style = MaterialTheme.typography.titleLarge,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "The Gateway returned no Sessions. Create one in the Gateway, then refresh this list.")
+        Text(text = "The Gateway returned no Sessions. Create one to get started.")
+    }
+}
+
+@Composable
+private fun CreateSessionContent(
+    state: SessionCreationUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Top,
+    ) {
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.CancelCreateSessionClicked) },
+            enabled = !state.isSubmitting,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            Text(text = "Cancel")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Create Session",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = "Optionally add a title. The Session is created only after confirmation.")
+        Spacer(modifier = Modifier.height(16.dp))
+        OutlinedTextField(
+            value = state.titleDraft,
+            onValueChange = { onEvent(EntryUiEvent.CreateSessionTitleChanged(it)) },
+            enabled = !state.isSubmitting,
+            label = { Text("Session title (optional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = { onEvent(EntryUiEvent.ConfirmCreateSessionClicked) },
+            enabled = !state.isSubmitting,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = if (state.errorCategory == null) "Confirm Create Session" else "Try again")
+        }
+        if (state.isSubmitting) {
+            Spacer(modifier = Modifier.height(16.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Text(
+                text = "Creating Session…",
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        state.errorCategory?.let { category ->
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = category.safeMessage,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
     }
 }
 

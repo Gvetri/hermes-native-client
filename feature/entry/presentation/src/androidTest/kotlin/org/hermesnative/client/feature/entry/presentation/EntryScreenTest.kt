@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.application.EntryState
@@ -217,10 +218,153 @@ class EntryScreenTest {
 
         composeTestRule.onNodeWithText("No Sessions on this Gateway").assertIsDisplayed()
         composeTestRule
-            .onNodeWithText("The Gateway returned no Sessions. Create one in the Gateway, then refresh this list.")
+            .onNodeWithText("The Gateway returned no Sessions. Create one to get started.")
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Refresh").assertHasClickAction().performClick()
         assertEquals(listOf(EntryUiEvent.RefreshSessionsClicked), events)
+    }
+
+    @Test
+    fun populated_and_empty_session_lists_expose_the_explicit_create_action() {
+        val events = mutableListOf<EntryUiEvent>()
+        val state =
+            mutableStateOf(
+                EntryUiState(
+                    title = "Gateway connected",
+                    supportingText = "The Gateway contract was verified successfully.",
+                    actionLabel = "Connected",
+                    isConnected = true,
+                    sessionList =
+                        SessionListUiState(
+                            sessions =
+                                listOf(
+                                    SessionItemUiState(
+                                        id = SessionId("existing"),
+                                        title = "Existing Session",
+                                        preview = null,
+                                        pinned = false,
+                                    ),
+                                ),
+                        ),
+                ),
+            )
+
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(state = state.value, onEvent = events::add)
+            }
+        }
+
+        composeTestRule.onNodeWithText("Create Session").assertHasClickAction().performClick()
+        assertEquals(listOf(EntryUiEvent.CreateSessionClicked), events)
+
+        events.clear()
+        composeTestRule.runOnIdle {
+            state.value = state.value.copy(sessionList = SessionListUiState())
+        }
+        composeTestRule.onNodeWithText("Create Session").assertHasClickAction().performClick()
+        assertEquals(listOf(EntryUiEvent.CreateSessionClicked), events)
+    }
+
+    @Test
+    fun creation_form_supports_optional_title_confirmation_and_cancellation() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    createSession = SessionCreationUiState(),
+                                ),
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Session title (optional)").performTextInput("Draft title")
+        composeTestRule.onNodeWithText("Confirm Create Session").assertHasClickAction().performClick()
+        assertEquals(
+            listOf(
+                EntryUiEvent.CreateSessionTitleChanged("Draft title"),
+                EntryUiEvent.ConfirmCreateSessionClicked,
+            ),
+            events,
+        )
+
+        events.clear()
+        composeTestRule.onNodeWithText("Cancel").assertHasClickAction().performClick()
+        assertEquals(listOf(EntryUiEvent.CancelCreateSessionClicked), events)
+    }
+
+    @Test
+    fun confirmed_creation_failure_preserves_the_draft_and_exposes_an_explicit_retry() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    createSession =
+                                        SessionCreationUiState(
+                                            titleDraft = "Preserved title",
+                                            errorCategory = SessionCreationErrorCategory.GATEWAY_REQUEST_FAILED,
+                                        ),
+                                ),
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Preserved title").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(SessionCreationErrorCategory.GATEWAY_REQUEST_FAILED.safeMessage)
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Try again").assertHasClickAction().performClick()
+        assertEquals(listOf(EntryUiEvent.ConfirmCreateSessionClicked), events)
+    }
+
+    @Test
+    fun creation_pending_state_disables_confirmation_and_cancellation_with_progress() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    createSession =
+                                        SessionCreationUiState(
+                                            titleDraft = "Draft title",
+                                            isSubmitting = true,
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Creating Session…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Confirm Create Session").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Cancel").assertIsNotEnabled()
     }
 
     @Test

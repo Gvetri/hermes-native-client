@@ -10,12 +10,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.hermesnative.client.feature.entry.application.CreateSession
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.LoadSessionList
 import org.hermesnative.client.feature.entry.application.OpenSession
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
+import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionId
 
@@ -35,6 +37,16 @@ sealed interface EntryUiEvent {
     data object TryAgainClicked : EntryUiEvent
 
     data object RefreshSessionsClicked : EntryUiEvent
+
+    data object CreateSessionClicked : EntryUiEvent
+
+    data class CreateSessionTitleChanged(
+        val value: String,
+    ) : EntryUiEvent
+
+    data object ConfirmCreateSessionClicked : EntryUiEvent
+
+    data object CancelCreateSessionClicked : EntryUiEvent
 
     data class SessionClicked(
         val sessionId: SessionId,
@@ -87,6 +99,10 @@ class EntryStateHolder(
             EntryUiEvent.TryAgainClicked,
             -> verifyConnection()
             EntryUiEvent.RefreshSessionsClicked -> refreshSessions()
+            EntryUiEvent.CreateSessionClicked -> showCreateSession()
+            is EntryUiEvent.CreateSessionTitleChanged -> updateCreateSessionTitle(event.value)
+            EntryUiEvent.ConfirmCreateSessionClicked -> confirmCreateSession()
+            EntryUiEvent.CancelCreateSessionClicked -> cancelCreateSession()
             is EntryUiEvent.SessionClicked -> openSession(event.sessionId)
             EntryUiEvent.ReturnToSessionListClicked -> returnToSessionList()
         }
@@ -182,7 +198,14 @@ class EntryStateHolder(
         val gateway = sessionGateway ?: return
         val state = _uiState.value
         val sessionList = state.sessionList ?: return
-        if (sessionList.isLoading || sessionList.isRefreshing || sessionList.openingSessionId != null) return
+        if (
+            sessionList.isLoading ||
+            sessionList.isRefreshing ||
+            sessionList.openingSessionId != null ||
+            sessionList.createSession != null
+        ) {
+            return
+        }
 
         _uiState.value =
             state.copy(
@@ -199,6 +222,183 @@ class EntryStateHolder(
             scope.launch {
                 loadSessions(gateway)
             }
+    }
+
+    private fun showCreateSession() {
+        val state = _uiState.value
+        val sessionList = state.sessionList ?: return
+        if (
+            sessionList.isLoading ||
+            sessionList.isRefreshing ||
+            sessionList.openingSessionId != null ||
+            sessionList.isUnavailable ||
+            sessionList.createSession != null
+        ) {
+            return
+        }
+        _uiState.value =
+            state.copy(
+                sessionList =
+                    sessionList.copy(
+                        createSession = SessionCreationUiState(),
+                        errorCategory = null,
+                    ),
+            )
+    }
+
+    private fun updateCreateSessionTitle(value: String) {
+        val current = _uiState.value.sessionList ?: return
+        val creation = current.createSession ?: return
+        if (creation.isSubmitting) return
+        _uiState.value =
+            _uiState.value.copy(
+                sessionList =
+                    current.copy(
+                        createSession =
+                            creation.copy(
+                                titleDraft = value,
+                                errorCategory = null,
+                            ),
+                    ),
+            )
+    }
+
+    private fun cancelCreateSession() {
+        val current = _uiState.value.sessionList ?: return
+        if (current.createSession?.isSubmitting == true) return
+        _uiState.value =
+            _uiState.value.copy(
+                sessionList =
+                    current.copy(
+                        createSession = null,
+                        errorCategory = null,
+                    ),
+            )
+    }
+
+    private fun confirmCreateSession() {
+        val gateway = sessionGateway ?: return
+        val state = _uiState.value
+        val sessionList = state.sessionList ?: return
+        val creation = sessionList.createSession ?: return
+        if (creation.isSubmitting || sessionList.isUnavailable) return
+
+        val title = creation.titleDraft.trim().takeIf(String::isNotEmpty)
+        _uiState.value =
+            state.copy(
+                sessionList =
+                    sessionList.copy(
+                        createSession =
+                            creation.copy(
+                                isSubmitting = true,
+                                errorCategory = null,
+                            ),
+                    ),
+            )
+        sessionJob?.cancel()
+        sessionJob =
+            scope.launch {
+                var createdSession: Session? = null
+                try {
+                    createdSession = CreateSession(gateway).execute(title)
+                    val openedSession = OpenSession(gateway).execute(createdSession.id)
+                    val refreshedPage =
+                        try {
+                            LoadSessionList(gateway).execute()
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            null
+                        }
+                    val current = _uiState.value.sessionList ?: return@launch
+                    val openedSessionUiState =
+                        OpenSessionUiState(
+                            session = openedSession.session.toSessionItemUiState(),
+                            messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
+                        )
+                    _uiState.value =
+                        _uiState.value.copy(
+                            sessionList =
+                                current.copy(
+                                    sessions =
+                                        refreshedPage?.let { page ->
+                                            val orderedSessions =
+                                                page.sessions.filter { it.pinned } + page.sessions.filterNot { it.pinned }
+                                            orderedSessions.map { it.toSessionItemUiState() }
+                                        } ?: mergeSession(current.sessions, openedSession.session),
+                                    isLoading = false,
+                                    isRefreshing = false,
+                                    isStale = refreshedPage == null,
+                                    isUnavailable = refreshedPage == null,
+                                    errorCategory =
+                                        if (refreshedPage == null) {
+                                            SessionListErrorCategory.GATEWAY_UNAVAILABLE
+                                        } else {
+                                            null
+                                        },
+                                    createSession = null,
+                                    openedSession = openedSessionUiState,
+                                ),
+                        )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: GatewayException) {
+                    if (createdSession == null) {
+                        showCreateSessionFailure()
+                    } else {
+                        showCreatedSessionFailure(createdSession)
+                    }
+                } catch (_: Exception) {
+                    if (createdSession == null) {
+                        showCreateSessionFailure()
+                    } else {
+                        showCreatedSessionFailure(createdSession)
+                    }
+                }
+            }
+    }
+
+    private fun showCreateSessionFailure() {
+        val current = _uiState.value.sessionList ?: return
+        val creation = current.createSession ?: return
+        _uiState.value =
+            _uiState.value.copy(
+                sessionList =
+                    current.copy(
+                        createSession =
+                            creation.copy(
+                                isSubmitting = false,
+                                errorCategory = SessionCreationErrorCategory.GATEWAY_REQUEST_FAILED,
+                            ),
+                    ),
+            )
+    }
+
+    private fun showCreatedSessionFailure(createdSession: Session) {
+        val current = _uiState.value.sessionList ?: return
+        _uiState.value =
+            _uiState.value.copy(
+                sessionList =
+                    current.copy(
+                        sessions = mergeSession(current.sessions, createdSession),
+                        isLoading = false,
+                        isRefreshing = false,
+                        isStale = true,
+                        isUnavailable = true,
+                        errorCategory = SessionListErrorCategory.SESSION_UNAVAILABLE,
+                        createSession = null,
+                    ),
+            )
+    }
+
+    private fun mergeSession(
+        sessions: List<SessionItemUiState>,
+        session: Session,
+    ): List<SessionItemUiState> {
+        val merged =
+            (sessions.filterNot { it.id == session.id } + session.toSessionItemUiState())
+                .distinctBy { it.id }
+        return merged.filter { it.pinned } + merged.filterNot { it.pinned }
     }
 
     private suspend fun loadSessions(gateway: SessionGatewayPort) {
@@ -302,6 +502,10 @@ class EntryStateHolder(
 
     private fun returnToSessionList() {
         val current = _uiState.value.sessionList ?: return
+        if (current.createSession != null) {
+            cancelCreateSession()
+            return
+        }
         _uiState.value =
             _uiState.value.copy(
                 sessionList =

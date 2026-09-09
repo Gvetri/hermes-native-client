@@ -14,6 +14,12 @@ class LoadSessionList(
     fun execute(): SessionPage = gateway.listSessions()
 }
 
+class CreateSession(
+    private val gateway: SessionGatewayPort,
+) {
+    fun execute(title: String?): Session = gateway.createSession(title)
+}
+
 data class OpenedSession(
     val session: Session,
     val history: SessionHistory,
