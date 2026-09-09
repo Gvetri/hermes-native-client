@@ -11,6 +11,12 @@ enum class SessionListErrorCategory(
     SESSION_UNAVAILABLE("This Session could not be opened. It may have been removed. Return to the list or refresh."),
 }
 
+enum class SessionCreationErrorCategory(
+    val safeMessage: String,
+) {
+    GATEWAY_REQUEST_FAILED("Session was not created. Your title is preserved. Try again."),
+}
+
 data class SessionItemUiState(
     val id: SessionId,
     val title: String,
@@ -29,6 +35,12 @@ data class OpenSessionUiState(
     val messages: List<SessionMessageUiState>,
 )
 
+data class SessionCreationUiState(
+    val titleDraft: String = "",
+    val isSubmitting: Boolean = false,
+    val errorCategory: SessionCreationErrorCategory? = null,
+)
+
 data class SessionListUiState(
     val sessions: List<SessionItemUiState> = emptyList(),
     val isLoading: Boolean = false,
@@ -39,6 +51,7 @@ data class SessionListUiState(
     val showFirstUseGuidance: Boolean = false,
     val openingSessionId: SessionId? = null,
     val openedSession: OpenSessionUiState? = null,
+    val createSession: SessionCreationUiState? = null,
 )
 
 internal fun Session.toSessionItemUiState(): SessionItemUiState =

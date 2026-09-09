@@ -16,6 +16,7 @@ import org.hermesnative.client.fixture.SyntheticGatewaySession
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -157,6 +158,40 @@ class GatewaySessionFixtureIntegrationTest {
         }
     }
 
+    @Test
+    fun explicit_creation_is_one_remote_mutation_and_refresh_failure_does_not_create_again() {
+        val behavior = behavior(emptyList())
+
+        fixture(behavior).execute { context ->
+            val client = client(context)
+            behavior.requests.clear()
+
+            assertTrue(LoadSessionList(client).execute().sessions.isEmpty())
+            assertTrue(behavior.requests.none { it.method == "POST" })
+
+            val created = client.createSession(null)
+            assertEquals(CREATED_SESSION, created.id.value)
+            assertNull(created.title)
+            assertEquals(1, behavior.requests.count { it.method == "POST" && it.path == "/v1/sessions" })
+
+            val opened = OpenSession(client).execute(created.id)
+            assertEquals(CREATED_SESSION, opened.session.id.value)
+            assertEquals("Created history", opened.history.messages.single().content)
+
+            behavior.failNextSessionList = true
+            val refreshFailure =
+                try {
+                    LoadSessionList(client).execute()
+                    error("Expected the synthetic refresh failure.")
+                } catch (failure: GatewayException) {
+                    failure
+                }
+            assertEquals(GatewayErrorCategory.GATEWAY_REQUEST_FAILED, refreshFailure.category)
+            assertEquals(1, behavior.requests.count { it.method == "POST" && it.path == "/v1/sessions" })
+            assertNoCredentials(behavior)
+        }
+    }
+
     private fun client(context: FixtureTestContext): DefaultGatewayClient =
         DefaultGatewayClient(
             endpoint = "https://127.0.0.1:${context.endpoint.port}",
@@ -234,5 +269,6 @@ class GatewaySessionFixtureIntegrationTest {
         const val PINNED_B = "22222222-2222-4222-8222-222222222222"
         const val SERVER_A = "33333333-3333-4333-8333-333333333333"
         const val SERVER_B = "44444444-4444-4444-8444-444444444444"
+        const val CREATED_SESSION = "55555555-5555-4555-8555-555555555555"
     }
 }

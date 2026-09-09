@@ -2,6 +2,9 @@ package org.hermesnative.client.fixture
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.InetSocketAddress
 import java.net.URI
@@ -30,6 +33,7 @@ data class SyntheticGatewayRequest(
     val path: String,
     val query: String?,
     val hasAuthorizationHeader: Boolean,
+    val body: String? = null,
 )
 
 class SyntheticGatewayBehavior(
@@ -45,6 +49,11 @@ class SyntheticGatewayBehavior(
 
     val sessions = CopyOnWriteArrayList(initialSessions)
     val requests = CopyOnWriteArrayList<SyntheticGatewayRequest>()
+
+    @Volatile
+    var failNextSessionList: Boolean = false
+
+    val createdSessionId: String = "55555555-5555-4555-8555-555555555555"
 }
 
 /** A loopback-only HTTP process with deterministic health, capability, and synthetic behavior. */
@@ -137,17 +146,44 @@ class LocalSyntheticGatewayProcess private constructor(
             exchange: HttpExchange,
             behavior: SyntheticGatewayBehavior,
         ) {
-            recordRequest(exchange, behavior)
+            val body = recordRequest(exchange, behavior)
             if (exchange.requestURI.path != "/v1/sessions") {
                 respond(exchange, 404, "{\"error\":\"not-found\"}")
                 return
             }
-            if (exchange.requestMethod != "GET") {
-                respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
-                return
+            when (exchange.requestMethod) {
+                "GET" -> {
+                    if (behavior.failNextSessionList) {
+                        behavior.failNextSessionList = false
+                        respond(exchange, 503, "{\"error\":\"synthetic-refresh-failure\"}")
+                        return
+                    }
+                    val sessions = behavior.sessions.joinToString(",") { sessionJson(it) }
+                    respond(exchange, 200, "{\"sessions\":[$sessions],\"next_cursor\":null}")
+                }
+                "POST" -> {
+                    val created =
+                        SyntheticGatewaySession(
+                            id = behavior.createdSessionId,
+                            title = parseCreateTitle(body),
+                            preview = null,
+                            pinned = false,
+                            updatedAt = "2026-09-09T00:00:00Z",
+                            history =
+                                listOf(
+                                    SyntheticGatewayMessage(
+                                        id = "message-${behavior.createdSessionId}",
+                                        role = "assistant",
+                                        content = "Created history",
+                                    ),
+                                ),
+                        )
+                    behavior.sessions.removeIf { it.id == created.id }
+                    behavior.sessions += created
+                    respond(exchange, 201, "{\"session\":${sessionJson(created)}}")
+                }
+                else -> respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
             }
-            val sessions = behavior.sessions.joinToString(",") { sessionJson(it) }
-            respond(exchange, 200, "{\"sessions\":[$sessions],\"next_cursor\":null}")
         }
 
         private fun handleSessionResourceRequest(
@@ -215,17 +251,28 @@ class LocalSyntheticGatewayProcess private constructor(
 
         private fun quote(value: String): String = JsonPrimitive(value).toString()
 
+        private fun parseCreateTitle(body: String?): String? {
+            val text = body?.takeIf(String::isNotBlank) ?: return null
+            val root =
+                runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
+            val title = root["title"] ?: return null
+            return if (title == JsonNull) null else (title as? JsonPrimitive)?.content
+        }
+
         private fun recordRequest(
             exchange: HttpExchange,
             behavior: SyntheticGatewayBehavior,
-        ) {
+        ): String? {
+            val body = exchange.requestBody.bufferedReader().use { it.readText().takeIf(String::isNotEmpty) }
             behavior.requests +=
                 SyntheticGatewayRequest(
                     method = exchange.requestMethod,
                     path = exchange.requestURI.path,
                     query = exchange.requestURI.rawQuery,
                     hasAuthorizationHeader = exchange.requestHeaders.getFirst("Authorization") != null,
+                    body = body,
                 )
+            return body
         }
 
         private fun respond(

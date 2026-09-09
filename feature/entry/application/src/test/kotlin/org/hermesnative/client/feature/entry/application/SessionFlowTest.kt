@@ -12,6 +12,17 @@ import org.junit.Test
 
 class SessionFlowTest {
     @Test
+    fun creating_a_session_forwards_the_optional_title_and_returns_the_gateway_session() {
+        val expected = Session(SessionId("created"), "Created", null, pinned = false, updatedAt = "now")
+        val gateway = RecordingSessionGateway().apply { createResult = expected }
+
+        val created = CreateSession(gateway).execute("Created")
+
+        assertEquals(expected, created)
+        assertEquals(listOf("Created"), gateway.createTitles)
+    }
+
+    @Test
     fun loading_the_session_list_requests_the_first_server_page_without_local_paging() {
         val gateway = RecordingSessionGateway()
         val expectedPage = SessionPage(emptyList(), nextCursor = "server-cursor")
@@ -47,6 +58,8 @@ class SessionFlowTest {
         val listRequests = mutableListOf<SessionListRequest>()
         val operations = mutableListOf<String>()
         var createCalls = 0
+        var createResult = Session(SessionId("created"), null, null, pinned = false, updatedAt = null)
+        val createTitles = mutableListOf<String?>()
 
         override fun listSessions(request: SessionListRequest): SessionPage {
             listRequests += request
@@ -55,7 +68,8 @@ class SessionFlowTest {
 
         override fun createSession(title: String?): Session {
             createCalls += 1
-            error("Session creation is outside this flow")
+            createTitles += title
+            return createResult
         }
 
         override fun openSession(sessionId: SessionId): Session {
