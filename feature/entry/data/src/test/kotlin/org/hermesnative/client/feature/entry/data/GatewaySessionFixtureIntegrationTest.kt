@@ -16,6 +16,7 @@ import org.hermesnative.client.fixture.SyntheticGatewaySession
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -170,6 +171,7 @@ class GatewaySessionFixtureIntegrationTest {
 
             val created = client.createSession(null)
             assertEquals(CREATED_SESSION, created.id.value)
+            assertNull(created.title)
             assertEquals(1, behavior.requests.count { it.method == "POST" && it.path == "/v1/sessions" })
 
             val opened = OpenSession(client).execute(created.id)

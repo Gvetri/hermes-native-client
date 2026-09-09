@@ -252,9 +252,11 @@ class LocalSyntheticGatewayProcess private constructor(
         private fun quote(value: String): String = JsonPrimitive(value).toString()
 
         private fun parseCreateTitle(body: String?): String? {
-            val root = Json.parseToJsonElement(body.orEmpty()) as? JsonObject ?: return null
+            val text = body?.takeIf(String::isNotBlank) ?: return null
+            val root =
+                runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
             val title = root["title"] ?: return null
-            return if (title == JsonNull) null else (title as JsonPrimitive).content
+            return if (title == JsonNull) null else (title as? JsonPrimitive)?.content
         }
 
         private fun recordRequest(
