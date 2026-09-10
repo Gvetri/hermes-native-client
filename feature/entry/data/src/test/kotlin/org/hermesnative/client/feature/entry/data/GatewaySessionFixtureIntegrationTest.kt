@@ -6,6 +6,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.fixture.DeterministicGatewayFixture
 import org.hermesnative.client.fixture.FixtureTestContext
 import org.hermesnative.client.fixture.GatewayProcessFactory
@@ -76,6 +77,138 @@ class GatewaySessionFixtureIntegrationTest {
             assertEquals(PINNED_B, openedB.session.id.value)
             assertEquals("History B", openedB.history.messages.single().content)
             assertNotEquals(openedA.history.messages.single().content, openedB.history.messages.single().content)
+            assertNoCredentials(behavior)
+        }
+    }
+
+    @Test
+    fun real_client_searches_title_and_preview_and_paginates_without_loading_history() {
+        val behavior =
+            behavior(
+                listOf(
+                    session(
+                        id = PINNED_A,
+                        title = "Needle title",
+                        preview = "Pinned preview",
+                        pinned = true,
+                        history = "Needle only appears in history",
+                    ),
+                    session(
+                        id = SERVER_A,
+                        title = "Other title",
+                        preview = "Needle preview",
+                        pinned = false,
+                    ),
+                    session(
+                        id = SERVER_B,
+                        title = "Other title",
+                        preview = "Other preview",
+                        pinned = false,
+                        history = "Needle only appears in history",
+                    ),
+                ),
+            ).apply {
+                sessionPageSize = 1
+            }
+
+        fixture(behavior).execute { context ->
+            val client = client(context)
+            behavior.requests.clear()
+            client.discoverCapabilities()
+
+            val firstPage = client.listSessions(SessionListRequest(search = "needle"))
+            val secondPage =
+                client.listSessions(
+                    SessionListRequest(
+                        cursor = requireNotNull(firstPage.nextCursor),
+                        search = "needle",
+                    ),
+                )
+            val refreshedPage = client.listSessions(SessionListRequest(search = "needle"))
+
+            assertEquals(listOf(PINNED_A), firstPage.sessions.map { it.id.value })
+            assertEquals(listOf(SERVER_A), secondPage.sessions.map { it.id.value })
+            assertNull(secondPage.nextCursor)
+            assertTrue(secondPage.sessions.none { it.id.value == SERVER_B })
+            assertEquals(listOf(PINNED_A), refreshedPage.sessions.map { it.id.value })
+            assertEquals("Needle title", firstPage.sessions.single().title)
+            assertEquals("Needle preview", secondPage.sessions.single().preview)
+
+            val listRequests = behavior.requests.filter { it.path == "/v1/sessions" }
+            assertEquals(
+                listOf(
+                    "limit=20&search=needle",
+                    "limit=20&cursor=offset%3A1&search=needle",
+                    "limit=20&search=needle",
+                ),
+                listRequests.map { it.query },
+            )
+            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
+            assertTrue(behavior.requests.none { it.method == "POST" })
+            assertNoCredentials(behavior)
+        }
+    }
+
+    @Test
+    fun real_client_pagination_exposes_overlapping_pages_for_state_holder_deduplication() {
+        val behavior =
+            behavior(
+                listOf(
+                    session(PINNED_A, "Pinned A", "Pinned A preview", pinned = true),
+                    session(SERVER_A, "Server A", "Server A preview", pinned = false),
+                    session(SERVER_A, "Server A refreshed", "Server A refreshed preview", pinned = false),
+                    session(SERVER_B, "Server B", "Server B preview", pinned = false),
+                ),
+            ).apply {
+                sessionPageSize = 2
+            }
+
+        fixture(behavior).execute { context ->
+            val client = client(context)
+            client.discoverCapabilities()
+
+            val firstPage = client.listSessions()
+            val secondPage =
+                client.listSessions(
+                    SessionListRequest(cursor = requireNotNull(firstPage.nextCursor)),
+                )
+            val pagedSessions = firstPage.sessions + secondPage.sessions
+
+            assertEquals(listOf(PINNED_A, SERVER_A), firstPage.sessions.map { it.id.value })
+            assertEquals(listOf(SERVER_A, SERVER_B), secondPage.sessions.map { it.id.value })
+            assertEquals(listOf(PINNED_A, SERVER_A, SERVER_A, SERVER_B), pagedSessions.map { it.id.value })
+            assertEquals("Server A refreshed", secondPage.sessions.first().title)
+            assertEquals(4, pagedSessions.size)
+            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
+            assertTrue(behavior.requests.none { it.method == "POST" })
+            assertNoCredentials(behavior)
+        }
+    }
+
+    @Test
+    fun real_client_retries_a_failed_session_list_without_remote_mutation() {
+        val behavior = behavior(listOf(session(SERVER_A, "Server A", "Server A preview", pinned = false)))
+
+        fixture(behavior).execute { context ->
+            val client = client(context)
+            client.discoverCapabilities()
+            val initial = client.listSessions()
+            behavior.failNextSessionList = true
+
+            val failure =
+                try {
+                    client.listSessions()
+                    error("Expected the synthetic session-list failure.")
+                } catch (error: GatewayException) {
+                    error
+                }
+            val recovered = client.listSessions()
+
+            assertEquals(GatewayErrorCategory.GATEWAY_REQUEST_FAILED, failure.category)
+            assertEquals(initial, recovered)
+            assertEquals(3, behavior.requests.count { it.path == "/v1/sessions" })
+            assertTrue(behavior.requests.none { it.method == "POST" })
+            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
             assertNoCredentials(behavior)
         }
     }

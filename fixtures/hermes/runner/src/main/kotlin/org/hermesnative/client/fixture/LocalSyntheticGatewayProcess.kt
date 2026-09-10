@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.InetSocketAddress
 import java.net.URI
+import java.net.URLDecoder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -52,6 +53,9 @@ class SyntheticGatewayBehavior(
 
     @Volatile
     var failNextSessionList: Boolean = false
+
+    @Volatile
+    var sessionPageSize: Int? = null
 
     val createdSessionId: String = "55555555-5555-4555-8555-555555555555"
 }
@@ -158,8 +162,47 @@ class LocalSyntheticGatewayProcess private constructor(
                         respond(exchange, 503, "{\"error\":\"synthetic-refresh-failure\"}")
                         return
                     }
-                    val sessions = behavior.sessions.joinToString(",") { sessionJson(it) }
-                    respond(exchange, 200, "{\"sessions\":[$sessions],\"next_cursor\":null}")
+                    val query = queryParameters(exchange.requestURI)
+                    val search = query["search"].orEmpty()
+                    val matchingSessions =
+                        if (search.isBlank()) {
+                            behavior.sessions.toList()
+                        } else {
+                            behavior.sessions.filter { session ->
+                                session.title.orEmpty().contains(search, ignoreCase = true) ||
+                                    session.preview.orEmpty().contains(search, ignoreCase = true)
+                            }
+                        }
+                    val cursor = query["cursor"]
+                    val parsedOffset = cursor?.removePrefix("offset:")?.toIntOrNull()
+                    if (cursor != null && !cursor.startsWith("offset:")) {
+                        respond(exchange, 400, "{\"error\":\"invalid-cursor\"}")
+                        return
+                    }
+                    if (cursor != null && parsedOffset == null) {
+                        respond(exchange, 400, "{\"error\":\"invalid-cursor\"}")
+                        return
+                    }
+                    val offset = parsedOffset ?: 0
+                    val pageSize = behavior.sessionPageSize ?: query["limit"]?.toIntOrNull() ?: matchingSessions.size
+                    if (pageSize <= 0) {
+                        respond(exchange, 400, "{\"error\":\"invalid-limit\"}")
+                        return
+                    }
+                    if (offset !in 0..matchingSessions.size) {
+                        respond(exchange, 400, "{\"error\":\"cursor-out-of-range\"}")
+                        return
+                    }
+                    val page = matchingSessions.drop(offset).take(pageSize)
+                    val nextOffset = offset + page.size
+                    val nextCursor =
+                        nextOffset.takeIf { it < matchingSessions.size }?.let { next -> "offset:$next" }
+                    val sessions = page.joinToString(",") { sessionJson(it) }
+                    respond(
+                        exchange,
+                        200,
+                        "{\"sessions\":[$sessions],\"next_cursor\":${nextCursor.jsonValue()}}",
+                    )
                 }
                 "POST" -> {
                     val created =
@@ -248,6 +291,21 @@ class LocalSyntheticGatewayProcess private constructor(
             }
 
         private fun String?.jsonValue(): String = this?.let(::quote) ?: "null"
+
+        private fun queryParameters(uri: URI): Map<String, String> =
+            uri.rawQuery.orEmpty()
+                .split('&')
+                .filter(String::isNotEmpty)
+                .mapNotNull { parameter ->
+                    val separator = parameter.indexOf('=')
+                    if (separator < 0) {
+                        null
+                    } else {
+                        URLDecoder.decode(parameter.substring(0, separator), Charsets.UTF_8.name()) to
+                            URLDecoder.decode(parameter.substring(separator + 1), Charsets.UTF_8.name())
+                    }
+                }
+                .toMap()
 
         private fun quote(value: String): String = JsonPrimitive(value).toString()
 

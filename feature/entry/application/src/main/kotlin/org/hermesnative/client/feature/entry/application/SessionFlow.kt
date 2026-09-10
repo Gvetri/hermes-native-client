@@ -6,12 +6,13 @@ import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionPage
 
 class LoadSessionList(
     private val gateway: SessionGatewayPort,
 ) {
-    fun execute(): SessionPage = gateway.listSessions()
+    fun execute(request: SessionListRequest = SessionListRequest()): SessionPage = gateway.listSessions(request)
 }
 
 class CreateSession(

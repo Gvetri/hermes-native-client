@@ -36,6 +36,16 @@ class SessionFlowTest {
     }
 
     @Test
+    fun loading_the_session_list_forwards_search_and_server_cursor() {
+        val gateway = RecordingSessionGateway()
+        val request = SessionListRequest(limit = 5, cursor = "server-cursor", search = "server query")
+
+        LoadSessionList(gateway).execute(request)
+
+        assertEquals(listOf(request), gateway.listRequests)
+    }
+
+    @Test
     fun opening_a_session_fetches_the_authoritative_session_then_its_history() {
         val sessionId = SessionId("session-one")
         val session = Session(sessionId, "Real title", "Real preview", pinned = false, updatedAt = "now")
