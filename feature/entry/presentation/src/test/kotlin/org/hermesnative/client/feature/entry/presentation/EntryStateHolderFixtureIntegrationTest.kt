@@ -15,12 +15,15 @@ import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
+import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.fixture.DeterministicGatewayFixture
+import org.hermesnative.client.fixture.FixtureTestContext
 import org.hermesnative.client.fixture.GatewayProcessFactory
 import org.hermesnative.client.fixture.LocalSyntheticGatewayProcess
 import org.hermesnative.client.fixture.SyntheticGatewayBehavior
 import org.hermesnative.client.fixture.SyntheticGatewaySession
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -93,6 +96,181 @@ class EntryStateHolderFixtureIntegrationTest {
         }
     }
 
+    @Test
+    fun confirmed_pin_reloads_the_first_page_before_loading_more_from_a_changed_server_order() {
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions =
+                    listOf(
+                        session(SERVER_A, "Server A"),
+                        session(SERVER_B, "Server B"),
+                    ),
+            ).apply {
+                sessionPageSize = 1
+            }
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context))
+            try {
+                connect(holder)
+                assertEquals(listOf(SERVER_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })
+
+                holder.onEvent(EntryUiEvent.PinSessionClicked(SessionId(SERVER_A)))
+
+                val pinned = requireNotNull(holder.uiState.value.sessionList)
+                assertTrue(pinned.sessions.single().pinned)
+                assertEquals("offset:1", pinned.nextCursor)
+                assertEquals(
+                    listOf("limit=20", "limit=20"),
+                    behavior.requests.filter { it.path == "/v1/sessions" }.map { it.query },
+                )
+            } finally {
+                holder.close()
+            }
+        }
+    }
+
+    @Test
+    fun state_holder_applies_confirmed_real_gateway_mutations_and_retries_failures_without_local_optimism() {
+        val targetId = SessionId(SERVER_A)
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions =
+                    listOf(
+                        session(SERVER_A, "Original", pinned = false),
+                        session(PINNED_A, "Already pinned", pinned = true),
+                    ),
+            ).apply {
+                failNextSessionPin = true
+                failNextSessionUnpin = true
+                failNextSessionDelete = true
+            }
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context))
+            try {
+                connect(holder)
+                val initial = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals(listOf(PINNED_A, SERVER_A), initial.sessions.map { it.id.value })
+
+                holder.onEvent(EntryUiEvent.RenameSessionClicked(targetId))
+                holder.onEvent(EntryUiEvent.RenameSessionTitleChanged(targetId, "Confirmed title"))
+                assertEquals("Original", requireNotNull(holder.uiState.value.sessionList).sessions.last().title)
+                holder.onEvent(EntryUiEvent.ConfirmRenameSessionClicked(targetId))
+                assertEquals("Confirmed title", requireNotNull(holder.uiState.value.sessionList).sessions.last().title)
+
+                holder.onEvent(EntryUiEvent.PinSessionClicked(targetId))
+                val pinFailure = requireNotNull(holder.uiState.value.sessionList)
+                assertFalse(pinFailure.sessions.single { it.id == targetId }.pinned)
+                assertEquals(SessionMutationAction.PIN, pinFailure.sessionMutations[targetId]?.retryAction)
+
+                holder.onEvent(EntryUiEvent.PinSessionClicked(targetId))
+                val pinned = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals(listOf(PINNED_A, SERVER_A), pinned.sessions.map { it.id.value })
+                assertTrue(pinned.sessions.all { it.pinned })
+
+                holder.onEvent(EntryUiEvent.UnpinSessionClicked(targetId))
+                val unpinFailure = requireNotNull(holder.uiState.value.sessionList)
+                assertTrue(unpinFailure.sessions.single { it.id == targetId }.pinned)
+                assertEquals(SessionMutationAction.UNPIN, unpinFailure.sessionMutations[targetId]?.retryAction)
+
+                holder.onEvent(EntryUiEvent.UnpinSessionClicked(targetId))
+                val unpinned = requireNotNull(holder.uiState.value.sessionList)
+                assertFalse(unpinned.sessions.single { it.id == targetId }.pinned)
+
+                holder.onEvent(EntryUiEvent.DeleteSessionClicked(targetId))
+                holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
+                val deleteFailure = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals(listOf(PINNED_A, SERVER_A), deleteFailure.sessions.map { it.id.value })
+                assertEquals(SessionMutationAction.DELETE, deleteFailure.sessionMutations[targetId]?.retryAction)
+
+                holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
+                assertEquals(listOf(PINNED_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })
+                assertTrue(behavior.sessions.none { it.id == SERVER_A })
+                assertEquals(
+                    listOf("PATCH", "POST", "POST", "DELETE", "DELETE", "DELETE", "DELETE"),
+                    behavior.requests.filter { it.path.contains(SERVER_A) }.map { it.method },
+                )
+            } finally {
+                holder.close()
+            }
+        }
+    }
+
+    @Test
+    fun refresh_replaces_real_gateway_metadata_preserves_only_an_unsent_draft_and_recovers_from_remote_deletion() {
+        val targetId = SessionId(SERVER_A)
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions =
+                    listOf(
+                        session(SERVER_A, "Listed title", pinned = false),
+                        session(SERVER_B, "Removed on refresh", pinned = false),
+                    ),
+            )
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context))
+            try {
+                connect(holder)
+                holder.onEvent(EntryUiEvent.RenameSessionClicked(targetId))
+                holder.onEvent(EntryUiEvent.RenameSessionTitleChanged(targetId, "Unsent draft"))
+
+                behavior.sessions.clear()
+                behavior.sessions += session(SERVER_A, "Server replacement", pinned = true, preview = "Server preview")
+                holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+
+                val refreshed = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals(listOf(SERVER_A), refreshed.sessions.map { it.id.value })
+                assertEquals("Server replacement", refreshed.sessions.single().title)
+                assertEquals("Server preview", refreshed.sessions.single().preview)
+                assertTrue(refreshed.sessions.single().pinned)
+                assertEquals("Unsent draft", refreshed.sessionMutations[targetId]?.rename?.titleDraft)
+                assertFalse(refreshed.isStale)
+                assertFalse(refreshed.isUnavailable)
+
+                behavior.sessions.clear()
+                holder.onEvent(EntryUiEvent.SessionClicked(targetId))
+                val deleted = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals(SessionListErrorCategory.SESSION_UNAVAILABLE, deleted.errorCategory)
+                assertTrue(deleted.isUnavailable)
+                assertEquals(listOf(SERVER_A), deleted.sessions.map { it.id.value })
+                assertEquals("Unsent draft", deleted.sessionMutations[targetId]?.rename?.titleDraft)
+
+                holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+                val recovered = requireNotNull(holder.uiState.value.sessionList)
+                assertTrue(recovered.sessions.isEmpty())
+                assertTrue(recovered.sessionMutations.isEmpty())
+                assertFalse(recovered.isStale)
+                assertFalse(recovered.isUnavailable)
+                assertEquals(null, recovered.errorCategory)
+            } finally {
+                holder.close()
+            }
+        }
+    }
+
+    private fun client(context: FixtureTestContext): DefaultGatewayClient =
+        DefaultGatewayClient(
+            endpoint = "https://127.0.0.1:${context.endpoint.port}",
+            bearerToken = "fixture-only-token",
+            transport = LoopbackFixtureTransport(),
+        )
+
+    private fun stateHolder(client: DefaultGatewayClient): EntryStateHolder =
+        EntryStateHolder(
+            initialState = EntryState(isGatewayConnectionConfigured = false),
+            verifyGatewayConnection =
+                VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
+                    GatewayCapabilities(requiredCapabilities)
+                },
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            sessionGatewayFactory = { _, _ -> client },
+        )
+
     private fun connect(holder: EntryStateHolder) {
         holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
         holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
@@ -104,11 +282,12 @@ class EntryStateHolderFixtureIntegrationTest {
         id: String,
         title: String,
         pinned: Boolean = false,
+        preview: String = "$title preview",
     ): SyntheticGatewaySession =
         SyntheticGatewaySession(
             id = id,
             title = title,
-            preview = "$title preview",
+            preview = preview,
             pinned = pinned,
             updatedAt = "2026-09-08T20:00:00Z",
         )

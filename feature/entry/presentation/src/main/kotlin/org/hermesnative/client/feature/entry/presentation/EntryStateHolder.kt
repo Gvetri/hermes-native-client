@@ -13,9 +13,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.hermesnative.client.feature.entry.application.CreateSession
+import org.hermesnative.client.feature.entry.application.DeleteSession
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.LoadSessionList
 import org.hermesnative.client.feature.entry.application.OpenSession
+import org.hermesnative.client.feature.entry.application.PinSession
+import org.hermesnative.client.feature.entry.application.RenameSession
+import org.hermesnative.client.feature.entry.application.UnpinSession
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
@@ -58,6 +62,43 @@ sealed interface EntryUiEvent {
     data object ConfirmCreateSessionClicked : EntryUiEvent
 
     data object CancelCreateSessionClicked : EntryUiEvent
+
+    data class RenameSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
+
+    data class RenameSessionTitleChanged(
+        val sessionId: SessionId,
+        val value: String,
+    ) : EntryUiEvent
+
+    data class ConfirmRenameSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
+
+    data class CancelRenameSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
+
+    data class PinSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
+
+    data class UnpinSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
+
+    data class DeleteSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
+
+    data class ConfirmDeleteSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
+
+    data class CancelDeleteSessionClicked(
+        val sessionId: SessionId,
+    ) : EntryUiEvent
 
     data class SessionClicked(
         val sessionId: SessionId,
@@ -104,6 +145,7 @@ class EntryStateHolder(
     private var sessionGateway: SessionGatewayPort? = null
     private val sessionRequestLock = Any()
     private var sessionRequestGeneration = 0L
+    private val mutationJobs = mutableMapOf<SessionId, Job>()
 
     fun onEvent(event: EntryUiEvent) {
         when (event) {
@@ -121,6 +163,15 @@ class EntryStateHolder(
             is EntryUiEvent.CreateSessionTitleChanged -> updateCreateSessionTitle(event.value)
             EntryUiEvent.ConfirmCreateSessionClicked -> confirmCreateSession()
             EntryUiEvent.CancelCreateSessionClicked -> cancelCreateSession()
+            is EntryUiEvent.RenameSessionClicked -> showRenameSession(event.sessionId)
+            is EntryUiEvent.RenameSessionTitleChanged -> updateRenameSessionTitle(event.sessionId, event.value)
+            is EntryUiEvent.ConfirmRenameSessionClicked -> confirmRenameSession(event.sessionId)
+            is EntryUiEvent.CancelRenameSessionClicked -> cancelRenameSession(event.sessionId)
+            is EntryUiEvent.PinSessionClicked -> pinSession(event.sessionId)
+            is EntryUiEvent.UnpinSessionClicked -> unpinSession(event.sessionId)
+            is EntryUiEvent.DeleteSessionClicked -> showDeleteSession(event.sessionId)
+            is EntryUiEvent.ConfirmDeleteSessionClicked -> confirmDeleteSession(event.sessionId)
+            is EntryUiEvent.CancelDeleteSessionClicked -> cancelDeleteSession(event.sessionId)
             is EntryUiEvent.SessionClicked -> openSession(event.sessionId)
             EntryUiEvent.ReturnToSessionListClicked -> returnToSessionList()
         }
@@ -129,6 +180,11 @@ class EntryStateHolder(
     fun close() {
         verificationJob?.cancel()
         sessionJob?.cancel()
+        val mutationJobsToCancel =
+            synchronized(sessionRequestLock) {
+                mutationJobs.values.toList().also { mutationJobs.clear() }
+            }
+        mutationJobsToCancel.forEach(Job::cancel)
         scope.cancel()
     }
 
@@ -222,6 +278,7 @@ class EntryStateHolder(
                 val sessionList = state.sessionList ?: return
                 if (sessionList.searchQuery == value) return
                 if (sessionList.createSession?.isSubmitting == true) return
+                if (sessionList.sessionMutations.isNotEmpty()) return
 
                 val gateway = sessionGateway
                 val requestGeneration = beginSessionRequest()
@@ -262,24 +319,26 @@ class EntryStateHolder(
 
     private fun refreshSessions() {
         val gateway = sessionGateway ?: return
-        val state = _uiState.value
-        val sessionList = state.sessionList ?: return
-        if (
-            (sessionList.isLoading && !sessionList.isSearching) ||
-            sessionList.isRefreshing ||
-            sessionList.openingSessionId != null ||
-            sessionList.createSession != null
-        ) {
-            return
-        }
+        synchronized(sessionRequestLock) {
+            val sessionList = _uiState.value.sessionList ?: return
+            if (
+                (sessionList.isLoading && !sessionList.isSearching) ||
+                sessionList.isRefreshing ||
+                sessionList.openingSessionId != null ||
+                sessionList.createSession != null ||
+                sessionList.hasPendingMutation
+            ) {
+                return
+            }
 
-        startFirstPageLoad(
-            gateway = gateway,
-            query = sessionList.searchQuery,
-            isRefreshing = true,
-            isSearching = false,
-            preserveSessions = true,
-        )
+            startFirstPageLoad(
+                gateway = gateway,
+                query = sessionList.searchQuery,
+                isRefreshing = true,
+                isSearching = false,
+                preserveSessions = true,
+            )
+        }
     }
 
     private fun loadMoreSessions() {
@@ -296,7 +355,8 @@ class EntryStateHolder(
                     sessionList.isLoadingMore ||
                     sessionList.isUnavailable ||
                     sessionList.openingSessionId != null ||
-                    sessionList.createSession != null
+                    sessionList.createSession != null ||
+                    sessionList.sessionMutations.isNotEmpty()
                 ) {
                     return
                 }
@@ -350,7 +410,8 @@ class EntryStateHolder(
             sessionList.isLoadingMore ||
             sessionList.openingSessionId != null ||
             sessionList.isUnavailable ||
-            sessionList.createSession != null
+            sessionList.createSession != null ||
+            sessionList.sessionMutations.isNotEmpty()
         ) {
             return
         }
@@ -393,6 +454,503 @@ class EntryStateHolder(
                     ),
             )
     }
+
+    private fun showRenameSession(sessionId: SessionId) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            if (!current.allowsSessionMutation()) return
+            val mutation = current.sessionMutations[sessionId]
+            if (mutation?.pendingAction != null || mutation?.delete != null) return
+            val session = current.sessions.firstOrNull { it.id == sessionId } ?: return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations =
+                                current.sessionMutations +
+                                    (
+                                        sessionId to
+                                            SessionMutationUiState(
+                                                rename = SessionRenameUiState(session.title),
+                                            )
+                                    ),
+                        ),
+                )
+        }
+    }
+
+    private fun updateRenameSessionTitle(
+        sessionId: SessionId,
+        value: String,
+    ) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val mutation = current.sessionMutations[sessionId] ?: return
+            val rename = mutation.rename ?: return
+            if (mutation.pendingAction != null || rename.isSubmitting) return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations =
+                                current.sessionMutations +
+                                    (
+                                        sessionId to
+                                            mutation.copy(
+                                                rename =
+                                                    rename.copy(
+                                                        titleDraft = value,
+                                                        errorCategory = null,
+                                                    ),
+                                                errorCategory = null,
+                                                retryAction = null,
+                                            )
+                                    ),
+                        ),
+                )
+        }
+    }
+
+    private fun cancelRenameSession(sessionId: SessionId) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val mutation = current.sessionMutations[sessionId] ?: return
+            if (mutation.pendingAction != null) return
+            val remaining = mutation.copy(rename = null)
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations =
+                                if (remaining.delete == null && remaining.errorCategory == null) {
+                                    current.sessionMutations - sessionId
+                                } else {
+                                    current.sessionMutations + (sessionId to remaining)
+                                },
+                        ),
+                )
+        }
+    }
+
+    private fun confirmRenameSession(sessionId: SessionId) {
+        val gateway = sessionGateway ?: return
+        val job =
+            synchronized(sessionRequestLock) {
+                val current = _uiState.value.sessionList ?: return
+                if (!current.allowsSessionMutation()) return
+                val mutation = current.sessionMutations[sessionId] ?: return
+                val rename = mutation.rename ?: return
+                if (mutation.pendingAction != null || rename.isSubmitting) return
+                val title = rename.titleDraft.trim()
+                val validationError = rename.titleDraft.validateRenameTitle()
+                if (validationError != null) {
+                    _uiState.value =
+                        _uiState.value.copy(
+                            sessionList =
+                                current.copy(
+                                    sessionMutations =
+                                        current.sessionMutations +
+                                            (
+                                                sessionId to
+                                                    mutation.copy(
+                                                        rename = rename.copy(errorCategory = validationError),
+                                                    )
+                                            ),
+                                ),
+                        )
+                    return
+                }
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                sessionMutations =
+                                    current.sessionMutations +
+                                        (
+                                            sessionId to
+                                                mutation.copy(
+                                                    rename =
+                                                        rename.copy(
+                                                            isSubmitting = true,
+                                                            errorCategory = null,
+                                                        ),
+                                                    pendingAction = SessionMutationAction.RENAME,
+                                                    errorCategory = null,
+                                                    retryAction = null,
+                                                )
+                                        ),
+                            ),
+                    )
+                createMutationJob(sessionId) {
+                    try {
+                        val confirmed = RenameSession(gateway).execute(sessionId, title)
+                        applyConfirmedSession(confirmed)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        showRenameFailure(sessionId)
+                    }
+                }
+            }
+        job.start()
+    }
+
+    private fun showRenameFailure(sessionId: SessionId) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val mutation = current.sessionMutations[sessionId] ?: return
+            val rename = mutation.rename ?: return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations =
+                                current.sessionMutations +
+                                    (
+                                        sessionId to
+                                            mutation.copy(
+                                                rename =
+                                                    rename.copy(
+                                                        isSubmitting = false,
+                                                        errorCategory = SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED,
+                                                    ),
+                                                pendingAction = null,
+                                                retryAction = SessionMutationAction.RENAME,
+                                            )
+                                    ),
+                        ),
+                )
+        }
+    }
+
+    private fun createMutationJob(
+        sessionId: SessionId,
+        block: suspend CoroutineScope.() -> Unit,
+    ): Job {
+        lateinit var job: Job
+        job =
+            scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    block()
+                } finally {
+                    synchronized(sessionRequestLock) {
+                        if (mutationJobs[sessionId] === job) {
+                            mutationJobs.remove(sessionId)
+                        }
+                    }
+                }
+            }
+        synchronized(sessionRequestLock) {
+            mutationJobs[sessionId] = job
+        }
+        return job
+    }
+
+    private fun applyConfirmedSession(session: Session) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            if (current.sessions.none { it.id == session.id }) return
+            val updated = session.toSessionItemUiState()
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessions =
+                                current.sessions
+                                    .map { item -> if (item.id == session.id) updated else item }
+                                    .orderedSessions(),
+                            openedSession =
+                                current.openedSession
+                                    ?.takeIf { it.session.id == session.id }
+                                    ?.copy(session = updated)
+                                    ?: current.openedSession,
+                            sessionMutations = current.sessionMutations - session.id,
+                        ),
+                )
+        }
+    }
+
+    private fun pinSession(sessionId: SessionId) {
+        changeSessionPin(sessionId, pinned = true)
+    }
+
+    private fun unpinSession(sessionId: SessionId) {
+        changeSessionPin(sessionId, pinned = false)
+    }
+
+    private fun changeSessionPin(
+        sessionId: SessionId,
+        pinned: Boolean,
+    ) {
+        val gateway = sessionGateway ?: return
+        val action = if (pinned) SessionMutationAction.PIN else SessionMutationAction.UNPIN
+        val job =
+            synchronized(sessionRequestLock) {
+                val current = _uiState.value.sessionList ?: return
+                if (!current.allowsSessionMutation()) return
+                if (current.sessions.none { it.id == sessionId }) return
+                val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
+                if (mutation.pendingAction != null || mutation.rename != null || mutation.delete != null) return
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                sessionMutations =
+                                    current.sessionMutations +
+                                        (
+                                            sessionId to
+                                                mutation.copy(
+                                                    pendingAction = action,
+                                                    errorCategory = null,
+                                                    retryAction = null,
+                                                )
+                                        ),
+                            ),
+                    )
+                createMutationJob(sessionId) {
+                    try {
+                        val result =
+                            if (pinned) {
+                                PinSession(gateway).execute(sessionId)
+                            } else {
+                                UnpinSession(gateway).execute(sessionId)
+                            }
+                        applyConfirmedPin(result.sessionId, result.pinned)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        showPinFailure(sessionId, action)
+                    }
+                }
+            }
+        job.start()
+    }
+
+    private fun applyConfirmedPin(
+        sessionId: SessionId,
+        pinned: Boolean,
+    ) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            if (current.sessions.none { it.id == sessionId }) return
+            val mutation = current.sessionMutations[sessionId] ?: return
+            val updatedSessions =
+                current.sessions
+                    .map { item -> if (item.id == sessionId) item.copy(pinned = pinned) else item }
+                    .orderedSessions()
+            val remainingMutation =
+                mutation.copy(
+                    pendingAction = null,
+                    errorCategory = null,
+                    retryAction = null,
+                )
+            val shouldRefresh = current.nextCursor != null
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessions = updatedSessions,
+                            openedSession =
+                                current.openedSession?.let { opened ->
+                                    if (opened.session.id == sessionId) {
+                                        opened.copy(session = opened.session.copy(pinned = pinned))
+                                    } else {
+                                        opened
+                                    }
+                                },
+                            sessionMutations = mutationMapAfter(sessionId, remainingMutation, current.sessionMutations),
+                        ),
+                )
+            if (shouldRefresh) {
+                sessionGateway?.let { gateway ->
+                    startFirstPageLoad(
+                        gateway = gateway,
+                        query = current.searchQuery,
+                        isRefreshing = true,
+                        isSearching = false,
+                        preserveSessions = true,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun showPinFailure(
+        sessionId: SessionId,
+        action: SessionMutationAction,
+    ) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val mutation = current.sessionMutations[sessionId] ?: return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations =
+                                current.sessionMutations +
+                                    (
+                                        sessionId to
+                                            mutation.copy(
+                                                pendingAction = null,
+                                                errorCategory = SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED,
+                                                retryAction = action,
+                                            )
+                                    ),
+                        ),
+                )
+        }
+    }
+
+    private fun showDeleteSession(sessionId: SessionId) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            if (!current.allowsSessionMutation()) return
+            if (current.sessions.none { it.id == sessionId }) return
+            val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
+            if (mutation.pendingAction != null || mutation.rename != null) return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations =
+                                current.sessionMutations +
+                                    (
+                                        sessionId to
+                                            mutation.copy(
+                                                delete = SessionDeleteUiState(),
+                                                errorCategory = null,
+                                                retryAction = null,
+                                            )
+                                    ),
+                        ),
+                )
+        }
+    }
+
+    private fun cancelDeleteSession(sessionId: SessionId) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val mutation = current.sessionMutations[sessionId] ?: return
+            if (mutation.pendingAction != null) return
+            val remaining = mutation.copy(delete = null, errorCategory = null, retryAction = null)
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations = mutationMapAfter(sessionId, remaining, current.sessionMutations),
+                        ),
+                )
+        }
+    }
+
+    private fun confirmDeleteSession(sessionId: SessionId) {
+        val gateway = sessionGateway ?: return
+        val job =
+            synchronized(sessionRequestLock) {
+                val current = _uiState.value.sessionList ?: return
+                if (!current.allowsSessionMutation()) return
+                val mutation = current.sessionMutations[sessionId] ?: return
+                val delete = mutation.delete ?: return
+                if (mutation.pendingAction != null || delete.isSubmitting) return
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                sessionMutations =
+                                    current.sessionMutations +
+                                        (
+                                            sessionId to
+                                                mutation.copy(
+                                                    delete = delete.copy(isSubmitting = true),
+                                                    pendingAction = SessionMutationAction.DELETE,
+                                                    errorCategory = null,
+                                                    retryAction = null,
+                                                )
+                                        ),
+                            ),
+                    )
+                createMutationJob(sessionId) {
+                    try {
+                        DeleteSession(gateway).execute(sessionId)
+                        removeConfirmedSession(sessionId)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        showDeleteFailure(sessionId)
+                    }
+                }
+            }
+        job.start()
+    }
+
+    private fun showDeleteFailure(sessionId: SessionId) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val mutation = current.sessionMutations[sessionId] ?: return
+            val delete = mutation.delete ?: return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessionMutations =
+                                current.sessionMutations +
+                                    (
+                                        sessionId to
+                                            mutation.copy(
+                                                delete = delete.copy(isSubmitting = false),
+                                                pendingAction = null,
+                                                errorCategory = SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED,
+                                                retryAction = SessionMutationAction.DELETE,
+                                            )
+                                    ),
+                        ),
+                )
+        }
+    }
+
+    private fun removeConfirmedSession(sessionId: SessionId) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val shouldRefresh = current.nextCursor != null
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessions = current.sessions.filterNot { it.id == sessionId },
+                            openedSession = current.openedSession?.takeUnless { it.session.id == sessionId },
+                            sessionMutations = current.sessionMutations - sessionId,
+                        ),
+                )
+            if (shouldRefresh) {
+                sessionGateway?.let { gateway ->
+                    startFirstPageLoad(
+                        gateway = gateway,
+                        query = current.searchQuery,
+                        isRefreshing = true,
+                        isSearching = false,
+                        preserveSessions = true,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun mutationMapAfter(
+        sessionId: SessionId,
+        mutation: SessionMutationUiState,
+        mutations: Map<SessionId, SessionMutationUiState>,
+    ): Map<SessionId, SessionMutationUiState> =
+        if (
+            mutation.rename == null &&
+            mutation.delete == null &&
+            mutation.pendingAction == null &&
+            mutation.errorCategory == null &&
+            mutation.retryAction == null
+        ) {
+            mutations - sessionId
+        } else {
+            mutations + (sessionId to mutation)
+        }
 
     private fun confirmCreateSession() {
         val gateway = sessionGateway ?: return
@@ -573,6 +1131,12 @@ class EntryStateHolder(
                                 isUnavailable = false,
                                 errorCategory = null,
                                 nextCursor = if (preserveSessions) current.nextCursor else null,
+                                sessionMutations =
+                                    if (preserveSessions) {
+                                        unsentRenameDrafts(current.sessionMutations)
+                                    } else {
+                                        emptyMap()
+                                    },
                             ),
                     )
                 createSessionJob {
@@ -595,6 +1159,11 @@ class EntryStateHolder(
                         mergeSessions(
                             emptyList(),
                             page.sessions.map { it.toSessionItemUiState() },
+                        ),
+                    sessionMutations =
+                        retainRenameDrafts(
+                            latest.sessionMutations,
+                            page.sessions.map { it.id },
                         ),
                     nextCursor = page.nextCursor,
                     isLoading = false,
@@ -694,13 +1263,23 @@ class EntryStateHolder(
                 val state = _uiState.value
                 val sessionList = state.sessionList ?: return
                 if (
+                    sessionList.isLoading ||
+                    sessionList.isRefreshing ||
+                    sessionList.isSearching ||
                     sessionList.isUnavailable ||
                     sessionList.isLoadingMore ||
-                    sessionList.openingSessionId != null
+                    sessionList.hasPendingMutation ||
+                    sessionList.openingSessionId != null ||
+                    sessionList.createSession != null
                 ) {
                     return
                 }
-                if (sessionList.sessions.none { it.id == sessionId }) return
+                if (
+                    sessionList.sessions.none { it.id == sessionId } ||
+                    sessionList.sessionMutations[sessionId]?.pendingAction != null
+                ) {
+                    return
+                }
 
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
@@ -717,11 +1296,21 @@ class EntryStateHolder(
                     try {
                         val openedSession = OpenSession(gateway).execute(sessionId)
                         updateCurrentSessionRequest(request.generation, request.query) { current ->
+                            val authoritativeSession = openedSession.session.toSessionItemUiState()
                             current.copy(
+                                sessions =
+                                    current.sessions
+                                        .map { item ->
+                                            if (item.id == sessionId) authoritativeSession else item
+                                        }
+                                        .orderedSessions(),
+                                sessionMutations = retainRenameDraft(current.sessionMutations, sessionId),
                                 openingSessionId = null,
+                                isStale = false,
+                                isUnavailable = false,
                                 openedSession =
                                     OpenSessionUiState(
-                                        session = openedSession.session.toSessionItemUiState(),
+                                        session = authoritativeSession,
                                         messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
                                     ),
                                 errorCategory = null,
@@ -730,9 +1319,9 @@ class EntryStateHolder(
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
-                        showSessionOpenFailure(request.generation, request.query)
+                        showSessionOpenFailure(request.generation, request.query, sessionId)
                     } catch (_: Exception) {
-                        showSessionOpenFailure(request.generation, request.query)
+                        showSessionOpenFailure(request.generation, request.query, sessionId)
                     }
                 }
             }
@@ -742,9 +1331,11 @@ class EntryStateHolder(
     private fun showSessionOpenFailure(
         requestGeneration: Long,
         query: String,
+        sessionId: SessionId,
     ) {
         updateCurrentSessionRequest(requestGeneration, query) { current ->
             current.copy(
+                sessionMutations = retainRenameDraft(current.sessionMutations, sessionId),
                 openingSessionId = null,
                 isStale = true,
                 isUnavailable = true,
@@ -796,6 +1387,42 @@ private data class CreateSessionRequest(
 
 private fun List<SessionItemUiState>.orderedSessions(): List<SessionItemUiState> = filter { it.pinned } + filterNot { it.pinned }
 
+private fun unsentRenameDrafts(mutations: Map<SessionId, SessionMutationUiState>): Map<SessionId, SessionMutationUiState> =
+    mutations.mapNotNull { (sessionId, mutation) ->
+        mutation.rename
+            ?.takeIf {
+                !it.isSubmitting &&
+                    mutation.pendingAction == null &&
+                    mutation.errorCategory == null &&
+                    mutation.retryAction == null
+            }
+            ?.let { rename ->
+                sessionId to
+                    SessionMutationUiState(
+                        rename = SessionRenameUiState(titleDraft = rename.titleDraft),
+                    )
+            }
+    }.toMap()
+
+private fun retainRenameDrafts(
+    mutations: Map<SessionId, SessionMutationUiState>,
+    sessionIds: List<SessionId>,
+): Map<SessionId, SessionMutationUiState> = unsentRenameDrafts(mutations).filterKeys { it in sessionIds }
+
+private fun retainRenameDraft(
+    mutations: Map<SessionId, SessionMutationUiState>,
+    sessionId: SessionId,
+): Map<SessionId, SessionMutationUiState> =
+    unsentRenameDrafts(mutations)
+        .filterKeys { it == sessionId }
+        .let { draft ->
+            if (draft.isEmpty()) {
+                mutations - sessionId
+            } else {
+                mutations + draft
+            }
+        }
+
 private fun EntryState.toUiState(): EntryUiState =
     if (isGatewayConnectionConfigured || configuredEndpoint != null) {
         EntryUiState(
@@ -831,4 +1458,11 @@ private fun GatewayErrorCategory.toUserFacingCategory(): EntryErrorCategory =
         GatewayErrorCategory.GATEWAY_REQUEST_FAILED,
         GatewayErrorCategory.INVALID_RESPONSE,
         -> EntryErrorCategory.GATEWAY_REQUEST_FAILED
+    }
+
+private fun String.validateRenameTitle(): SessionRenameErrorCategory? =
+    when {
+        trim().isEmpty() -> SessionRenameErrorCategory.EMPTY_TITLE
+        any(Char::isISOControl) -> SessionRenameErrorCategory.CONTROL_CHARACTER
+        else -> null
     }
