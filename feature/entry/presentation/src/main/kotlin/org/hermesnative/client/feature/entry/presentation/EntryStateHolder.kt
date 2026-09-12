@@ -744,7 +744,6 @@ class EntryStateHolder(
                     errorCategory = null,
                     retryAction = null,
                 )
-            val shouldRefresh = current.nextCursor != null
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -761,16 +760,14 @@ class EntryStateHolder(
                             sessionMutations = mutationMapAfter(sessionId, remainingMutation, current.sessionMutations),
                         ),
                 )
-            if (shouldRefresh) {
-                sessionGateway?.let { gateway ->
-                    startFirstPageLoad(
-                        gateway = gateway,
-                        query = current.searchQuery,
-                        isRefreshing = true,
-                        isSearching = false,
-                        preserveSessions = true,
-                    )
-                }
+            sessionGateway?.let { gateway ->
+                startFirstPageLoad(
+                    gateway = gateway,
+                    query = current.searchQuery,
+                    isRefreshing = true,
+                    isSearching = false,
+                    preserveSessions = true,
+                )
             }
         }
     }

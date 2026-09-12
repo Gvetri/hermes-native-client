@@ -3,6 +3,9 @@ package org.hermesnative.client.feature.entry.presentation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayClient
@@ -27,6 +30,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class EntryStateHolderFixtureIntegrationTest {
     private val repositoryRoot =
@@ -132,6 +137,314 @@ class EntryStateHolderFixtureIntegrationTest {
     }
 
     @Test
+    fun confirmed_unpin_reloads_terminal_first_page_to_apply_gateway_order() {
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions =
+                    listOf(
+                        session(PINNED_A, "Pinned A", pinned = true),
+                        session(SERVER_B, "Server B"),
+                    ),
+            )
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context))
+            try {
+                connect(holder)
+                behavior.sessions.clear()
+                behavior.sessions += session(SERVER_B, "Server B")
+                behavior.sessions += session(PINNED_A, "Pinned A", pinned = true)
+                behavior.requests.clear()
+
+                holder.onEvent(EntryUiEvent.UnpinSessionClicked(SessionId(PINNED_A)))
+
+                val unpinned = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals(
+                    listOf(SERVER_B, PINNED_A),
+                    unpinned.sessions.map { it.id.value },
+                )
+                assertFalse(unpinned.sessions.last().pinned)
+                assertEquals(
+                    listOf("limit=20"),
+                    behavior.requests.filter { it.path == "/v1/sessions" }.map { it.query },
+                )
+            } finally {
+                holder.close()
+            }
+        }
+    }
+
+    @Test
+    fun real_gateway_rename_failure_preserves_title_and_retries_with_confirmed_result() {
+        val targetId = SessionId(SERVER_A)
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions = listOf(session(SERVER_A, "Original")),
+            ).apply {
+                failNextSessionRename = true
+            }
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context))
+            try {
+                connect(holder)
+                behavior.requests.clear()
+
+                holder.onEvent(EntryUiEvent.RenameSessionClicked(targetId))
+                holder.onEvent(EntryUiEvent.RenameSessionTitleChanged(targetId, "Confirmed title"))
+                holder.onEvent(EntryUiEvent.ConfirmRenameSessionClicked(targetId))
+
+                val failed = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals("Original", failed.sessions.single().title)
+                assertEquals(
+                    SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED,
+                    failed.sessionMutations[targetId]?.rename?.errorCategory,
+                )
+                assertEquals(SessionMutationAction.RENAME, failed.sessionMutations[targetId]?.retryAction)
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                    },
+                )
+
+                holder.onEvent(EntryUiEvent.ConfirmRenameSessionClicked(targetId))
+
+                val confirmed = requireNotNull(holder.uiState.value.sessionList)
+                assertEquals("Confirmed title", confirmed.sessions.single().title)
+                assertTrue(confirmed.sessionMutations.isEmpty())
+                assertEquals(
+                    2,
+                    behavior.requests.count {
+                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                    },
+                )
+            } finally {
+                holder.close()
+            }
+        }
+    }
+
+    @Test
+    fun real_fixture_blocks_duplicate_rename_submission_while_the_first_request_is_pending() {
+        val targetId = SessionId(SERVER_A)
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions = listOf(session(SERVER_A, "Original")),
+            )
+        val transport =
+            BlockingMutationResponseTransport {
+                it.method == "PATCH" && it.url.endsWith("/v1/sessions/$SERVER_A")
+            }
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context, transport), asynchronous = true)
+            try {
+                connect(holder)
+                awaitState(holder) { it.sessionList?.sessions?.singleOrNull()?.id == targetId }
+                behavior.requests.clear()
+
+                holder.onEvent(EntryUiEvent.RenameSessionClicked(targetId))
+                holder.onEvent(EntryUiEvent.RenameSessionTitleChanged(targetId, "Renamed"))
+                holder.onEvent(EntryUiEvent.ConfirmRenameSessionClicked(targetId))
+
+                assertTrue(transport.started.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                assertEquals(SessionMutationAction.RENAME, mutation(holder, targetId)?.pendingAction)
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                    },
+                )
+
+                holder.onEvent(EntryUiEvent.ConfirmRenameSessionClicked(targetId))
+
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                    },
+                )
+                assertEquals("Original", requireNotNull(holder.uiState.value.sessionList).sessions.single().title)
+                transport.release.countDown()
+                awaitState(holder) { state ->
+                    state.sessionList?.let { list ->
+                        list.sessions.singleOrNull()?.title == "Renamed" &&
+                            list.sessionMutations.isEmpty()
+                    } == true
+                }
+            } finally {
+                transport.release.countDown()
+                holder.close()
+            }
+        }
+    }
+
+    @Test
+    fun real_fixture_blocks_duplicate_pin_submission_while_the_first_request_is_pending() {
+        val targetId = SessionId(SERVER_A)
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions = listOf(session(SERVER_A, "Original")),
+            )
+        val transport =
+            BlockingMutationResponseTransport {
+                it.method == "POST" && it.url.endsWith("/v1/sessions/$SERVER_A/pin")
+            }
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context, transport), asynchronous = true)
+            try {
+                connect(holder)
+                awaitState(holder) { it.sessionList?.sessions?.singleOrNull()?.id == targetId }
+                behavior.requests.clear()
+
+                holder.onEvent(EntryUiEvent.PinSessionClicked(targetId))
+
+                assertTrue(transport.started.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                assertEquals(SessionMutationAction.PIN, requireNotNull(mutation(holder, targetId)).pendingAction)
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "POST" && it.path == "/v1/sessions/$SERVER_A/pin"
+                    },
+                )
+
+                holder.onEvent(EntryUiEvent.PinSessionClicked(targetId))
+
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "POST" && it.path == "/v1/sessions/$SERVER_A/pin"
+                    },
+                )
+                transport.release.countDown()
+                awaitState(holder) { state ->
+                    state.sessionList?.let { list ->
+                        list.sessions.singleOrNull()?.pinned == true &&
+                            list.sessionMutations.isEmpty() &&
+                            !list.isRefreshing
+                    } == true
+                }
+            } finally {
+                transport.release.countDown()
+                holder.close()
+            }
+        }
+    }
+
+    @Test
+    fun real_fixture_blocks_duplicate_unpin_submission_while_the_first_request_is_pending() {
+        val targetId = SessionId(SERVER_A)
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions = listOf(session(SERVER_A, "Original", pinned = true)),
+            )
+        val transport =
+            BlockingMutationResponseTransport {
+                it.method == "DELETE" && it.url.endsWith("/v1/sessions/$SERVER_A/pin")
+            }
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context, transport), asynchronous = true)
+            try {
+                connect(holder)
+                awaitState(holder) { it.sessionList?.sessions?.singleOrNull()?.id == targetId }
+                behavior.requests.clear()
+
+                holder.onEvent(EntryUiEvent.UnpinSessionClicked(targetId))
+
+                assertTrue(transport.started.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                assertEquals(SessionMutationAction.UNPIN, mutation(holder, targetId)?.pendingAction)
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A/pin"
+                    },
+                )
+
+                holder.onEvent(EntryUiEvent.UnpinSessionClicked(targetId))
+
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A/pin"
+                    },
+                )
+                transport.release.countDown()
+                awaitState(holder) { state ->
+                    state.sessionList?.let { list ->
+                        list.sessions.singleOrNull()?.pinned == false &&
+                            list.sessionMutations.isEmpty() &&
+                            !list.isRefreshing
+                    } == true
+                }
+            } finally {
+                transport.release.countDown()
+                holder.close()
+            }
+        }
+    }
+
+    @Test
+    fun real_fixture_blocks_duplicate_delete_submission_while_the_first_request_is_pending() {
+        val targetId = SessionId(SERVER_A)
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions = listOf(session(SERVER_A, "Original")),
+            )
+        val transport =
+            BlockingMutationResponseTransport {
+                it.method == "DELETE" && it.url.endsWith("/v1/sessions/$SERVER_A")
+            }
+
+        fixture(behavior).execute { context ->
+            val holder = stateHolder(client(context, transport), asynchronous = true)
+            try {
+                connect(holder)
+                awaitState(holder) { it.sessionList?.sessions?.singleOrNull()?.id == targetId }
+                behavior.requests.clear()
+
+                holder.onEvent(EntryUiEvent.DeleteSessionClicked(targetId))
+                holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
+
+                assertTrue(transport.started.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                assertEquals(SessionMutationAction.DELETE, mutation(holder, targetId)?.pendingAction)
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A"
+                    },
+                )
+
+                holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
+
+                assertEquals(
+                    1,
+                    behavior.requests.count {
+                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A"
+                    },
+                )
+                transport.release.countDown()
+                awaitState(holder) { state ->
+                    state.sessionList?.let { list ->
+                        list.sessions.isEmpty() && list.sessionMutations.isEmpty()
+                    } == true
+                }
+            } finally {
+                transport.release.countDown()
+                holder.close()
+            }
+        }
+    }
+
+    @Test
     fun state_holder_applies_confirmed_real_gateway_mutations_and_retries_failures_without_local_optimism() {
         val targetId = SessionId(SERVER_A)
         val behavior =
@@ -139,8 +452,8 @@ class EntryStateHolderFixtureIntegrationTest {
                 capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
-                        session(SERVER_A, "Original", pinned = false),
                         session(PINNED_A, "Already pinned", pinned = true),
+                        session(SERVER_A, "Original", pinned = false),
                     ),
             ).apply {
                 failNextSessionPin = true
@@ -253,21 +566,30 @@ class EntryStateHolderFixtureIntegrationTest {
         }
     }
 
-    private fun client(context: FixtureTestContext): DefaultGatewayClient =
+    private fun client(
+        context: FixtureTestContext,
+        transport: GatewayTransport = LoopbackFixtureTransport(),
+    ): DefaultGatewayClient =
         DefaultGatewayClient(
             endpoint = "https://127.0.0.1:${context.endpoint.port}",
             bearerToken = "fixture-only-token",
-            transport = LoopbackFixtureTransport(),
+            transport = transport,
         )
 
-    private fun stateHolder(client: DefaultGatewayClient): EntryStateHolder =
+    private fun stateHolder(
+        client: DefaultGatewayClient,
+        asynchronous: Boolean = false,
+    ): EntryStateHolder =
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
                 VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
                     GatewayCapabilities(requiredCapabilities)
                 },
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            scope =
+                CoroutineScope(
+                    SupervisorJob() + if (asynchronous) Dispatchers.Default else Dispatchers.Unconfined,
+                ),
             sessionGatewayFactory = { _, _ -> client },
         )
 
@@ -276,6 +598,22 @@ class EntryStateHolderFixtureIntegrationTest {
         holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
         holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
         holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+    }
+
+    private fun mutation(
+        holder: EntryStateHolder,
+        sessionId: SessionId,
+    ): SessionMutationUiState? = requireNotNull(holder.uiState.value.sessionList).sessionMutations[sessionId]
+
+    private fun awaitState(
+        holder: EntryStateHolder,
+        predicate: (EntryUiState) -> Boolean,
+    ) {
+        runBlocking {
+            withTimeout(ASYNC_TEST_TIMEOUT_MILLIS) {
+                holder.uiState.first(predicate)
+            }
+        }
     }
 
     private fun session(
@@ -328,7 +666,32 @@ class EntryStateHolderFixtureIntegrationTest {
         }
     }
 
+    private class BlockingMutationResponseTransport(
+        private val shouldBlock: (GatewayHttpRequest) -> Boolean,
+    ) : GatewayTransport {
+        private val delegate = LoopbackFixtureTransport()
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+
+        override fun execute(request: GatewayHttpRequest): GatewayHttpResponse {
+            val response = delegate.execute(request)
+            if (shouldBlock(request)) {
+                started.countDown()
+                try {
+                    release.await()
+                } catch (error: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw error
+                }
+            }
+            return response
+        }
+
+        override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream = delegate.openEventStream(request)
+    }
+
     private companion object {
+        const val ASYNC_TEST_TIMEOUT_MILLIS = 5_000L
         const val PINNED_A = "11111111-1111-4111-8111-111111111111"
         const val SERVER_A = "33333333-3333-4333-8333-333333333333"
         const val SERVER_B = "44444444-4444-4444-8444-444444444444"

@@ -47,7 +47,7 @@ class SessionPinDeleteStateHolderTest {
 
         assertEquals(listOf("pinned", "first", "second"), sessionIds(holder))
         holder.onEvent(EntryUiEvent.PinSessionClicked(unpinnedFirst.id))
-        assertEquals(listOf("pinned", "first", "second"), sessionIds(holder))
+        assertEquals(listOf("first", "pinned", "second"), sessionIds(holder))
         assertEquals(listOf(true, true, false), pinnedValues(holder))
 
         holder.onEvent(EntryUiEvent.UnpinSessionClicked(pinned.id))
@@ -305,8 +305,9 @@ class SessionPinDeleteStateHolderTest {
     }
 
     private class FakeSessionGateway(
-        private val listedSessions: List<Session>,
+        sessions: List<Session>,
     ) : SessionGatewayPort {
+        private val listedSessions = sessions.toMutableList()
         private val pinResults = ArrayDeque<Result<SessionPinResult>>()
         private val deleteResults = ArrayDeque<Result<Unit>>()
         val pinOperations = mutableListOf<SessionId>()
@@ -330,7 +331,7 @@ class SessionPinDeleteStateHolderTest {
             deleteResults += Result.success(Unit)
         }
 
-        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listedSessions, null)
+        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listedSessions.toList(), null)
 
         override fun createSession(title: String?): Session = error("not used")
 
@@ -356,13 +357,24 @@ class SessionPinDeleteStateHolderTest {
         override fun pinSession(sessionId: SessionId): SessionPinResult {
             pinCalls += 1
             pinOperations += sessionId
-            return pinResults.removeFirst().getOrThrow()
+            return applyPinResult(sessionId, pinResults.removeFirst().getOrThrow())
         }
 
         override fun unpinSession(sessionId: SessionId): SessionPinResult {
             pinCalls += 1
             pinOperations += sessionId
-            return pinResults.removeFirst().getOrThrow()
+            return applyPinResult(sessionId, pinResults.removeFirst().getOrThrow())
+        }
+
+        private fun applyPinResult(
+            sessionId: SessionId,
+            result: SessionPinResult,
+        ): SessionPinResult {
+            val index = listedSessions.indexOfFirst { it.id == sessionId }
+            if (index >= 0) {
+                listedSessions[index] = listedSessions[index].copy(pinned = result.pinned)
+            }
+            return result
         }
     }
 
