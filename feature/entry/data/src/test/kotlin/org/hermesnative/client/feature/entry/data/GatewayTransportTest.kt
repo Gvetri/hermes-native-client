@@ -38,4 +38,31 @@ class GatewayTransportTest {
             server.stop(0)
         }
     }
+
+    @Test
+    fun post_without_json_body_is_sent_with_an_empty_request_body() {
+        val requestBodyBytes = AtomicInteger(-1)
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/post") { exchange ->
+            requestBodyBytes.set(exchange.requestBody.use { it.readBytes().size })
+            exchange.sendResponseHeaders(204, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val response =
+                OkHttpGatewayTransport().execute(
+                    GatewayHttpRequest(
+                        method = "POST",
+                        url = "http://127.0.0.1:${server.address.port}/post",
+                        headers = emptyMap(),
+                    ),
+                )
+
+            assertEquals(204, response.statusCode)
+            assertEquals(0, requestBodyBytes.get())
+        } finally {
+            server.stop(0)
+        }
+    }
 }

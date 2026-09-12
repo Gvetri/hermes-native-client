@@ -38,6 +38,8 @@ internal fun SessionListContent(
     state.openedSession?.let { openedSession ->
         SessionDetailContent(
             state = openedSession,
+            mutation = state.sessionMutations[openedSession.session.id],
+            actionsEnabled = state.allowsSessionMutation(),
             onEvent = onEvent,
             modifier = modifier,
         )
@@ -73,6 +75,7 @@ internal fun SessionListContent(
         OutlinedTextField(
             value = state.searchQuery,
             onValueChange = { onEvent(EntryUiEvent.SessionSearchQueryChanged(it)) },
+            enabled = state.sessionMutations.isEmpty(),
             label = { Text("Search Sessions") },
             placeholder = { Text("Search titles and previews") },
             singleLine = true,
@@ -82,6 +85,7 @@ internal fun SessionListContent(
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
                 onClick = { onEvent(EntryUiEvent.ClearSessionSearchClicked) },
+                enabled = state.sessionMutations.isEmpty(),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
                 Text(text = "Clear search")
@@ -97,7 +101,8 @@ internal fun SessionListContent(
                     !state.isRefreshing &&
                     !state.isLoadingMore &&
                     !state.isUnavailable &&
-                    state.openingSessionId == null,
+                    state.openingSessionId == null &&
+                    state.sessionMutations.isEmpty(),
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = "Create Session")
@@ -134,8 +139,10 @@ internal fun SessionListContent(
                 ) { session ->
                     SessionRow(
                         session = session,
-                        enabled = !state.isUnavailable && state.openingSessionId == null,
+                        mutation = state.sessionMutations[session.id],
+                        enabled = state.allowsSessionMutation(),
                         onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
+                        onEvent = onEvent,
                     )
                 }
                 item {
@@ -191,7 +198,11 @@ internal fun SessionListContent(
         Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
-            enabled = !state.isLoading && !state.isRefreshing && state.openingSessionId == null,
+            enabled =
+                !state.isLoading &&
+                    !state.isRefreshing &&
+                    state.openingSessionId == null &&
+                    !state.hasPendingMutation,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = if (state.isUnavailable) "Try again" else "Refresh")
@@ -275,7 +286,7 @@ private fun SessionPaginationFooter(
         state.nextCursor != null ->
             Button(
                 onClick = { onEvent(EntryUiEvent.LoadMoreSessionsClicked) },
-                enabled = !state.isUnavailable && !state.isRefreshing,
+                enabled = !state.isUnavailable && !state.isRefreshing && state.sessionMutations.isEmpty(),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
                 Text(text = "Load more Sessions")
@@ -364,38 +375,251 @@ private fun CreateSessionContent(
 @Composable
 private fun SessionRow(
     session: SessionItemUiState,
+    mutation: SessionMutationUiState?,
     enabled: Boolean,
     onClick: () -> Unit,
+    onEvent: (EntryUiEvent) -> Unit,
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = session.title,
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (session.pinned) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Button(
+            onClick = onClick,
+            enabled = enabled && mutation?.pendingAction == null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = "Pinned",
-                        style = MaterialTheme.typography.labelMedium,
+                        text = session.title,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    if (session.pinned) {
+                        Text(
+                            text = "Pinned",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+                session.preview?.let { preview ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = preview,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
-            session.preview?.let { preview ->
+        }
+        SessionActionControls(
+            session = session,
+            mutation = mutation,
+            enabled = enabled,
+            onEvent = onEvent,
+        )
+    }
+}
+
+@Composable
+private fun SessionActionControls(
+    session: SessionItemUiState,
+    mutation: SessionMutationUiState?,
+    enabled: Boolean,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    when {
+        mutation?.rename != null ->
+            RenameSessionContent(
+                session = session,
+                state = mutation.rename,
+                enabled = enabled,
+                onEvent = onEvent,
+            )
+        mutation?.delete != null ->
+            DeleteSessionContent(
+                session = session,
+                state = mutation.delete,
+                errorCategory = mutation.errorCategory,
+                enabled = enabled,
+                onEvent = onEvent,
+            )
+        else -> {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        onEvent(
+                            if (session.pinned) {
+                                EntryUiEvent.UnpinSessionClicked(session.id)
+                            } else {
+                                EntryUiEvent.PinSessionClicked(session.id)
+                            },
+                        )
+                    },
+                    enabled = enabled && mutation?.pendingAction == null,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text(
+                        text =
+                            if (mutation?.retryAction == SessionMutationAction.PIN ||
+                                mutation?.retryAction == SessionMutationAction.UNPIN
+                            ) {
+                                "Try again"
+                            } else if (session.pinned) {
+                                "Unpin Session"
+                            } else {
+                                "Pin Session"
+                            },
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = preview,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                OutlinedButton(
+                    onClick = { onEvent(EntryUiEvent.RenameSessionClicked(session.id)) },
+                    enabled = enabled && mutation?.pendingAction == null,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text(text = "Rename Session")
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = { onEvent(EntryUiEvent.DeleteSessionClicked(session.id)) },
+                    enabled = enabled && mutation?.pendingAction == null,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text(text = "Delete Session")
+                }
+                mutation?.pendingAction?.let { action ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = action.pendingMessage(),
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                mutation?.errorCategory?.let { category ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = category.safeMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun RenameSessionContent(
+    session: SessionItemUiState,
+    state: SessionRenameUiState,
+    enabled: Boolean,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
+        Text(
+            text = "Rename Session",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = "Current title: ${session.title}")
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = state.titleDraft,
+            onValueChange = { onEvent(EntryUiEvent.RenameSessionTitleChanged(session.id, it)) },
+            enabled = enabled && !state.isSubmitting,
+            label = { Text("New Session title") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { onEvent(EntryUiEvent.ConfirmRenameSessionClicked(session.id)) },
+            enabled = enabled && !state.isSubmitting,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = if (state.errorCategory == null) "Confirm Rename Session" else "Try again")
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.CancelRenameSessionClicked(session.id)) },
+            enabled = !state.isSubmitting,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Cancel Rename")
+        }
+        if (state.isSubmitting) {
+            Spacer(modifier = Modifier.height(8.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Text(
+                text = "Renaming Session…",
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        state.errorCategory?.let { category ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = category.safeMessage,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeleteSessionContent(
+    session: SessionItemUiState,
+    state: SessionDeleteUiState,
+    errorCategory: SessionMutationErrorCategory?,
+    enabled: Boolean,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
+        Text(
+            text = "Delete Session",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = "Delete \"${session.title}\"?")
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = "Remote deletion cannot be undone by this client.")
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(session.id)) },
+            enabled = enabled && !state.isSubmitting,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = if (errorCategory == null) "Confirm Delete Session" else "Try again")
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.CancelDeleteSessionClicked(session.id)) },
+            enabled = !state.isSubmitting,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Cancel Delete")
+        }
+        if (state.isSubmitting) {
+            Spacer(modifier = Modifier.height(8.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Text(
+                text = "Deleting Session…",
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        errorCategory?.let { category ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = category.safeMessage,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
         }
     }
 }
@@ -403,6 +627,8 @@ private fun SessionRow(
 @Composable
 private fun SessionDetailContent(
     state: OpenSessionUiState,
+    mutation: SessionMutationUiState?,
+    actionsEnabled: Boolean,
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -426,6 +652,12 @@ private fun SessionDetailContent(
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = preview, style = MaterialTheme.typography.bodyLarge)
         }
+        SessionActionControls(
+            session = state.session,
+            mutation = mutation,
+            enabled = actionsEnabled && mutation?.pendingAction == null,
+            onEvent = onEvent,
+        )
         Spacer(modifier = Modifier.height(16.dp))
         if (state.messages.isEmpty()) {
             Text(text = "No messages in this Session.")
@@ -449,3 +681,11 @@ private fun SessionDetailContent(
         }
     }
 }
+
+private fun SessionMutationAction.pendingMessage(): String =
+    when (this) {
+        SessionMutationAction.RENAME -> "Renaming Session…"
+        SessionMutationAction.PIN -> "Pinning Session…"
+        SessionMutationAction.UNPIN -> "Unpinning Session…"
+        SessionMutationAction.DELETE -> "Deleting Session…"
+    }
