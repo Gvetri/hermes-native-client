@@ -291,6 +291,42 @@ class EntryScreenTest {
     }
 
     @Test
+    fun searching_keeps_existing_sessions_visible_with_progress_feedback() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    sessions =
+                                        listOf(
+                                            SessionItemUiState(
+                                                id = SessionId("existing"),
+                                                title = "Existing Session",
+                                                preview = "Previous preview",
+                                                pinned = false,
+                                            ),
+                                        ),
+                                    isLoading = true,
+                                    isSearching = true,
+                                    searchQuery = "needle",
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Existing Session").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Searching Sessions…").assertIsDisplayed()
+    }
+
+    @Test
     fun session_list_search_and_pagination_controls_remain_usable_at_increased_font_scale() {
         val events = mutableListOf<EntryUiEvent>()
         composeTestRule.setContent {

@@ -197,6 +197,9 @@ class EntryStateHolderTest {
 
         verify(holder)
         holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("matching"))
+        val searching = requireNotNull(holder.uiState.value.sessionList)
+        assertEquals(listOf("initial"), searching.sessions.map { it.id.value })
+        assertTrue(searching.isSearching)
         awaitSessions(holder, "matching")
 
         val searched = requireNotNull(holder.uiState.value.sessionList)

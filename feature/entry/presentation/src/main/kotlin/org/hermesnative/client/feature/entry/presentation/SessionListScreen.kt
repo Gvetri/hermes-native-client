@@ -104,7 +104,7 @@ internal fun SessionListContent(
         }
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (state.isLoading || state.isSearching) {
+        if ((state.isLoading || state.isSearching) && state.sessions.isEmpty()) {
             LoadingSessionsContent(if (state.isSearching) "Searching Sessions…" else "Loading Sessions…")
         } else if (state.sessions.isEmpty() && (state.isUnavailable || state.isStale)) {
             if (state.searchQuery.isNotBlank()) {
@@ -117,6 +117,13 @@ internal fun SessionListContent(
         } else if (state.sessions.isEmpty()) {
             EmptySessionsContent()
         } else {
+            if (state.isSearching) {
+                Text(
+                    text = "Searching Sessions…",
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),

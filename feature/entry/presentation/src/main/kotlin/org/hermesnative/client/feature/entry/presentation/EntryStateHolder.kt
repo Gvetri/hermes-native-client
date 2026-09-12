@@ -221,6 +221,7 @@ class EntryStateHolder(
                 val state = _uiState.value
                 val sessionList = state.sessionList ?: return
                 if (sessionList.searchQuery == value) return
+                if (sessionList.createSession?.isSubmitting == true) return
 
                 val gateway = sessionGateway
                 val requestGeneration = beginSessionRequest()
@@ -228,7 +229,7 @@ class EntryStateHolder(
                     state.copy(
                         sessionList =
                             sessionList.copy(
-                                sessions = emptyList(),
+                                sessions = sessionList.sessions,
                                 searchQuery = value,
                                 nextCursor = null,
                                 isLoading = gateway != null,
