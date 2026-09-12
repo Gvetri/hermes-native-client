@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
@@ -223,7 +224,10 @@ class SessionMutationScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Renaming Session…").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Renaming Session…")
+            .performScrollTo()
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText("Confirm Rename Session").assertIsNotEnabled()
         composeTestRule.onNodeWithText("Cancel Rename").assertIsNotEnabled()
     }
