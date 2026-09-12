@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.testing.Test
 import org.w3c.dom.Element
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -38,10 +39,17 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit4)
+    testImplementation(libs.okhttp)
+    testImplementation(project(":feature:entry:data"))
+    testImplementation(project(":fixtures:hermes:runner"))
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty("fixture.repositoryRoot", rootProject.projectDir.absolutePath)
 }
 
 tasks.register("verifyConnectedAndroidTests") {

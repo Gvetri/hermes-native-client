@@ -9,6 +9,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.RunEventType
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -101,6 +102,25 @@ class DefaultGatewayClientTest {
         client.discoverCapabilities()
 
         assertEquals("https://gateway.example/profile-a/v1/capabilities", transport.requests.single().url)
+    }
+
+    @Test
+    fun session_list_forwards_and_encodes_server_search_and_cursor_parameters() {
+        val transport = RecordingTransport(responses = listOf(response("sessions/list-response-page-1.json")))
+        val client = DefaultGatewayClient("https://gateway.example", "test-token", transport)
+
+        client.listSessions(
+            SessionListRequest(
+                limit = 7,
+                cursor = "page two",
+                search = "title & preview",
+            ),
+        )
+
+        assertEquals(
+            "limit=7&cursor=page%20two&search=title%20%26%20preview",
+            URI(transport.requests.single().url).rawQuery,
+        )
     }
 
     @Test

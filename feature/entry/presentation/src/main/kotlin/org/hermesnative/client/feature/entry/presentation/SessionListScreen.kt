@@ -70,11 +70,32 @@ internal fun SessionListContent(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
+        OutlinedTextField(
+            value = state.searchQuery,
+            onValueChange = { onEvent(EntryUiEvent.SessionSearchQueryChanged(it)) },
+            label = { Text("Search Sessions") },
+            placeholder = { Text("Search titles and previews") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (state.searchQuery.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { onEvent(EntryUiEvent.ClearSessionSearchClicked) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) {
+                Text(text = "Clear search")
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+
         Button(
             onClick = { onEvent(EntryUiEvent.CreateSessionClicked) },
             enabled =
                 !state.isLoading &&
+                    !state.isSearching &&
                     !state.isRefreshing &&
+                    !state.isLoadingMore &&
                     !state.isUnavailable &&
                     state.openingSessionId == null,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -83,11 +104,26 @@ internal fun SessionListContent(
         }
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (state.isLoading) {
-            LoadingSessionsContent()
+        if ((state.isLoading || state.isSearching) && state.sessions.isEmpty()) {
+            LoadingSessionsContent(if (state.isSearching) "Searching Sessions…" else "Loading Sessions…")
+        } else if (state.sessions.isEmpty() && (state.isUnavailable || state.isStale)) {
+            if (state.searchQuery.isNotBlank()) {
+                SearchUnavailableContent()
+            } else {
+                SessionsUnavailableContent()
+            }
+        } else if (state.searchQuery.isNotBlank() && state.sessions.isEmpty()) {
+            NoSearchResultsContent()
         } else if (state.sessions.isEmpty()) {
             EmptySessionsContent()
         } else {
+            if (state.isSearching) {
+                Text(
+                    text = "Searching Sessions…",
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -102,7 +138,18 @@ internal fun SessionListContent(
                         onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
                     )
                 }
+                item {
+                    SessionPaginationFooter(state = state, onEvent = onEvent)
+                }
             }
+        }
+        if (
+            state.sessions.isEmpty() &&
+            !state.isLoading &&
+            !state.isSearching &&
+            state.nextCursor != null
+        ) {
+            SessionPaginationFooter(state = state, onEvent = onEvent)
         }
 
         if (state.openingSessionId != null) {
@@ -153,7 +200,7 @@ internal fun SessionListContent(
 }
 
 @Composable
-private fun LoadingSessionsContent() {
+private fun LoadingSessionsContent(message: String) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -162,7 +209,77 @@ private fun LoadingSessionsContent() {
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
         Spacer(modifier = Modifier.height(12.dp))
-        Text(text = "Loading Sessions…")
+        Text(text = message)
+    }
+}
+
+@Composable
+private fun NoSearchResultsContent() {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "No Sessions match this search",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
+@Composable
+private fun SearchUnavailableContent() {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "Search results are unavailable",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
+@Composable
+private fun SessionsUnavailableContent() {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "Sessions are unavailable",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
+@Composable
+private fun SessionPaginationFooter(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    when {
+        state.isLoadingMore ->
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Loading more Sessions…",
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+        state.nextCursor != null ->
+            Button(
+                onClick = { onEvent(EntryUiEvent.LoadMoreSessionsClicked) },
+                enabled = !state.isUnavailable && !state.isRefreshing,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) {
+                Text(text = "Load more Sessions")
+            }
     }
 }
 

@@ -22,6 +22,7 @@ data class SessionItemUiState(
     val title: String,
     val preview: String?,
     val pinned: Boolean,
+    val updatedAt: String? = null,
 )
 
 data class SessionMessageUiState(
@@ -52,6 +53,10 @@ data class SessionListUiState(
     val openingSessionId: SessionId? = null,
     val openedSession: OpenSessionUiState? = null,
     val createSession: SessionCreationUiState? = null,
+    val searchQuery: String = "",
+    val nextCursor: String? = null,
+    val isLoadingMore: Boolean = false,
+    val isSearching: Boolean = false,
 )
 
 internal fun Session.toSessionItemUiState(): SessionItemUiState =
@@ -60,6 +65,7 @@ internal fun Session.toSessionItemUiState(): SessionItemUiState =
         title = title?.takeIf(String::isNotBlank) ?: "Untitled Session",
         preview = preview?.takeIf(String::isNotBlank),
         pinned = pinned,
+        updatedAt = updatedAt,
     )
 
 internal fun GatewayHistoryMessage.toSessionMessageUiState(): SessionMessageUiState =
