@@ -3,8 +3,10 @@ package org.hermesnative.client.feature.entry.presentation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
@@ -29,6 +31,9 @@ import org.junit.Test
 import java.util.ArrayDeque
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+
+private const val ASYNC_TEST_TIMEOUT_MILLIS = 5_000L
 
 class EntryStateHolderTest {
     @Test
@@ -140,7 +145,7 @@ class EntryStateHolderTest {
         val gateway = FakeSessionGateway()
         val firstSession = session("first", title = "First")
         val refreshedSession = session("second", title = "Second")
-        gateway.enqueueList(SessionPage(listOf(firstSession), null))
+        gateway.enqueueList(SessionPage(listOf(firstSession), "next"))
         gateway.enqueueFailure(GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED))
         gateway.enqueueList(SessionPage(listOf(refreshedSession), null))
         val holder =
@@ -157,8 +162,9 @@ class EntryStateHolderTest {
 
         val unavailable = requireNotNull(holder.uiState.value.sessionList)
         assertEquals(listOf("first"), unavailable.sessions.map { it.id.value })
+        assertEquals("next", unavailable.nextCursor)
         assertTrue(unavailable.isStale)
-        assertTrue(unavailable.isUnavailable)
+        assertFalse(unavailable.isUnavailable)
         assertEquals(SessionListErrorCategory.GATEWAY_UNAVAILABLE, unavailable.errorCategory)
 
         holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
@@ -191,6 +197,7 @@ class EntryStateHolderTest {
 
         verify(holder)
         holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("matching"))
+        awaitSessions(holder, "matching")
 
         val searched = requireNotNull(holder.uiState.value.sessionList)
         assertEquals("matching", searched.searchQuery)
@@ -202,12 +209,34 @@ class EntryStateHolderTest {
         )
 
         holder.onEvent(EntryUiEvent.ClearSessionSearchClicked)
+        awaitSessions(holder, "initial")
 
         val cleared = requireNotNull(holder.uiState.value.sessionList)
         assertEquals("", cleared.searchQuery)
         assertEquals(listOf("initial"), cleared.sessions.map { it.id.value })
         assertEquals(3, gateway.listRequests.size)
         assertEquals(SessionListRequest(), gateway.listRequests.last())
+        holder.close()
+    }
+
+    @Test
+    fun rapid_search_query_changes_start_only_the_final_debounced_request() {
+        val gateway = SlowSessionGateway(SessionPage(listOf(session("initial")), null))
+        val holder = slowHolder(gateway)
+        verifySlow(holder, gateway)
+
+        holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("n"))
+        holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("needle"))
+
+        val finalRequest = SessionListRequest(search = "needle")
+        gateway.awaitRequest(finalRequest)
+        assertEquals(
+            listOf(SessionListRequest(), finalRequest),
+            gateway.listRequests,
+        )
+
+        gateway.complete(finalRequest, SessionPage(listOf(session("needle-result")), null))
+        awaitSessions(holder, "needle-result")
         holder.close()
     }
 
@@ -623,17 +652,33 @@ class EntryStateHolderTest {
     ) {
         verify(holder)
         gateway.awaitRequest(SessionListRequest())
-        runBlocking { holder.uiState.first { it.sessionList?.sessions?.isNotEmpty() == true } }
+        awaitState(holder, "initial Session list") {
+            it.sessionList?.sessions?.isNotEmpty() == true
+        }
     }
 
     private fun awaitSessions(
         holder: EntryStateHolder,
         vararg ids: String,
     ) {
-        runBlocking {
-            holder.uiState.first {
-                it.sessionList?.sessions?.map { session -> session.id.value } == ids.toList()
+        awaitState(holder, "Sessions ${ids.toList()}") {
+            it.sessionList?.sessions?.map { session -> session.id.value } == ids.toList()
+        }
+    }
+
+    private fun awaitState(
+        holder: EntryStateHolder,
+        description: String,
+        predicate: (EntryUiState) -> Boolean,
+    ) {
+        try {
+            runBlocking {
+                withTimeout(ASYNC_TEST_TIMEOUT_MILLIS) {
+                    holder.uiState.first(predicate)
+                }
             }
+        } catch (_: TimeoutCancellationException) {
+            throw AssertionError("Timed out waiting for $description.")
         }
     }
 
@@ -737,12 +782,19 @@ class EntryStateHolderTest {
                     val occurrence = gates.size
                     val gate = RequestGate()
                     gates += gate
+                    listRequests += request
                     requestMonitor.notifyAll()
                     occurrence to gate
                 }
-            listRequests += request
             if (request == SessionListRequest() && occurrence == 0) return initialPage
-            val result = gate.result.join()
+            val result =
+                try {
+                    gate.result.get(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                } catch (_: java.util.concurrent.TimeoutException) {
+                    throw AssertionError(
+                        "Timed out waiting for SessionPage for request $request occurrence $occurrence.",
+                    )
+                }
             synchronized(requestMonitor) {
                 beforeReturnActions.remove(RequestKey(request, occurrence))?.invoke()
             }
@@ -753,11 +805,7 @@ class EntryStateHolderTest {
             request: SessionListRequest,
             occurrence: Int = 0,
         ) {
-            synchronized(requestMonitor) {
-                while (requestGates[request].orEmpty().size <= occurrence) {
-                    requestMonitor.wait()
-                }
-            }
+            awaitGate(request, occurrence)
         }
 
         fun beforeReturn(
@@ -775,15 +823,28 @@ class EntryStateHolderTest {
             page: SessionPage,
             occurrence: Int = 0,
         ) {
-            val gate =
-                synchronized(requestMonitor) {
-                    while (requestGates[request].orEmpty().size <= occurrence) {
-                        requestMonitor.wait()
-                    }
-                    requestGates.getValue(request)[occurrence]
-                }
+            val gate = awaitGate(request, occurrence)
             gate.result.complete(page)
         }
+
+        private fun awaitGate(
+            request: SessionListRequest,
+            occurrence: Int,
+        ): RequestGate =
+            synchronized(requestMonitor) {
+                val deadline =
+                    System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ASYNC_TEST_TIMEOUT_MILLIS)
+                while (requestGates[request].orEmpty().size <= occurrence) {
+                    val remaining = deadline - System.nanoTime()
+                    if (remaining <= 0) {
+                        throw AssertionError(
+                            "Timed out waiting for request $request occurrence $occurrence.",
+                        )
+                    }
+                    TimeUnit.NANOSECONDS.timedWait(requestMonitor, remaining)
+                }
+                requestGates.getValue(request)[occurrence]
+            }
 
         private data class RequestKey(
             val request: SessionListRequest,

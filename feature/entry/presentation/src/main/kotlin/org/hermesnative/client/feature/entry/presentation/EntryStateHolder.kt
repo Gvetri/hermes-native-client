@@ -2,10 +2,12 @@ package org.hermesnative.client.feature.entry.presentation
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -73,6 +75,8 @@ enum class EntryErrorCategory(
     REQUIRED_FEATURE_UNAVAILABLE("Required feature unavailable. This Gateway does not support the client contract."),
     GATEWAY_REQUEST_FAILED("Gateway request failed. Try again."),
 }
+
+private const val SESSION_SEARCH_DEBOUNCE_MILLIS = 300L
 
 data class EntryUiState(
     val title: String,
@@ -212,14 +216,14 @@ class EntryStateHolder(
     }
 
     private fun updateSearchQuery(value: String) {
-        val gateway =
+        val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
                 val sessionList = state.sessionList ?: return
                 if (sessionList.searchQuery == value) return
 
                 val gateway = sessionGateway
-                beginSessionRequest()
+                val requestGeneration = beginSessionRequest()
                 _uiState.value =
                     state.copy(
                         sessionList =
@@ -238,17 +242,15 @@ class EntryStateHolder(
                                 errorCategory = null,
                             ),
                     )
-                gateway
+                gateway?.let {
+                    val request = SessionRequestContext(requestGeneration, value, cursor = null)
+                    createSessionJob {
+                        delay(SESSION_SEARCH_DEBOUNCE_MILLIS)
+                        loadFirstPage(it, request, preserveSessions = false)
+                    }
+                }
             }
-        gateway?.let {
-            startFirstPageLoad(
-                gateway = it,
-                query = value,
-                isRefreshing = false,
-                isSearching = true,
-                preserveSessions = false,
-            )
-        }
+        job?.start()
     }
 
     private fun clearSearch() {
@@ -281,7 +283,7 @@ class EntryStateHolder(
 
     private fun loadMoreSessions() {
         val gateway = sessionGateway ?: return
-        val request =
+        val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
                 val sessionList = state.sessionList ?: return
@@ -300,6 +302,7 @@ class EntryStateHolder(
 
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
+                val request = SessionRequestContext(requestGeneration, query, cursor)
                 _uiState.value =
                     state.copy(
                         sessionList =
@@ -308,34 +311,33 @@ class EntryStateHolder(
                                 errorCategory = null,
                             ),
                     )
-                SessionRequestContext(requestGeneration, query, cursor)
-            }
-        sessionJob =
-            scope.launch {
-                try {
-                    val page = LoadSessionList(gateway).execute(sessionListRequest(request.query, request.cursor))
-                    updateCurrentSessionRequest(request.generation, request.query, request.cursor) { current ->
-                        current.copy(
-                            sessions =
-                                mergeSessions(
-                                    current.sessions,
-                                    page.sessions.map { it.toSessionItemUiState() },
-                                ),
-                            nextCursor = page.nextCursor,
-                            isLoadingMore = false,
-                            isStale = false,
-                            isUnavailable = false,
-                            errorCategory = null,
-                        )
+                createSessionJob {
+                    try {
+                        val page = LoadSessionList(gateway).execute(sessionListRequest(request.query, request.cursor))
+                        updateCurrentSessionRequest(request.generation, request.query, request.cursor) { current ->
+                            current.copy(
+                                sessions =
+                                    mergeSessions(
+                                        current.sessions,
+                                        page.sessions.map { it.toSessionItemUiState() },
+                                    ),
+                                nextCursor = page.nextCursor,
+                                isLoadingMore = false,
+                                isStale = false,
+                                isUnavailable = false,
+                                errorCategory = null,
+                            )
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: GatewayException) {
+                        showSessionListFailure(request.generation, request.query, request.cursor, preserveSessions = true)
+                    } catch (_: Exception) {
+                        showSessionListFailure(request.generation, request.query, request.cursor, preserveSessions = true)
                     }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: GatewayException) {
-                    showSessionListFailure(request.generation, request.query, request.cursor)
-                } catch (_: Exception) {
-                    showSessionListFailure(request.generation, request.query, request.cursor)
                 }
             }
+        job.start()
     }
 
     private fun showCreateSession() {
@@ -393,7 +395,7 @@ class EntryStateHolder(
 
     private fun confirmCreateSession() {
         val gateway = sessionGateway ?: return
-        val request =
+        val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
                 val sessionList = state.sessionList ?: return
@@ -403,6 +405,11 @@ class EntryStateHolder(
                 val title = creation.titleDraft.trim().takeIf(String::isNotEmpty)
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
+                val request =
+                    CreateSessionRequest(
+                        context = SessionRequestContext(requestGeneration, query, cursor = null),
+                        title = title,
+                    )
                 _uiState.value =
                     state.copy(
                         sessionList =
@@ -414,77 +421,79 @@ class EntryStateHolder(
                                     ),
                             ),
                     )
-                CreateSessionRequest(
-                    context = SessionRequestContext(requestGeneration, query, cursor = null),
-                    title = title,
-                )
+                createSessionJob(gateway, request)
             }
-        sessionJob =
-            scope.launch {
-                var createdSession: Session? = null
-                try {
-                    createdSession = CreateSession(gateway).execute(request.title)
-                    val openedSession = OpenSession(gateway).execute(createdSession.id)
-                    val refreshedPage =
-                        try {
-                            LoadSessionList(gateway).execute(sessionListRequest(request.context.query, cursor = null))
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (_: Exception) {
-                            null
-                        }
-                    val openedSessionUiState =
-                        OpenSessionUiState(
-                            session = openedSession.session.toSessionItemUiState(),
-                            messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
-                        )
-                    updateCurrentSessionRequest(request.context.generation, request.context.query) { current ->
-                        current.copy(
-                            sessions =
-                                refreshedPage?.let { page ->
-                                    mergeSessions(
-                                        emptyList(),
-                                        page.sessions.map { it.toSessionItemUiState() },
-                                    )
-                                } ?: if (request.context.query.isBlank()) {
-                                    mergeSession(current.sessions, openedSession.session)
-                                } else {
-                                    current.sessions
-                                },
-                            nextCursor = refreshedPage?.nextCursor,
-                            isLoading = false,
-                            isRefreshing = false,
-                            isSearching = false,
-                            isLoadingMore = false,
-                            isStale = refreshedPage == null,
-                            isUnavailable = refreshedPage == null,
-                            errorCategory =
-                                if (refreshedPage == null) {
-                                    SessionListErrorCategory.GATEWAY_UNAVAILABLE
-                                } else {
-                                    null
-                                },
-                            createSession = null,
-                            openedSession = openedSessionUiState,
-                        )
+        job.start()
+    }
+
+    private fun createSessionJob(
+        gateway: SessionGatewayPort,
+        request: CreateSessionRequest,
+    ): Job =
+        createSessionJob {
+            var createdSession: Session? = null
+            try {
+                createdSession = CreateSession(gateway).execute(request.title)
+                val openedSession = OpenSession(gateway).execute(createdSession.id)
+                val refreshedPage =
+                    try {
+                        LoadSessionList(gateway).execute(sessionListRequest(request.context.query, cursor = null))
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        null
                     }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: GatewayException) {
-                    if (createdSession == null) {
-                        showCreateSessionFailure(request.context.generation, request.context.query)
-                    } else {
-                        showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
-                    }
-                } catch (_: Exception) {
-                    if (createdSession == null) {
-                        showCreateSessionFailure(request.context.generation, request.context.query)
-                    } else {
-                        showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
-                    }
+                val openedSessionUiState =
+                    OpenSessionUiState(
+                        session = openedSession.session.toSessionItemUiState(),
+                        messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
+                    )
+                updateCurrentSessionRequest(request.context.generation, request.context.query) { current ->
+                    current.copy(
+                        sessions =
+                            refreshedPage?.let { page ->
+                                mergeSessions(
+                                    emptyList(),
+                                    page.sessions.map { it.toSessionItemUiState() },
+                                )
+                            } ?: if (request.context.query.isBlank()) {
+                                mergeSession(current.sessions, openedSession.session)
+                            } else {
+                                current.sessions
+                            },
+                        nextCursor = refreshedPage?.nextCursor,
+                        isLoading = false,
+                        isRefreshing = false,
+                        isSearching = false,
+                        isLoadingMore = false,
+                        isStale = refreshedPage == null,
+                        isUnavailable = refreshedPage == null,
+                        errorCategory =
+                            if (refreshedPage == null) {
+                                SessionListErrorCategory.GATEWAY_UNAVAILABLE
+                            } else {
+                                null
+                            },
+                        createSession = null,
+                        openedSession = openedSessionUiState,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: GatewayException) {
+                if (createdSession == null) {
+                    showCreateSessionFailure(request.context.generation, request.context.query)
+                } else {
+                    showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
+                }
+            } catch (_: Exception) {
+                if (createdSession == null) {
+                    showCreateSessionFailure(request.context.generation, request.context.query)
+                } else {
+                    showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
                 }
             }
-    }
+        }
 
     private fun showCreateSessionFailure(
         requestGeneration: Long,
@@ -545,10 +554,11 @@ class EntryStateHolder(
         isSearching: Boolean,
         preserveSessions: Boolean,
     ) {
-        val request =
+        val job =
             synchronized(sessionRequestLock) {
                 val current = _uiState.value.sessionList ?: return
                 val requestGeneration = beginSessionRequest()
+                val request = SessionRequestContext(requestGeneration, query, cursor = null)
                 _uiState.value =
                     _uiState.value.copy(
                         sessionList =
@@ -561,40 +571,57 @@ class EntryStateHolder(
                                 isStale = if (preserveSessions) current.isStale else false,
                                 isUnavailable = false,
                                 errorCategory = null,
-                                nextCursor = null,
+                                nextCursor = if (preserveSessions) current.nextCursor else null,
                             ),
                     )
-                SessionRequestContext(requestGeneration, query, cursor = null)
-            }
-        sessionJob =
-            scope.launch {
-                try {
-                    val page = LoadSessionList(gateway).execute(sessionListRequest(request.query, request.cursor))
-                    updateCurrentSessionRequest(request.generation, request.query) { latest ->
-                        latest.copy(
-                            sessions =
-                                mergeSessions(
-                                    emptyList(),
-                                    page.sessions.map { it.toSessionItemUiState() },
-                                ),
-                            nextCursor = page.nextCursor,
-                            isLoading = false,
-                            isRefreshing = false,
-                            isSearching = false,
-                            isLoadingMore = false,
-                            isStale = false,
-                            isUnavailable = false,
-                            errorCategory = null,
-                        )
-                    }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: GatewayException) {
-                    showSessionListFailure(request.generation, request.query, cursor = null)
-                } catch (_: Exception) {
-                    showSessionListFailure(request.generation, request.query, cursor = null)
+                createSessionJob {
+                    loadFirstPage(gateway, request, preserveSessions)
                 }
             }
+        job.start()
+    }
+
+    private suspend fun loadFirstPage(
+        gateway: SessionGatewayPort,
+        request: SessionRequestContext,
+        preserveSessions: Boolean,
+    ) {
+        try {
+            val page = LoadSessionList(gateway).execute(sessionListRequest(request.query, request.cursor))
+            updateCurrentSessionRequest(request.generation, request.query) { latest ->
+                latest.copy(
+                    sessions =
+                        mergeSessions(
+                            emptyList(),
+                            page.sessions.map { it.toSessionItemUiState() },
+                        ),
+                    nextCursor = page.nextCursor,
+                    isLoading = false,
+                    isRefreshing = false,
+                    isSearching = false,
+                    isLoadingMore = false,
+                    isStale = false,
+                    isUnavailable = false,
+                    errorCategory = null,
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: GatewayException) {
+            showSessionListFailure(
+                request.generation,
+                request.query,
+                cursor = null,
+                preserveSessions = preserveSessions,
+            )
+        } catch (_: Exception) {
+            showSessionListFailure(
+                request.generation,
+                request.query,
+                cursor = null,
+                preserveSessions = preserveSessions,
+            )
+        }
     }
 
     private fun sessionListRequest(
@@ -613,6 +640,11 @@ class EntryStateHolder(
             sessionRequestGeneration
         }
     }
+
+    private fun createSessionJob(block: suspend CoroutineScope.() -> Unit): Job =
+        synchronized(sessionRequestLock) {
+            scope.launch(start = CoroutineStart.LAZY, block = block).also { sessionJob = it }
+        }
 
     private fun updateCurrentSessionRequest(
         requestGeneration: Long,
@@ -639,6 +671,7 @@ class EntryStateHolder(
         requestGeneration: Long,
         query: String,
         cursor: String?,
+        preserveSessions: Boolean,
     ) {
         updateCurrentSessionRequest(requestGeneration, query, cursor) { current ->
             current.copy(
@@ -647,7 +680,7 @@ class EntryStateHolder(
                 isSearching = false,
                 isLoadingMore = false,
                 isStale = true,
-                isUnavailable = true,
+                isUnavailable = !preserveSessions || current.sessions.isEmpty(),
                 errorCategory = SessionListErrorCategory.GATEWAY_UNAVAILABLE,
             )
         }
@@ -655,7 +688,7 @@ class EntryStateHolder(
 
     private fun openSession(sessionId: SessionId) {
         val gateway = sessionGateway ?: return
-        val request =
+        val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
                 val sessionList = state.sessionList ?: return
@@ -670,6 +703,7 @@ class EntryStateHolder(
 
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
+                val request = SessionRequestContext(requestGeneration, query, cursor = null)
                 _uiState.value =
                     state.copy(
                         sessionList =
@@ -678,31 +712,30 @@ class EntryStateHolder(
                                 errorCategory = null,
                             ),
                     )
-                SessionRequestContext(requestGeneration, query, cursor = null)
-            }
-        sessionJob =
-            scope.launch {
-                try {
-                    val openedSession = OpenSession(gateway).execute(sessionId)
-                    updateCurrentSessionRequest(request.generation, request.query) { current ->
-                        current.copy(
-                            openingSessionId = null,
-                            openedSession =
-                                OpenSessionUiState(
-                                    session = openedSession.session.toSessionItemUiState(),
-                                    messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
-                                ),
-                            errorCategory = null,
-                        )
+                createSessionJob {
+                    try {
+                        val openedSession = OpenSession(gateway).execute(sessionId)
+                        updateCurrentSessionRequest(request.generation, request.query) { current ->
+                            current.copy(
+                                openingSessionId = null,
+                                openedSession =
+                                    OpenSessionUiState(
+                                        session = openedSession.session.toSessionItemUiState(),
+                                        messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
+                                    ),
+                                errorCategory = null,
+                            )
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: GatewayException) {
+                        showSessionOpenFailure(request.generation, request.query)
+                    } catch (_: Exception) {
+                        showSessionOpenFailure(request.generation, request.query)
                     }
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: GatewayException) {
-                    showSessionOpenFailure(request.generation, request.query)
-                } catch (_: Exception) {
-                    showSessionOpenFailure(request.generation, request.query)
                 }
             }
+        job.start()
     }
 
     private fun showSessionOpenFailure(
