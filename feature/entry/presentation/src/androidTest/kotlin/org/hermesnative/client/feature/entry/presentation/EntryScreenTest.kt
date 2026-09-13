@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertHasClickAction
@@ -36,7 +37,7 @@ class EntryScreenTest {
             CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
                 HermesTheme {
                     EntryScreen(
-                        state = stateHolder.uiState.value,
+                        state = stateHolder.uiState.collectAsState().value,
                         onEvent = stateHolder::onEvent,
                     )
                 }

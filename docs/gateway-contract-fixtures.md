@@ -39,6 +39,13 @@ adapters must use these shapes and must not infer additional routes or fields.
 | Run status | `GET /v1/runs/{run_id}` |
 | Run observation | `GET /v1/runs/{run_id}/events` as Server-Sent Events |
 
+A Session history response contains `session_id`, an ordered `messages` array,
+and `next_cursor`. Each message must provide its Gateway `id`; `role` and
+`content` may be unavailable. When the Gateway provides them, the supported
+message fields `run_id`, `run_status`, `run_result`, and ISO-8601 `timestamp`
+remain attached to that message. The client does not derive IDs, results,
+statuses, or timestamps from other fields.
+
 The required capability identifiers are:
 
 - `session.list`

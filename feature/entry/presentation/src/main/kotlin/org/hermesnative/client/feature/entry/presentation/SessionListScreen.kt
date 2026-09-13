@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -28,6 +27,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 @Composable
 internal fun SessionListContent(
@@ -40,6 +43,9 @@ internal fun SessionListContent(
             state = openedSession,
             mutation = state.sessionMutations[openedSession.session.id],
             actionsEnabled = state.allowsSessionMutation(),
+            listRequestActive = state.hasActiveRequest,
+            listIsStale = state.isStale,
+            listErrorCategory = state.errorCategory,
             onEvent = onEvent,
             modifier = modifier,
         )
@@ -636,6 +642,9 @@ private fun SessionDetailContent(
     state: OpenSessionUiState,
     mutation: SessionMutationUiState?,
     actionsEnabled: Boolean,
+    listRequestActive: Boolean,
+    listIsStale: Boolean,
+    listErrorCategory: SessionListErrorCategory?,
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -659,6 +668,50 @@ private fun SessionDetailContent(
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = preview, style = MaterialTheme.typography.bodyLarge)
         }
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
+            enabled = !state.isRefreshing && !listRequestActive && mutation?.pendingAction == null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Refresh history")
+        }
+        if (state.isRefreshing) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Refreshing Session history…",
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        if (state.isStale || listIsStale) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text =
+                    if (state.isStale) {
+                        "The displayed Session history may be stale."
+                    } else {
+                        "The displayed Session data may be stale."
+                    },
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
+        state.errorCategory?.let { category ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = category.safeMessage,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
+        listErrorCategory?.let { category ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = category.safeMessage,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
         SessionActionControls(
             session = state.session,
             mutation = mutation,
@@ -673,21 +726,61 @@ private fun SessionDetailContent(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                itemsIndexed(
+                items(
                     items = state.messages,
-                    key = { index, message -> message.id ?: "message-$index" },
-                ) { _, message ->
-                    message.content?.takeIf(String::isNotBlank)?.let { content ->
-                        Text(
-                            text = content,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        )
-                    }
+                    key = { message -> message.id },
+                ) { message ->
+                    SessionMessageContent(message)
                 }
             }
         }
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedTextField(
+            value = state.composerText,
+            onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },
+            label = { Text("Message") },
+            placeholder = { Text("Write a message") },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
+
+@Composable
+private fun SessionMessageContent(message: SessionMessageUiState) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        message.role?.takeIf(String::isNotBlank)?.let { role ->
+            Text(text = "Role: $role")
+        }
+        message.content?.takeIf(String::isNotBlank)?.let { content ->
+            Text(text = content)
+        }
+        message.runResult?.let { result ->
+            Text(text = "Run result: $result")
+        }
+        message.runStatus?.let { status ->
+            Text(text = "Run status: ${status.stableRunStatusLabel()}")
+        }
+        message.timestamp?.let { timestamp ->
+            Text(text = "Timestamp: ${formatGatewayTimestamp(timestamp)}")
+        }
+    }
+}
+
+private fun String.stableRunStatusLabel(): String =
+    when (lowercase(Locale.ROOT)) {
+        "queued" -> "Queued"
+        "running", "starting", "in_progress" -> "Running"
+        "completed", "succeeded" -> "Completed"
+        "failed", "error" -> "Failed"
+        "cancelled", "canceled" -> "Cancelled"
+        else -> "Unavailable"
+    }
+
+private fun formatGatewayTimestamp(timestamp: java.time.Instant): String =
+    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
+        .withLocale(Locale.getDefault())
+        .withZone(ZoneId.systemDefault())
+        .format(timestamp)
 
 private fun SessionMutationAction.pendingMessage(): String =
     when (this) {

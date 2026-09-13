@@ -42,7 +42,7 @@ class DefaultGatewayClientTest {
                         response("sessions/list-response-page-1.json"),
                         response("sessions/create-response.json"),
                         response("sessions/open-response.json"),
-                        response("sessions/history-response.json"),
+                        response("sessions/history-response-populated.json"),
                         response("sessions/rename-response.json"),
                         response("sessions/delete-response.json"),
                         response("sessions/pin-response.json"),
@@ -59,7 +59,14 @@ class DefaultGatewayClientTest {
         assertEquals(1, client.listSessions().sessions.size)
         assertEquals(CREATED_SESSION_ID, client.createSession(null).id.value)
         assertEquals(sessionId, client.openSession(sessionId).id)
-        assertEquals(sessionId, client.loadSessionHistory(sessionId).sessionId)
+        val history = client.loadSessionHistory(sessionId)
+        assertEquals(sessionId, history.sessionId)
+        assertEquals(RUN_ID, history.messages.single().runId?.value)
+        assertEquals("completed", history.messages.single().runStatus)
+        assertNull(history.messages.single().role)
+        assertNull(history.messages.single().content)
+        assertNull(history.messages.single().runResult)
+        assertEquals("2026-09-08T20:00:00Z", history.messages.single().timestamp)
         assertEquals("Renamed session", client.renameSession(sessionId, "Renamed session").title)
         client.deleteSession(sessionId)
         assertTrue(client.pinSession(sessionId).pinned)

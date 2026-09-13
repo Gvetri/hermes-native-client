@@ -17,6 +17,7 @@ import org.hermesnative.client.feature.entry.application.DeleteSession
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.LoadSessionList
 import org.hermesnative.client.feature.entry.application.OpenSession
+import org.hermesnative.client.feature.entry.application.OpenedSession
 import org.hermesnative.client.feature.entry.application.PinSession
 import org.hermesnative.client.feature.entry.application.RenameSession
 import org.hermesnative.client.feature.entry.application.UnpinSession
@@ -105,6 +106,10 @@ sealed interface EntryUiEvent {
     ) : EntryUiEvent
 
     data object ReturnToSessionListClicked : EntryUiEvent
+
+    data class ComposerTextChanged(
+        val value: String,
+    ) : EntryUiEvent
 }
 
 enum class EntryErrorCategory(
@@ -174,6 +179,7 @@ class EntryStateHolder(
             is EntryUiEvent.CancelDeleteSessionClicked -> cancelDeleteSession(event.sessionId)
             is EntryUiEvent.SessionClicked -> openSession(event.sessionId)
             EntryUiEvent.ReturnToSessionListClicked -> returnToSessionList()
+            is EntryUiEvent.ComposerTextChanged -> updateComposerText(event.value)
         }
     }
 
@@ -262,13 +268,13 @@ class EntryStateHolder(
 
     private fun loadInitialSessions(gateway: SessionGatewayPort) {
         val sessionList = _uiState.value.sessionList ?: return
-        startFirstPageLoad(
+        createFirstPageLoadJob(
             gateway = gateway,
             query = sessionList.searchQuery,
             isRefreshing = false,
             isSearching = false,
             preserveSessions = false,
-        )
+        )?.start()
     }
 
     private fun updateSearchQuery(value: String) {
@@ -319,25 +325,108 @@ class EntryStateHolder(
 
     private fun refreshSessions() {
         val gateway = sessionGateway ?: return
-        synchronized(sessionRequestLock) {
-            val sessionList = _uiState.value.sessionList ?: return
-            if (
-                (sessionList.isLoading && !sessionList.isSearching) ||
-                sessionList.isRefreshing ||
-                sessionList.openingSessionId != null ||
-                sessionList.createSession != null ||
-                sessionList.hasPendingMutation
-            ) {
-                return
+        val job =
+            synchronized(sessionRequestLock) {
+                val sessionList = _uiState.value.sessionList ?: return@synchronized null
+                if (sessionList.openedSession != null) {
+                    refreshOpenedSession(gateway)
+                } else if (
+                    (sessionList.isLoading && !sessionList.isSearching) ||
+                    sessionList.isRefreshing ||
+                    sessionList.openingSessionId != null ||
+                    sessionList.createSession != null ||
+                    sessionList.hasPendingMutation
+                ) {
+                    null
+                } else {
+                    createFirstPageLoadJob(
+                        gateway = gateway,
+                        query = sessionList.searchQuery,
+                        isRefreshing = true,
+                        isSearching = false,
+                        preserveSessions = true,
+                    )
+                }
             }
+        job?.start()
+    }
 
-            startFirstPageLoad(
-                gateway = gateway,
-                query = sessionList.searchQuery,
-                isRefreshing = true,
-                isSearching = false,
-                preserveSessions = true,
-            )
+    private fun refreshOpenedSession(gateway: SessionGatewayPort): Job? =
+        synchronized(sessionRequestLock) {
+            val state = _uiState.value
+            val sessionList = state.sessionList ?: return@synchronized null
+            val openedSession = sessionList.openedSession ?: return@synchronized null
+            if (openedSession.isRefreshing || sessionList.hasActiveRequest) return@synchronized null
+
+            val requestGeneration = beginSessionRequest()
+            val request = SessionRequestContext(requestGeneration, sessionList.searchQuery, cursor = null)
+            _uiState.value =
+                state.copy(
+                    sessionList =
+                        sessionList.copy(
+                            openedSession =
+                                openedSession.copy(
+                                    isRefreshing = true,
+                                    errorCategory = null,
+                                ),
+                            errorCategory = null,
+                        ),
+                )
+            createSessionJob {
+                loadOpenedSession(gateway, request, openedSession.session.id)
+            }
+        }
+
+    private suspend fun loadOpenedSession(
+        gateway: SessionGatewayPort,
+        request: SessionRequestContext,
+        sessionId: SessionId,
+    ) {
+        try {
+            val openedSession = OpenSession(gateway).execute(sessionId)
+            updateCurrentSessionRequest(request.generation, request.query) { current ->
+                val previous = current.openedSession
+                if (previous == null) {
+                    current
+                } else {
+                    val authoritativeSession = openedSession.session.toSessionItemUiState()
+                    current.copy(
+                        sessions =
+                            current.sessions
+                                .map { item -> if (item.id == sessionId) authoritativeSession else item }
+                                .orderedSessions(),
+                        openedSession =
+                            openedSession.toOpenSessionUiState(
+                                composerText = previous.composerText,
+                            ),
+                        errorCategory = null,
+                    )
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: GatewayException) {
+            showOpenedSessionFailure(request.generation, request.query)
+        } catch (_: Exception) {
+            showOpenedSessionFailure(request.generation, request.query)
+        }
+    }
+
+    private fun showOpenedSessionFailure(
+        requestGeneration: Long,
+        query: String,
+    ) {
+        updateCurrentSessionRequest(requestGeneration, query) { current ->
+            current.openedSession?.let { openedSession ->
+                current.copy(
+                    openedSession =
+                        openedSession.copy(
+                            isRefreshing = false,
+                            isStale = true,
+                            errorCategory = SessionHistoryErrorCategory.GATEWAY_REQUEST_FAILED,
+                        ),
+                )
+            } ?: current
         }
     }
 
@@ -730,46 +819,48 @@ class EntryStateHolder(
         sessionId: SessionId,
         pinned: Boolean,
     ) {
-        synchronized(sessionRequestLock) {
-            val current = _uiState.value.sessionList ?: return
-            if (current.sessions.none { it.id == sessionId }) return
-            val mutation = current.sessionMutations[sessionId] ?: return
-            val updatedSessions =
-                current.sessions
-                    .map { item -> if (item.id == sessionId) item.copy(pinned = pinned) else item }
-                    .orderedSessions()
-            val remainingMutation =
-                mutation.copy(
-                    pendingAction = null,
-                    errorCategory = null,
-                    retryAction = null,
-                )
-            _uiState.value =
-                _uiState.value.copy(
-                    sessionList =
-                        current.copy(
-                            sessions = updatedSessions,
-                            openedSession =
-                                current.openedSession?.let { opened ->
-                                    if (opened.session.id == sessionId) {
-                                        opened.copy(session = opened.session.copy(pinned = pinned))
-                                    } else {
-                                        opened
-                                    }
-                                },
-                            sessionMutations = mutationMapAfter(sessionId, remainingMutation, current.sessionMutations),
-                        ),
-                )
-            sessionGateway?.let { gateway ->
-                startFirstPageLoad(
-                    gateway = gateway,
-                    query = current.searchQuery,
-                    isRefreshing = true,
-                    isSearching = false,
-                    preserveSessions = true,
-                )
+        val refreshJob =
+            synchronized(sessionRequestLock) {
+                val current = _uiState.value.sessionList ?: return@synchronized null
+                if (current.sessions.none { it.id == sessionId }) return@synchronized null
+                val mutation = current.sessionMutations[sessionId] ?: return@synchronized null
+                val updatedSessions =
+                    current.sessions
+                        .map { item -> if (item.id == sessionId) item.copy(pinned = pinned) else item }
+                        .orderedSessions()
+                val remainingMutation =
+                    mutation.copy(
+                        pendingAction = null,
+                        errorCategory = null,
+                        retryAction = null,
+                    )
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                sessions = updatedSessions,
+                                openedSession =
+                                    current.openedSession?.let { opened ->
+                                        if (opened.session.id == sessionId) {
+                                            opened.copy(session = opened.session.copy(pinned = pinned))
+                                        } else {
+                                            opened
+                                        }
+                                    },
+                                sessionMutations = mutationMapAfter(sessionId, remainingMutation, current.sessionMutations),
+                            ),
+                    )
+                sessionGateway?.let { gateway ->
+                    createFirstPageLoadJob(
+                        gateway = gateway,
+                        query = current.searchQuery,
+                        isRefreshing = true,
+                        isSearching = false,
+                        preserveSessions = true,
+                    )
+                }
             }
-        }
+        refreshJob?.start()
     }
 
     private fun showPinFailure(
@@ -906,30 +997,34 @@ class EntryStateHolder(
     }
 
     private fun removeConfirmedSession(sessionId: SessionId) {
-        synchronized(sessionRequestLock) {
-            val current = _uiState.value.sessionList ?: return
-            val shouldRefresh = current.nextCursor != null
-            _uiState.value =
-                _uiState.value.copy(
-                    sessionList =
-                        current.copy(
-                            sessions = current.sessions.filterNot { it.id == sessionId },
-                            openedSession = current.openedSession?.takeUnless { it.session.id == sessionId },
-                            sessionMutations = current.sessionMutations - sessionId,
-                        ),
-                )
-            if (shouldRefresh) {
-                sessionGateway?.let { gateway ->
-                    startFirstPageLoad(
-                        gateway = gateway,
-                        query = current.searchQuery,
-                        isRefreshing = true,
-                        isSearching = false,
-                        preserveSessions = true,
+        val refreshJob =
+            synchronized(sessionRequestLock) {
+                val current = _uiState.value.sessionList ?: return@synchronized null
+                val shouldRefresh = current.nextCursor != null
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                sessions = current.sessions.filterNot { it.id == sessionId },
+                                openedSession = current.openedSession?.takeUnless { it.session.id == sessionId },
+                                sessionMutations = current.sessionMutations - sessionId,
+                            ),
                     )
+                if (shouldRefresh) {
+                    sessionGateway?.let { gateway ->
+                        createFirstPageLoadJob(
+                            gateway = gateway,
+                            query = current.searchQuery,
+                            isRefreshing = true,
+                            isSearching = false,
+                            preserveSessions = true,
+                        )
+                    }
+                } else {
+                    null
                 }
             }
-        }
+        refreshJob?.start()
     }
 
     private fun mutationMapAfter(
@@ -999,11 +1094,7 @@ class EntryStateHolder(
                     } catch (_: Exception) {
                         null
                     }
-                val openedSessionUiState =
-                    OpenSessionUiState(
-                        session = openedSession.session.toSessionItemUiState(),
-                        messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
-                    )
+                val openedSessionUiState = openedSession.toOpenSessionUiState()
                 updateCurrentSessionRequest(request.context.generation, request.context.query) { current ->
                     current.copy(
                         sessions =
@@ -1103,45 +1194,42 @@ class EntryStateHolder(
         incoming: List<SessionItemUiState>,
     ): List<SessionItemUiState> = (existing + incoming).associateBy { it.id }.values.toList().orderedSessions()
 
-    private fun startFirstPageLoad(
+    private fun createFirstPageLoadJob(
         gateway: SessionGatewayPort,
         query: String,
         isRefreshing: Boolean,
         isSearching: Boolean,
         preserveSessions: Boolean,
-    ) {
-        val job =
-            synchronized(sessionRequestLock) {
-                val current = _uiState.value.sessionList ?: return
-                val requestGeneration = beginSessionRequest()
-                val request = SessionRequestContext(requestGeneration, query, cursor = null)
-                _uiState.value =
-                    _uiState.value.copy(
-                        sessionList =
-                            current.copy(
-                                sessions = if (preserveSessions) current.sessions else emptyList(),
-                                isLoading = !isRefreshing,
-                                isRefreshing = isRefreshing,
-                                isSearching = isSearching,
-                                isLoadingMore = false,
-                                isStale = if (preserveSessions) current.isStale else false,
-                                isUnavailable = false,
-                                errorCategory = null,
-                                nextCursor = if (preserveSessions) current.nextCursor else null,
-                                sessionMutations =
-                                    if (preserveSessions) {
-                                        unsentRenameDrafts(current.sessionMutations)
-                                    } else {
-                                        emptyMap()
-                                    },
-                            ),
-                    )
-                createSessionJob {
-                    loadFirstPage(gateway, request, preserveSessions)
-                }
+    ): Job? =
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return@synchronized null
+            val requestGeneration = beginSessionRequest()
+            val request = SessionRequestContext(requestGeneration, query, cursor = null)
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            sessions = if (preserveSessions) current.sessions else emptyList(),
+                            isLoading = !isRefreshing,
+                            isRefreshing = isRefreshing,
+                            isSearching = isSearching,
+                            isLoadingMore = false,
+                            isStale = if (preserveSessions) current.isStale else false,
+                            isUnavailable = false,
+                            errorCategory = null,
+                            nextCursor = if (preserveSessions) current.nextCursor else null,
+                            sessionMutations =
+                                if (preserveSessions) {
+                                    unsentRenameDrafts(current.sessionMutations)
+                                } else {
+                                    emptyMap()
+                                },
+                        ),
+                )
+            createSessionJob {
+                loadFirstPage(gateway, request, preserveSessions)
             }
-        job.start()
-    }
+        }
 
     private suspend fun loadFirstPage(
         gateway: SessionGatewayPort,
@@ -1305,11 +1393,7 @@ class EntryStateHolder(
                                 openingSessionId = null,
                                 isStale = false,
                                 isUnavailable = false,
-                                openedSession =
-                                    OpenSessionUiState(
-                                        session = authoritativeSession,
-                                        messages = openedSession.history.messages.map { it.toSessionMessageUiState() },
-                                    ),
+                                openedSession = openedSession.toOpenSessionUiState(),
                                 errorCategory = null,
                             )
                         }
@@ -1369,7 +1453,25 @@ class EntryStateHolder(
                 )
         }
     }
+
+    private fun updateComposerText(value: String) {
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            val opened = current.openedSession ?: return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList = current.copy(openedSession = opened.copy(composerText = value)),
+                )
+        }
+    }
 }
+
+private fun OpenedSession.toOpenSessionUiState(composerText: String = ""): OpenSessionUiState =
+    OpenSessionUiState(
+        session = session.toSessionItemUiState(),
+        messages = history.messages.map { it.toSessionMessageUiState() }.chronological(),
+        composerText = composerText,
+    )
 
 private data class SessionRequestContext(
     val generation: Long,

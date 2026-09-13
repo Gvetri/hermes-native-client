@@ -18,6 +18,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+        isCoreLibraryDesugaringEnabled = true
+    }
+
     buildFeatures {
         compose = true
     }
@@ -36,6 +42,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(project(":feature:entry:application"))
     implementation(project(":feature:entry:domain"))
+
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit4)

@@ -129,6 +129,7 @@ jobs:
   compose_test:
     name: api24-launch-themes
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -153,8 +154,12 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim
           disable-animations: true
           script: |
-            ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests --no-daemon
-            ./gradlew :app:verifyConnectedAndroidTests --no-daemon -Pandroid.testInstrumentationRunnerArguments.class=org.hermesnative.client.MainActivityTest,org.hermesnative.client.MainActivitySystemLightThemeTest,org.hermesnative.client.MainActivitySystemDarkThemeTest
+            set -eu
+            printf '%s\n' 'Starting presentation connected Android tests.'
+            ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests --no-daemon --console=plain --info
+            printf '%s\n' 'Presentation connected Android tests passed. Starting app connected Android tests.'
+            ./gradlew :app:verifyConnectedAndroidTests --no-daemon --console=plain --info -Pandroid.testInstrumentationRunnerArguments.class=org.hermesnative.client.MainActivityTest,org.hermesnative.client.MainActivitySystemLightThemeTest,org.hermesnative.client.MainActivitySystemDarkThemeTest
+            printf '%s\n' 'App connected Android tests passed.'
 
   quality-gate:
     name: quality-gate

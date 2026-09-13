@@ -375,27 +375,6 @@ class GatewaySessionFixtureIntegrationTest {
         assertTrue(behavior.requests.none { it.hasAuthorizationHeader })
     }
 
-    private class LoopbackFixtureTransport : GatewayTransport {
-        private val delegate = OkHttpGatewayTransport()
-
-        override fun execute(request: GatewayHttpRequest): GatewayHttpResponse = delegate.execute(toLoopbackRequest(request))
-
-        override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream = delegate.openEventStream(toLoopbackRequest(request))
-
-        private fun toLoopbackRequest(request: GatewayHttpRequest): GatewayHttpRequest {
-            val secureUrl = request.url.removePrefix("https://")
-            require(secureUrl.startsWith("127.0.0.1:")) {
-                "Fixture transport accepts only the loopback fixture endpoint."
-            }
-            return GatewayHttpRequest(
-                method = request.method,
-                url = "http://$secureUrl",
-                headers = request.headers.filterKeys { it != "Authorization" },
-                body = request.body,
-            )
-        }
-    }
-
     private fun behavior(sessions: List<SyntheticGatewaySession>): SyntheticGatewayBehavior =
         SyntheticGatewayBehavior(
             capabilities = requiredCapabilities + "client-manifest",
@@ -442,5 +421,26 @@ class GatewaySessionFixtureIntegrationTest {
         const val SERVER_A = "33333333-3333-4333-8333-333333333333"
         const val SERVER_B = "44444444-4444-4444-8444-444444444444"
         const val CREATED_SESSION = "55555555-5555-4555-8555-555555555555"
+    }
+}
+
+internal class LoopbackFixtureTransport : GatewayTransport {
+    private val delegate = OkHttpGatewayTransport()
+
+    override fun execute(request: GatewayHttpRequest): GatewayHttpResponse = delegate.execute(toLoopbackRequest(request))
+
+    override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream = delegate.openEventStream(toLoopbackRequest(request))
+
+    private fun toLoopbackRequest(request: GatewayHttpRequest): GatewayHttpRequest {
+        val secureUrl = request.url.removePrefix("https://")
+        require(secureUrl.startsWith("127.0.0.1:")) {
+            "Fixture transport accepts only the loopback fixture endpoint."
+        }
+        return GatewayHttpRequest(
+            method = request.method,
+            url = "http://$secureUrl",
+            headers = request.headers.filterKeys { it != "Authorization" },
+            body = request.body,
+        )
     }
 }

@@ -64,9 +64,14 @@ internal object GatewayJsonParser {
         operation: String,
         root: JsonObject,
     ): SessionHistory {
+        val messageIds = mutableSetOf<String>()
         val messages =
             requiredArray(root, "messages", operation).mapIndexed { index, value ->
-                parseMessage(value, "$operation.messages[$index]")
+                parseMessage(value, "$operation.messages[$index]").also { message ->
+                    if (!messageIds.add(message.id)) {
+                        invalid(operation, "field 'messages[$index].id' duplicates another message ID")
+                    }
+                }
             }
         return SessionHistory(
             sessionId = SessionId(requiredNonBlankString(root, "session_id", operation)),
@@ -133,9 +138,13 @@ internal object GatewayJsonParser {
     ): GatewayHistoryMessage {
         val message = value as? JsonObject ?: invalid(operation, "message must be a JSON object")
         return GatewayHistoryMessage(
-            id = optionalString(message, "id", operation),
+            id = requiredNonBlankString(message, "id", operation),
             role = optionalString(message, "role", operation),
             content = optionalString(message, "content", operation),
+            runId = optionalString(message, "run_id", operation)?.takeIf(String::isNotBlank)?.let(::RunId),
+            runStatus = optionalString(message, "run_status", operation),
+            runResult = optionalString(message, "run_result", operation),
+            timestamp = optionalString(message, "timestamp", operation),
         )
     }
 
