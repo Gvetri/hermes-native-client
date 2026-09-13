@@ -748,6 +748,9 @@ private fun SessionDetailContent(
 @Composable
 private fun SessionMessageContent(message: SessionMessageUiState) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        message.role?.takeIf(String::isNotBlank)?.let { role ->
+            Text(text = "Role: $role")
+        }
         message.content?.takeIf(String::isNotBlank)?.let { content ->
             Text(text = content)
         }

@@ -45,6 +45,11 @@ class SessionHistoryScreenTest {
                                                         runResult = "Done",
                                                         timestamp = java.time.Instant.parse("2026-09-08T20:00:00Z"),
                                                     ),
+                                                    SessionMessageUiState(
+                                                        id = "message-2",
+                                                        role = "assistant",
+                                                        content = "Answer",
+                                                    ),
                                                 ),
                                         ),
                                 ),
@@ -55,6 +60,9 @@ class SessionHistoryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Run this").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Answer").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Role: user").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Role: assistant").assertIsDisplayed()
         composeTestRule.onNodeWithText("Run result: Done").assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Completed").assertIsDisplayed()
         composeTestRule.onNode(hasText("Timestamp:", substring = true)).assertIsDisplayed()
