@@ -214,6 +214,45 @@ class GatewaySessionFixtureIntegrationTest {
     }
 
     @Test
+    fun real_client_executes_session_mutations_and_applies_only_confirmed_gateway_state() {
+        val behavior = behavior(listOf(session(SERVER_A, "Initial title", "Initial preview", pinned = false)))
+
+        fixture(behavior).execute { context ->
+            val client = client(context)
+            behavior.requests.clear()
+
+            client.discoverCapabilities()
+            val listed = LoadSessionList(client).execute()
+            val renamed = client.renameSession(SessionId(SERVER_A), "Confirmed title")
+            val pinned = client.pinSession(SessionId(SERVER_A))
+            val unpinned = client.unpinSession(SessionId(SERVER_A))
+            client.deleteSession(SessionId(SERVER_A))
+
+            assertEquals("Initial title", listed.sessions.single().title)
+            assertEquals("Confirmed title", renamed.title)
+            assertTrue(pinned.pinned)
+            assertFalse(unpinned.pinned)
+            assertTrue(behavior.sessions.isEmpty())
+            assertEquals(
+                listOf(
+                    "GET:/v1/capabilities",
+                    "GET:/v1/sessions",
+                    "PATCH:/v1/sessions/$SERVER_A",
+                    "POST:/v1/sessions/$SERVER_A/pin",
+                    "DELETE:/v1/sessions/$SERVER_A/pin",
+                    "DELETE:/v1/sessions/$SERVER_A",
+                ),
+                behavior.requests.map { "${it.method}:${it.path}" },
+            )
+            assertEquals("{\"title\":\"Confirmed title\"}", behavior.requests[2].body)
+            assertEquals(null, behavior.requests[3].body)
+            assertEquals(null, behavior.requests[4].body)
+            assertEquals(null, behavior.requests[5].body)
+            assertNoCredentials(behavior)
+        }
+    }
+
+    @Test
     fun refresh_reads_the_first_page_updates_fixture_metadata_and_is_repeat_safe() {
         val behavior = behavior(listOf(session(SERVER_A, "Initial title", "Initial preview", pinned = false)))
 

@@ -57,6 +57,18 @@ class SyntheticGatewayBehavior(
     @Volatile
     var sessionPageSize: Int? = null
 
+    @Volatile
+    var failNextSessionRename: Boolean = false
+
+    @Volatile
+    var failNextSessionDelete: Boolean = false
+
+    @Volatile
+    var failNextSessionPin: Boolean = false
+
+    @Volatile
+    var failNextSessionUnpin: Boolean = false
+
     val createdSessionId: String = "55555555-5555-4555-8555-555555555555"
 }
 
@@ -233,12 +245,7 @@ class LocalSyntheticGatewayProcess private constructor(
             exchange: HttpExchange,
             behavior: SyntheticGatewayBehavior,
         ) {
-            recordRequest(exchange, behavior)
-            if (exchange.requestMethod != "GET") {
-                respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
-                return
-            }
-
+            val body = recordRequest(exchange, behavior)
             val resource = exchange.requestURI.path.removePrefix("/v1/sessions/")
             val segments = resource.split('/')
             val sessionId = segments.firstOrNull().orEmpty()
@@ -248,12 +255,73 @@ class LocalSyntheticGatewayProcess private constructor(
                 return
             }
 
-            when {
-                segments.size == 1 -> respond(exchange, 200, "{\"session\":${sessionJson(session)}}")
-                segments[1] == "history" -> respond(exchange, 200, historyJson(session))
-                else -> respond(exchange, 404, "{\"error\":\"not-found\"}")
+            when (exchange.requestMethod) {
+                "GET" ->
+                    when {
+                        segments.size == 1 -> respond(exchange, 200, "{\"session\":${sessionJson(session)}}")
+                        segments[1] == "history" -> respond(exchange, 200, historyJson(session))
+                        else -> respond(exchange, 404, "{\"error\":\"not-found\"}")
+                    }
+                "PATCH" -> {
+                    if (segments.size != 1) {
+                        respond(exchange, 404, "{\"error\":\"not-found\"}")
+                    } else if (behavior.failNextSessionRename) {
+                        behavior.failNextSessionRename = false
+                        respond(exchange, 503, "{\"error\":\"synthetic-rename-failure\"}")
+                    } else {
+                        val renamed = session.copy(title = parseCreateTitle(body))
+                        replaceSession(behavior, renamed)
+                        respond(exchange, 200, "{\"session\":${sessionJson(renamed)}}")
+                    }
+                }
+                "POST" -> {
+                    if (segments.size != 2 || segments[1] != "pin") {
+                        respond(exchange, 404, "{\"error\":\"not-found\"}")
+                    } else if (behavior.failNextSessionPin) {
+                        behavior.failNextSessionPin = false
+                        respond(exchange, 503, "{\"error\":\"synthetic-pin-failure\"}")
+                    } else {
+                        val pinned = session.copy(pinned = true)
+                        replaceSession(behavior, pinned)
+                        respond(exchange, 200, pinJson(pinned))
+                    }
+                }
+                "DELETE" ->
+                    when {
+                        segments.size == 2 && segments[1] == "pin" -> {
+                            if (behavior.failNextSessionUnpin) {
+                                behavior.failNextSessionUnpin = false
+                                respond(exchange, 503, "{\"error\":\"synthetic-unpin-failure\"}")
+                            } else {
+                                val unpinned = session.copy(pinned = false)
+                                replaceSession(behavior, unpinned)
+                                respond(exchange, 200, pinJson(unpinned))
+                            }
+                        }
+                        segments.size == 1 -> {
+                            if (behavior.failNextSessionDelete) {
+                                behavior.failNextSessionDelete = false
+                                respond(exchange, 503, "{\"error\":\"synthetic-delete-failure\"}")
+                            } else {
+                                behavior.sessions.removeIf { it.id == sessionId }
+                                respond(exchange, 204, "")
+                            }
+                        }
+                        else -> respond(exchange, 404, "{\"error\":\"not-found\"}")
+                    }
+                else -> respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
             }
         }
+
+        private fun replaceSession(
+            behavior: SyntheticGatewayBehavior,
+            session: SyntheticGatewaySession,
+        ) {
+            val index = behavior.sessions.indexOfFirst { it.id == session.id }
+            if (index >= 0) behavior.sessions[index] = session
+        }
+
+        private fun pinJson(session: SyntheticGatewaySession): String = "{\"session_id\":${quote(session.id)},\"pinned\":${session.pinned}}"
 
         private fun sessionJson(session: SyntheticGatewaySession): String =
             buildString {

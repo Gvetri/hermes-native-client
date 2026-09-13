@@ -89,12 +89,13 @@ class OkHttpGatewayTransport(
         val builder = Request.Builder().url(request.url)
         request.headers.forEach { (name, value) -> builder.header(name, value) }
         val body = request.body?.toRequestBody(JSON_MEDIA_TYPE)
-        val requestBody = if (request.method in METHODS_WITHOUT_BODY) null else body
+        val requestBody = if (request.method in METHODS_WITHOUT_BODY) null else body ?: EMPTY_REQUEST_BODY
         return builder.method(request.method, requestBody).build()
     }
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        val EMPTY_REQUEST_BODY = "".toRequestBody(JSON_MEDIA_TYPE)
         val METHODS_WITHOUT_BODY = setOf("GET", "DELETE", "HEAD")
     }
 }
