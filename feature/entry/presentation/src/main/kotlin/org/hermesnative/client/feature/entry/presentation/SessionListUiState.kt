@@ -1,8 +1,10 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
+import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionId
+import java.time.Instant
 
 enum class SessionListErrorCategory(
     val safeMessage: String,
@@ -47,14 +49,28 @@ data class SessionItemUiState(
 )
 
 data class SessionMessageUiState(
-    val id: String?,
+    val id: String,
     val role: String?,
     val content: String?,
+    val runId: RunId? = null,
+    val runStatus: String? = null,
+    val runResult: String? = null,
+    val timestamp: Instant? = null,
 )
+
+enum class SessionHistoryErrorCategory(
+    val safeMessage: String,
+) {
+    GATEWAY_REQUEST_FAILED("Session history could not be refreshed. The current content is preserved."),
+}
 
 data class OpenSessionUiState(
     val session: SessionItemUiState,
     val messages: List<SessionMessageUiState>,
+    val composerText: String = "",
+    val isRefreshing: Boolean = false,
+    val isStale: Boolean = false,
+    val errorCategory: SessionHistoryErrorCategory? = null,
 )
 
 data class SessionCreationUiState(
@@ -102,15 +118,20 @@ data class SessionListUiState(
         get() = sessionMutations.values.any { it.pendingAction != null }
 }
 
+internal val SessionListUiState.hasActiveRequest: Boolean
+    get() =
+        isLoading ||
+            isRefreshing ||
+            isLoadingMore ||
+            isSearching ||
+            openingSessionId != null ||
+            createSession != null ||
+            hasPendingMutation
+
 internal fun SessionListUiState.allowsSessionMutation(): Boolean =
-    !isLoading &&
-        !isRefreshing &&
-        !isLoadingMore &&
-        !isSearching &&
+    !hasActiveRequest &&
         !isUnavailable &&
-        !hasPendingMutation &&
-        openingSessionId == null &&
-        createSession == null
+        openedSession?.isRefreshing != true
 
 internal fun Session.toSessionItemUiState(): SessionItemUiState =
     SessionItemUiState(
@@ -126,4 +147,25 @@ internal fun GatewayHistoryMessage.toSessionMessageUiState(): SessionMessageUiSt
         id = id,
         role = role,
         content = content,
+        runId = runId,
+        runStatus = runStatus,
+        runResult = runResult,
+        timestamp = timestamp?.let { runCatching { Instant.parse(it) }.getOrNull() },
     )
+
+internal fun List<SessionMessageUiState>.chronological(): List<SessionMessageUiState> {
+    val timestamped =
+        filter { it.timestamp != null }
+            .sortedBy { requireNotNull(it.timestamp) }
+    if (timestamped.size == size) return timestamped
+    if (timestamped.isEmpty()) return this
+
+    var timestampedIndex = 0
+    return map { message ->
+        if (message.timestamp == null) {
+            message
+        } else {
+            timestamped[timestampedIndex++]
+        }
+    }
+}

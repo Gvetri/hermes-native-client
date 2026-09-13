@@ -34,9 +34,13 @@ data class SessionPage(
 )
 
 data class GatewayHistoryMessage(
-    val id: String?,
+    val id: String,
     val role: String?,
     val content: String?,
+    val runId: RunId? = null,
+    val runStatus: String? = null,
+    val runResult: String? = null,
+    val timestamp: String? = null,
 )
 
 data class SessionHistory(

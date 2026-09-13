@@ -1,5 +1,9 @@
 package org.hermesnative.client.fixture.contract
 
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.hermesnative.client.fixture.PinnedFixtureDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -93,6 +97,7 @@ class ContractFixtureParserTest {
         val openResponse = parseJson("sessions/open-response.json")
         val historyRequest = parseJson("sessions/history-request.json")
         val historyResponse = parseJson("sessions/history-response.json")
+        val populatedHistoryResponse = parseJson("sessions/history-response-populated.json")
         val renameRequest = parseJson("sessions/rename-request.json")
         val renameResponse = parseJson("sessions/rename-response.json")
         val deleteRequest = parseJson("sessions/delete-request.json")
@@ -126,6 +131,15 @@ class ContractFixtureParserTest {
         assertEquals(200, historyResponse.requiredInt("response.status"))
         assertEquals(SESSION_ID, historyResponse.requiredString("response.body.session_id"))
         assertEquals(0, historyResponse.requiredArray("response.body.messages").size)
+        val populatedMessage =
+            populatedHistoryResponse.root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!
+                .jsonArray.single().jsonObject
+        assertEquals(RUN_ID, populatedMessage["run_id"]!!.jsonPrimitive.content)
+        assertEquals("completed", populatedMessage["run_status"]!!.jsonPrimitive.content)
+        assertEquals(JsonNull, populatedMessage["role"])
+        assertEquals(JsonNull, populatedMessage["content"])
+        assertEquals(JsonNull, populatedMessage["run_result"])
+        assertEquals("2026-09-08T20:00:00Z", populatedMessage["timestamp"]!!.jsonPrimitive.content)
 
         assertRequest(renameRequest, "PATCH", "/v1/sessions/$SESSION_ID")
         assertEquals("Renamed session", renameRequest.requiredString("request.body.title"))

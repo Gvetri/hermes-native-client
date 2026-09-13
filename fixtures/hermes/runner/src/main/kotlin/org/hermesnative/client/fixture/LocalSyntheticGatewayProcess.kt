@@ -16,8 +16,12 @@ import java.util.concurrent.TimeUnit
 
 data class SyntheticGatewayMessage(
     val id: String,
-    val role: String,
-    val content: String,
+    val role: String?,
+    val content: String?,
+    val runId: String? = null,
+    val runStatus: String? = null,
+    val runResult: String? = null,
+    val timestamp: String? = null,
 )
 
 data class SyntheticGatewaySession(
@@ -352,9 +356,13 @@ class LocalSyntheticGatewayProcess private constructor(
                 append("{\"id\":")
                 append(quote(message.id))
                 append(",\"role\":")
-                append(quote(message.role))
+                append(message.role.jsonValue())
                 append(",\"content\":")
-                append(quote(message.content))
+                append(message.content.jsonValue())
+                message.runId?.let { append(",\"run_id\":${quote(it)}") }
+                message.runStatus?.let { append(",\"run_status\":${quote(it)}") }
+                message.runResult?.let { append(",\"run_result\":${quote(it)}") }
+                message.timestamp?.let { append(",\"timestamp\":${quote(it)}") }
                 append('}')
             }
 
