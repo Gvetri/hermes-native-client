@@ -538,7 +538,14 @@ private fun RenameSessionContent(
             enabled = enabled && !state.isSubmitting,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text(text = if (state.errorCategory == null) "Confirm Rename Session" else "Try again")
+            Text(
+                text =
+                    if (state.errorCategory == SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED) {
+                        "Try again"
+                    } else {
+                        "Confirm Rename Session"
+                    },
+            )
         }
         Spacer(modifier = Modifier.height(4.dp))
         OutlinedButton(

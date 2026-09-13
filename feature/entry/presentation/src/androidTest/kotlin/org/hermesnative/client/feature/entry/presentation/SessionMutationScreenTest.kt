@@ -112,7 +112,36 @@ class SessionMutationScreenTest {
         }
 
         composeTestRule.onNodeWithText(SessionRenameErrorCategory.EMPTY_TITLE.safeMessage).assertIsDisplayed()
-        composeTestRule.onNodeWithText("Try again").assertHasClickAction()
+        composeTestRule.onNodeWithText("Confirm Rename Session").assertHasClickAction()
+    }
+
+    @Test
+    fun rename_control_character_validation_keeps_the_confirmation_label() {
+        val sessionId = SessionId("session-one")
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        connectedState(
+                            session = session(sessionId, "Current title"),
+                            mutation =
+                                SessionMutationUiState(
+                                    rename =
+                                        SessionRenameUiState(
+                                            titleDraft = "Draft\nTitle",
+                                            errorCategory = SessionRenameErrorCategory.CONTROL_CHARACTER,
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule
+            .onNodeWithText(SessionRenameErrorCategory.CONTROL_CHARACTER.safeMessage)
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Confirm Rename Session").assertHasClickAction()
     }
 
     @Test
