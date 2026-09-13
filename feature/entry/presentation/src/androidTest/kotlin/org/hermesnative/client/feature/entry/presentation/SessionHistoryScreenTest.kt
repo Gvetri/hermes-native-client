@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.SessionId
@@ -59,13 +60,13 @@ class SessionHistoryScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Run this").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Answer").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Role: user").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Role: assistant").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Run result: Done").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Run status: Completed").assertIsDisplayed()
-        composeTestRule.onNode(hasText("Timestamp:", substring = true)).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run this").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Role: user").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run result: Done").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run status: Completed").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNode(hasText("Timestamp:", substring = true)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Answer").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Role: assistant").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Message").assertIsDisplayed().assertIsEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsDisplayed().assertIsEnabled()
     }
