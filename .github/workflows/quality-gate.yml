@@ -154,7 +154,7 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             printf '%s\n' 'Starting presentation connected Android tests.'
             ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests --no-daemon --console=plain --info
             printf '%s\n' 'Presentation connected Android tests passed. Starting app connected Android tests.'
