@@ -4,11 +4,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -789,9 +791,18 @@ class EntryScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Partial answer").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Run state: Running").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Partial answer")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Streaming response…")
+            .performScrollTo()
+            .assertIsDisplayed()
+        val runStateNodes = composeTestRule.onAllNodesWithText("Run state: Running")
+        runStateNodes.assertCountEquals(2)
+        runStateNodes[0].assertIsDisplayed()
+        runStateNodes[1].assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: running").assertDoesNotExist()
     }
 }
