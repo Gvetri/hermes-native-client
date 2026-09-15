@@ -1,6 +1,8 @@
 package org.hermesnative.client.buildlogic
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -126,6 +128,54 @@ class QualityGateConfigurationTest {
             "The wrapper must redact Authorization values independent of authentication scheme.",
             evidenceScript.contains("authorization\\s*[:=]"),
         )
+    }
+
+    @Test
+    fun evidence_wrapper_redacts_quoted_json_credentials() {
+        val tempDir = Files.createTempDirectory("android-test-evidence-test")
+        try {
+            val evidenceDir = tempDir.resolve("artifacts/android-test-evidence")
+            Files.createDirectories(evidenceDir)
+            val pendingMarker = tempDir.resolve("artifacts/android-test-evidence-redaction-pending")
+            Files.writeString(pendingMarker, "pending")
+            Files.writeString(evidenceDir.resolve("android-test-start-epoch.txt"), "0")
+
+            val fakeGradle = tempDir.resolve("gradlew")
+            Files.writeString(
+                fakeGradle,
+                """
+                    #!/usr/bin/env bash
+                    printf '%s' '{"token":"token-secret","authToken":"auth-secret","access_token":"access-secret"}'
+                    exit 17
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeGradle, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val process =
+                ProcessBuilder("bash", repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").absolutePath)
+                    .directory(tempDir.toFile())
+            process.environment()["GITHUB_WORKSPACE"] = tempDir.toString()
+            process.environment()["ANDROID_TEST_TIMEOUT_SECONDS"] = "30"
+            process.redirectErrorStream(true)
+            val startedProcess = process.start()
+            startedProcess.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = startedProcess.waitFor()
+
+            assertEquals(17, exitCode)
+            val sanitizedOutput = Files.readString(evidenceDir.resolve("runner-output.log"))
+            listOf("token-secret", "auth-secret", "access-secret").forEach { secret ->
+                assertTrue("The sanitized output must not contain $secret.", !sanitizedOutput.contains(secret))
+            }
+            listOf("token", "authToken", "access_token").forEach { key ->
+                assertTrue(
+                    "The sanitized output must redact the $key value.",
+                    sanitizedOutput.contains("\"$key\":\"<redacted>\""),
+                )
+            }
+            assertTrue("The sanitization marker must be removed after success.", !Files.exists(pendingMarker))
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
     }
 
     @Test
