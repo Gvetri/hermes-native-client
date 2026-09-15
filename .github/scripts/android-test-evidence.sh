@@ -43,7 +43,7 @@ if b"\x00" in raw_content:
 content = raw_content.decode("utf-8", errors="replace")
 
 patterns = (
-    (re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+"), r"\1<redacted>"),
+    (re.compile(r"(?i)(authorization\s*[:=]\s*)[^\r\n]+"), r"\1<redacted>"),
     (
         re.compile(
             r"(?i)((?:token|password|secret|api[_-]?key|access[_-]?token|client[_-]?secret|private[_-]?key)\s*[=:]\s*)[^\s,;]+"

@@ -114,6 +114,10 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must identify installation failures.", evidenceScript.contains("installation_failure"))
         assertTrue("The wrapper must identify emulator failures.", evidenceScript.contains("emulator_failure"))
         assertTrue("The wrapper must redact sensitive values.", evidenceScript.contains("<redacted>"))
+        assertTrue(
+            "The wrapper must redact Authorization values independent of authentication scheme.",
+            evidenceScript.contains("authorization\\s*[:=]"),
+        )
     }
 
     @Test
