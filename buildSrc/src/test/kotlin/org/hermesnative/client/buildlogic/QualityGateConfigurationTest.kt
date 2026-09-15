@@ -120,6 +120,7 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must identify emulator failures.", evidenceScript.contains("emulator_failure"))
         assertTrue("The wrapper must redact sensitive values.", evidenceScript.contains("<redacted>"))
         assertTrue("The wrapper must redact quoted JSON sensitive values.", evidenceScript.contains("sensitive_key"))
+        assertTrue("The wrapper must redact bare authentication schemes.", evidenceScript.contains("bearer|basic"))
         assertTrue("The wrapper must bound cleanup commands.", evidenceScript.contains("run_cleanup_command"))
         assertTrue("The wrapper must bound total cleanup time.", evidenceScript.contains("cleanup_budget_seconds"))
         assertTrue("The wrapper must ignore cancellation signals during cleanup.", evidenceScript.contains("trap '' TERM INT"))
@@ -148,6 +149,7 @@ class QualityGateConfigurationTest {
                 fakeGradle,
                 """
                     #!/usr/bin/env bash
+                    printf '%s\n' 'Bearer bearer-secret Basic basic-secret'
                     printf '%s' '{"token":"escaped-prefix\"escaped-secret","authToken":"auth-secret","access_token":"access-secret"}'
                     exit 17
                 """.trimIndent(),
@@ -178,9 +180,11 @@ class QualityGateConfigurationTest {
 
             assertEquals(17, exitCode)
             val sanitizedOutput = Files.readString(evidenceDir.resolve("runner-output.log"))
-            listOf("escaped-secret", "auth-secret", "access-secret").forEach { secret ->
+            listOf("escaped-secret", "auth-secret", "access-secret", "bearer-secret", "basic-secret").forEach { secret ->
                 assertTrue("The sanitized output must not contain $secret.", !sanitizedOutput.contains(secret))
             }
+            assertTrue("Bare Bearer credentials must be redacted.", sanitizedOutput.contains("Bearer <redacted>"))
+            assertTrue("Bare Basic credentials must be redacted.", sanitizedOutput.contains("Basic <redacted>"))
             listOf("token", "authToken", "access_token").forEach { key ->
                 assertTrue(
                     "The sanitized output must redact the $key value.",
