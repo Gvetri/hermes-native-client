@@ -89,7 +89,6 @@ try:
 except OSError:
     raise SystemExit(3)
 PY
-    status=$?
     return "$status"
 }
 
