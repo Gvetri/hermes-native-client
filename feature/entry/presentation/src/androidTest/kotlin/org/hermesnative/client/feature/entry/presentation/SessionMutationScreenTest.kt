@@ -3,10 +3,12 @@ package org.hermesnative.client.feature.entry.presentation
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
@@ -43,7 +45,11 @@ class SessionMutationScreenTest {
         composeTestRule.onNodeWithText("Rename Session").assertIsDisplayed()
         composeTestRule.onNodeWithText("New Session title").assertIsDisplayed()
         composeTestRule.onNodeWithText("Confirm Rename Session").assertHasClickAction().performClick()
-        composeTestRule.onNodeWithText("Cancel Rename").assertHasClickAction().performClick()
+        composeTestRule
+            .onNodeWithText("Cancel Rename")
+            .performScrollTo()
+            .assertHasClickAction()
+            .performClick()
 
         assertEquals(
             listOf(
@@ -111,7 +117,10 @@ class SessionMutationScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText(SessionRenameErrorCategory.EMPTY_TITLE.safeMessage).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(SessionRenameErrorCategory.EMPTY_TITLE.safeMessage)
+            .performScrollTo()
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText("Confirm Rename Session").assertHasClickAction()
     }
 
@@ -140,6 +149,7 @@ class SessionMutationScreenTest {
 
         composeTestRule
             .onNodeWithText(SessionRenameErrorCategory.CONTROL_CHARACTER.safeMessage)
+            .performScrollTo()
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Confirm Rename Session").assertHasClickAction()
     }
@@ -171,6 +181,7 @@ class SessionMutationScreenTest {
 
         composeTestRule
             .onNodeWithText(SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED.safeMessage)
+            .performScrollTo()
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Try again").assertHasClickAction().performClick()
         assertEquals(listOf(EntryUiEvent.ConfirmRenameSessionClicked(sessionId)), events)
@@ -200,6 +211,7 @@ class SessionMutationScreenTest {
 
         composeTestRule
             .onNodeWithText(SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED.safeMessage)
+            .performScrollTo()
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Try again").assertHasClickAction().performClick()
         assertEquals(listOf(EntryUiEvent.ConfirmDeleteSessionClicked(sessionId)), events)
@@ -230,7 +242,11 @@ class SessionMutationScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Second").assertIsNotEnabled()
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        composeTestRule
+            .onNodeWithText("Second")
+            .performScrollTo()
+            .assertIsNotEnabled()
     }
 
     @Test

@@ -3,10 +3,12 @@ package org.hermesnative.client.feature.entry.presentation
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.SessionId
@@ -65,6 +67,7 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Run result: Done").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Completed").performScrollTo().assertIsDisplayed()
         composeTestRule.onNode(hasText("Timestamp:", substring = true)).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
         composeTestRule.onNodeWithText("Answer").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Role: assistant").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Message").assertIsDisplayed().assertIsEnabled()
@@ -175,7 +178,10 @@ class SessionHistoryScreenTest {
             }
         }
 
-        composeTestRule.onNodeWithText("Preserved content").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Preserved content")
+            .performScrollTo()
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText("Preserved draft").assertIsDisplayed()
         composeTestRule.onNodeWithText("The displayed Session history may be stale.").assertIsDisplayed()
         composeTestRule
