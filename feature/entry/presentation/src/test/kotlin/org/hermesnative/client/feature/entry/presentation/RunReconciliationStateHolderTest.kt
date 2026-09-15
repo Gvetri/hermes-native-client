@@ -435,16 +435,83 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun confirmed_reconciliation_clears_send_failure_before_reopen() {
+        val session = session()
+        val activeRun = Run(RunId("run-2"), session.id, "running")
+        val terminalRun = activeRun.copy(status = "succeeded")
+        val activeHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("active", "assistant", "Running", activeRun.id, "running")),
+                null,
+            )
+        val terminalHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("terminal", "assistant", "Succeeded", terminalRun.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(activeHistory)
+                histories.add(terminalHistory)
+                histories.add(terminalHistory)
+                statuses.add(terminalRun)
+                failRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Failed first attempt"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            }
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    it.sessionList?.openedSession?.sendErrorCategory == null &&
+                    gateway.statusRequests.size == 1
+            }
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            awaitState(holder) { it.sessionList?.openedSession == null }
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRun?.id == terminalRun.id &&
+                    it.sessionList?.openedSession?.sendErrorCategory == null
+            }
+            assertEquals(1, gateway.runRequests.size)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun terminal_run_without_matching_history_closes_observer_and_keeps_send_disabled() {
         val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")
+        val otherRun = Run(RunId("run-2"), session.id, "succeeded")
         val observation = BlockingObservation()
+        val otherHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("other", "assistant", "Other result", otherRun.id, "succeeded")),
+                null,
+            )
         val gateway =
             FakeGateway(session).apply {
                 histories.add(SessionHistory(session.id, emptyList(), null))
                 histories.add(SessionHistory(session.id, emptyList(), null))
                 histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(otherHistory)
+                histories.add(SessionHistory(session.id, emptyList(), null))
                 statuses.add(run.copy(status = "cancelled"))
+                statuses.add(run.copy(status = "canceled"))
                 runs.add(run)
                 observations.add(observation)
             }
@@ -463,9 +530,20 @@ class RunReconciliationStateHolderTest {
             }
             assertTrue(observation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            awaitState(holder) { it.sessionList?.openedSession == null }
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    it.sessionList?.openedSession?.latestRun?.id == run.id &&
+                    gateway.statusRequests.size == 2
+            }
+
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertEquals(1, gateway.runRequests.size)
+            assertEquals(2, gateway.statusRequests.size)
             assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
         } finally {
             observation.release.countDown()
@@ -571,6 +649,7 @@ class RunReconciliationStateHolderTest {
         var historyRequests = 0
         var observation: RunEventObservation = ScriptedObservation(emptyList())
         var blockRunCreation = false
+        var failRunCreation = false
         var failHistoryRequest: Int? = null
         var blockNextStatus = false
         val runStarted = CountDownLatch(1)
@@ -622,6 +701,7 @@ class RunReconciliationStateHolderTest {
             input: String,
         ): Run {
             runRequests += sessionId to input
+            if (failRunCreation) error("run creation failed")
             if (blockRunCreation) {
                 runStarted.countDown()
                 try {

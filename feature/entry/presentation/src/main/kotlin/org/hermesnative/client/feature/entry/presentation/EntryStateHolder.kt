@@ -756,6 +756,7 @@ class EntryStateHolder(
                 observationToClose = runObservations.remove(sessionId)
             }
             if (reconciliation.decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
+                sessionSendErrors.remove(sessionId)
                 runObservationStates.remove(sessionId)
                 _uiState.value =
                     _uiState.value.copy(
@@ -1204,8 +1205,23 @@ class EntryStateHolder(
     ): List<Run> {
         val confirmedRuns = openedSession.history.runs()
         if (confirmedRuns.isNotEmpty()) {
+            val confirmedRunIds = confirmedRuns.mapTo(mutableSetOf()) { it.id }
+            val observationState = runObservationStates[sessionId]
+            if (observationState?.run?.id?.let { it in confirmedRunIds } == true) {
+                runObservationStates.remove(sessionId)
+            }
             val localRuns = sessionRuns[sessionId].orEmpty()
-            val retainedLocalRuns = localRuns.filter(Run::isActive).withoutUncertainSendRun()
+            val unresolvedRun =
+                observationState
+                    ?.takeIf {
+                        it.state == RunPresentationState.UNCERTAIN &&
+                            it.run.id !in confirmedRunIds &&
+                            !it.run.isUncertainSendRun()
+                    }
+                    ?.run
+            val retainedLocalRuns =
+                (localRuns.filter(Run::isActive) + listOfNotNull(unresolvedRun))
+                    .withoutUncertainSendRun()
             sessionRuns[sessionId] = mergeRuns(confirmedRuns, retainedLocalRuns)
         }
         return sessionRuns[sessionId].orEmpty()
