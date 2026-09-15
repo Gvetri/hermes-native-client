@@ -121,6 +121,7 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must redact sensitive values.", evidenceScript.contains("<redacted>"))
         assertTrue("The wrapper must redact quoted JSON sensitive values.", evidenceScript.contains("sensitive_key"))
         assertTrue("The wrapper must redact bare authentication schemes.", evidenceScript.contains("bearer|basic"))
+        assertTrue("The wrapper must not stream raw output to the Actions log.", !evidenceScript.contains("| tee -a"))
         assertTrue("The wrapper must bound cleanup commands.", evidenceScript.contains("run_cleanup_command"))
         assertTrue("The wrapper must bound total cleanup time.", evidenceScript.contains("cleanup_budget_seconds"))
         assertTrue("The wrapper must ignore cancellation signals during cleanup.", evidenceScript.contains("trap '' TERM INT"))
@@ -175,13 +176,14 @@ class QualityGateConfigurationTest {
                 "${tempDir}${File.pathSeparator}${System.getenv("PATH") ?: ""}"
             process.redirectErrorStream(true)
             val startedProcess = process.start()
-            startedProcess.inputStream.bufferedReader().use { it.readText() }
+            val wrapperOutput = startedProcess.inputStream.bufferedReader().use { it.readText() }
             val exitCode = startedProcess.waitFor()
 
             assertEquals(17, exitCode)
             val sanitizedOutput = Files.readString(evidenceDir.resolve("runner-output.log"))
             listOf("escaped-secret", "auth-secret", "access-secret", "bearer-secret", "basic-secret").forEach { secret ->
                 assertTrue("The sanitized output must not contain $secret.", !sanitizedOutput.contains(secret))
+                assertTrue("The Actions log must not contain $secret.", !wrapperOutput.contains(secret))
             }
             assertTrue("Bare Bearer credentials must be redacted.", sanitizedOutput.contains("Bearer <redacted>"))
             assertTrue("Bare Basic credentials must be redacted.", sanitizedOutput.contains("Basic <redacted>"))

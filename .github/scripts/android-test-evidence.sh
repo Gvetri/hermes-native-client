@@ -263,10 +263,9 @@ run_gradle_step() {
 
     printf '\n=== %s ===\n' "$name" >> "$runner_output"
     set +e
-    timeout --foreground --signal=TERM --kill-after=30s "${remaining_seconds}s" "$@" 2>&1 | tee -a "$runner_output"
-    local pipeline_status=("${PIPESTATUS[@]}")
+    timeout --foreground --signal=TERM --kill-after=30s "${remaining_seconds}s" "$@" >> "$runner_output" 2>&1
+    local command_status=$?
     set -e
-    local command_status="${pipeline_status[0]}"
     printf '=== %s exit code: %s ===\n' "$name" "$command_status" >> "$runner_output"
     if [[ "$command_status" != "0" ]]; then
         return "$command_status"
