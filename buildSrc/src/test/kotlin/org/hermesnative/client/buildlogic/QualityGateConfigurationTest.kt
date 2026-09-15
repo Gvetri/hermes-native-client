@@ -97,7 +97,12 @@ class QualityGateConfigurationTest {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val evidenceScript = repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").readText()
         val emulatorJob = workflow.substringAfter("  compose_test:").substringBefore("  quality-gate:")
-        val failureStep = emulatorJob.substringAfter("      - name: Fail when Android tests fail")
+        val failureStepMarker = "      - name: Fail when Android tests fail"
+        assertTrue("The workflow must keep the Android failure step.", emulatorJob.contains(failureStepMarker))
+        val failureStep =
+            emulatorJob
+                .substringAfter(failureStepMarker)
+                .substringBefore("\n      - name:")
 
         assertTrue("The emulator job must survive workflow cancellation long enough to finalize evidence.", emulatorJob.contains("    if: \${{ always() }}"))
         assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 15"))
