@@ -146,7 +146,7 @@ class SessionHistoryScreenTest {
                                                     ),
                                                 ),
                                             composerText = "Preserved draft",
-                                            latestRun = Run(runId, SessionId("session-1"), "running"),
+                                            latestRun = Run(runId, SessionId("session-1"), "failed"),
                                             latestRunState = RunPresentationState.UNCERTAIN,
                                             activeResponse =
                                                 SessionMessageUiState(

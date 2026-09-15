@@ -409,10 +409,50 @@ class RunReconciliationStateHolderTest {
             assertEquals(RunPresentationState.UNCERTAIN, opened.latestRunState)
             val uncertainRun = requireNotNull(opened.latestRun)
             assertEquals(listOf(uncertainRun), opened.activeRuns)
+            assertTrue(gateway.observedRunIds.isEmpty())
             assertEquals(1, gateway.runRequests.size)
             assertEquals(2, gateway.historyRequests)
         } finally {
             gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun terminal_run_without_matching_history_closes_observer_and_keeps_send_disabled() {
+        val session = session()
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val observation = BlockingObservation()
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                statuses.add(run.copy(status = "failed"))
+                runs.add(run)
+                observations.add(observation)
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+            }
+            assertTrue(observation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertEquals(1, gateway.runRequests.size)
+            assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
+        } finally {
+            observation.release.countDown()
             holder.close()
         }
     }

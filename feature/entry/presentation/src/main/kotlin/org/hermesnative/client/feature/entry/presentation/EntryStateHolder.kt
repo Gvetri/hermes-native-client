@@ -745,9 +745,11 @@ class EntryStateHolder(
                     reconciliation.history.runs() + run,
                 )
             sessionRuns[sessionId] = knownRuns
-            if (reconciliation.decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
+            if (reconciliation.run.toRunPresentationState().isTerminal()) {
                 observationJobToCancel = runObservationJobs.remove(sessionId)
                 observationToClose = runObservations.remove(sessionId)
+            }
+            if (reconciliation.decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
                 runObservationStates.remove(sessionId)
                 _uiState.value =
                     _uiState.value.copy(
@@ -2049,6 +2051,7 @@ class EntryStateHolder(
                     )
                 if (
                     !submissionState.canSubmit ||
+                    opened.latestRunState == RunPresentationState.UNCERTAIN ||
                     opened.composerText.isBlank() ||
                     opened.isRefreshing ||
                     current.hasPendingMutation
@@ -2091,6 +2094,7 @@ class EntryStateHolder(
                         ) {
                             synchronized(sessionRequestLock) {
                                 sessionRuns[sessionId].orEmpty().latestActiveRun()
+                                    ?.takeUnless { it.id.value.startsWith(UNCERTAIN_SEND_RUN_PREFIX) }
                             }?.let { activeRun -> startRunObservation(sessionId, activeRun) }
                             onRunSubmissionCompleted?.invoke()
                         }

@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -771,6 +772,7 @@ private fun SessionDetailContent(
             ).canSubmit
         val sendEnabled =
             composerEnabled &&
+                state.latestRunState != RunPresentationState.UNCERTAIN &&
                 canSubmit &&
                 state.composerText.isNotBlank()
         OutlinedTextField(
