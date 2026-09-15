@@ -201,6 +201,8 @@ jobs:
               else
                 printf '%s\n' 'category=emulator_failure' > "$category_file"
               fi
+            elif [[ "$ANDROID_TEST_OUTCOME" == "success" ]]; then
+              printf '%s\n' 'category=success' > "$category_file"
             else
               printf '%s\n' 'category=test_failure' > "$category_file"
             fi
