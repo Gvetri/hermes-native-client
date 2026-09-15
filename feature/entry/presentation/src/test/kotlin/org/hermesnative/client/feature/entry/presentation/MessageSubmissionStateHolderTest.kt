@@ -125,6 +125,35 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun close_prevents_a_pending_submission_from_updating_state() {
+        val session = session("session-1")
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run once"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            val stateAtClose = holder.uiState.value
+
+            holder.close()
+            gateway.releaseRun.countDown()
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            assertEquals(stateAtClose, holder.uiState.value)
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun reopening_a_pending_submission_preserves_a_changed_draft_and_blocks_duplicate_send() {
         val session = session("session-1")
         val run = Run(RunId("run-1"), session.id, "starting")
@@ -475,7 +504,7 @@ class MessageSubmissionStateHolderTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-            onRunSubmissionCompleted = gateway.runFinished::countDown,
+            onRunSubmissionSettled = gateway.runFinished::countDown,
         )
 
     private fun connect(

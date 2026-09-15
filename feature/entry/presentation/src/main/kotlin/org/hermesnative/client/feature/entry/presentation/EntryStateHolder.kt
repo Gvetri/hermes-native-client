@@ -157,6 +157,7 @@ class EntryStateHolder(
     private val runGatewayFactory: ((endpoint: String, bearerCredential: String) -> RunGatewayPort)? = null,
     private val removeGatewayConnectionUseCase: RemoveGatewayConnection? = null,
     private val onRunSubmissionCompleted: (() -> Unit)? = null,
+    private val onRunSubmissionSettled: (() -> Unit)? = null,
 ) {
     private val _uiState = MutableStateFlow(initialState.toUiState())
     val uiState: StateFlow<EntryUiState> = _uiState.asStateFlow()
@@ -208,24 +209,26 @@ class EntryStateHolder(
     }
 
     fun close() {
-        verificationJob?.cancel()
-        sessionJob?.cancel()
-        val mutationJobsToCancel =
+        val jobsToCancel =
             synchronized(sessionRequestLock) {
-                mutationJobs.values.toList().also { mutationJobs.clear() }
+                sessionRequestGeneration += 1
+                connectionGeneration += 1
+                sessionGateway = null
+                runGateway = null
+                val verificationJobToCancel = verificationJob
+                val sessionJobToCancel = sessionJob
+                verificationJob = null
+                sessionJob = null
+                val requestJobs = (mutationJobs.values + runJobs.values).toList()
+                mutationJobs.clear()
+                runJobs.clear()
+                sessionDrafts.clear()
+                sessionSendErrors.clear()
+                pendingRunDrafts.clear()
+                sessionRuns.clear()
+                requestJobs + listOfNotNull(verificationJobToCancel, sessionJobToCancel)
             }
-        val runJobsToCancel =
-            synchronized(sessionRequestLock) {
-                runJobs.values.toList().also {
-                    runJobs.clear()
-                    sessionDrafts.clear()
-                    sessionSendErrors.clear()
-                    pendingRunDrafts.clear()
-                    sessionRuns.clear()
-                }
-            }
-        mutationJobsToCancel.forEach(Job::cancel)
-        runJobsToCancel.forEach(Job::cancel)
+        jobsToCancel.forEach(Job::cancel)
         scope.cancel()
     }
 
@@ -1654,16 +1657,21 @@ class EntryStateHolder(
                 createRunJob(sessionId) {
                     try {
                         val run = SubmitMessage(gateway).execute(sessionId, opened.composerText)
-                        applySubmittedRun(sessionId, run, requestConnectionGeneration)
-                        onRunSubmissionCompleted?.invoke()
+                        if (applySubmittedRun(sessionId, run, requestConnectionGeneration)) {
+                            onRunSubmissionCompleted?.invoke()
+                        }
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
-                        showMessageSendFailure(sessionId, requestConnectionGeneration)
-                        onRunSubmissionCompleted?.invoke()
+                        if (showMessageSendFailure(sessionId, requestConnectionGeneration)) {
+                            onRunSubmissionCompleted?.invoke()
+                        }
                     } catch (_: Exception) {
-                        showMessageSendFailure(sessionId, requestConnectionGeneration)
-                        onRunSubmissionCompleted?.invoke()
+                        if (showMessageSendFailure(sessionId, requestConnectionGeneration)) {
+                            onRunSubmissionCompleted?.invoke()
+                        }
+                    } finally {
+                        onRunSubmissionSettled?.invoke()
                     }
                 }
             }
@@ -1674,9 +1682,9 @@ class EntryStateHolder(
         sessionId: SessionId,
         run: Run,
         requestConnectionGeneration: Long,
-    ) {
-        synchronized(sessionRequestLock) {
-            if (connectionGeneration != requestConnectionGeneration) return
+    ): Boolean {
+        return synchronized(sessionRequestLock) {
+            if (connectionGeneration != requestConnectionGeneration) return false
             sessionSendErrors.remove(sessionId)
             val submittedDraft = pendingRunDrafts.remove(sessionId)
             if (sessionDrafts[sessionId] == submittedDraft) {
@@ -1685,46 +1693,52 @@ class EntryStateHolder(
             val knownRuns =
                 (sessionRuns[sessionId].orEmpty().filterNot { it.id == run.id } + run)
                     .also { sessionRuns[sessionId] = it }
-            val current = _uiState.value.sessionList ?: return
-            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
-            _uiState.value =
-                _uiState.value.copy(
-                    sessionList =
-                        current.copy(
-                            openedSession =
-                                opened.copy(
-                                    composerText = sessionDrafts[sessionId].orEmpty(),
-                                    latestRun = knownRuns.latestRun() ?: run,
-                                    activeRuns = knownRuns.activeRuns(),
-                                    isSending = false,
-                                    sendErrorCategory = null,
-                                ),
-                        ),
-                )
+            val current = _uiState.value.sessionList
+            val opened = current?.openedSession?.takeIf { it.session.id == sessionId }
+            if (current != null && opened != null) {
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                openedSession =
+                                    opened.copy(
+                                        composerText = sessionDrafts[sessionId].orEmpty(),
+                                        latestRun = knownRuns.latestRun() ?: run,
+                                        activeRuns = knownRuns.activeRuns(),
+                                        isSending = false,
+                                        sendErrorCategory = null,
+                                    ),
+                            ),
+                    )
+            }
+            true
         }
     }
 
     private fun showMessageSendFailure(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
-    ) {
-        synchronized(sessionRequestLock) {
-            if (connectionGeneration != requestConnectionGeneration) return
+    ): Boolean {
+        return synchronized(sessionRequestLock) {
+            if (connectionGeneration != requestConnectionGeneration) return false
             pendingRunDrafts.remove(sessionId)
             sessionSendErrors[sessionId] = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
-            val current = _uiState.value.sessionList ?: return
-            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
-            _uiState.value =
-                _uiState.value.copy(
-                    sessionList =
-                        current.copy(
-                            openedSession =
-                                opened.copy(
-                                    isSending = false,
-                                    sendErrorCategory = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED,
-                                ),
-                        ),
-                )
+            val current = _uiState.value.sessionList
+            val opened = current?.openedSession?.takeIf { it.session.id == sessionId }
+            if (current != null && opened != null) {
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                openedSession =
+                                    opened.copy(
+                                        isSending = false,
+                                        sendErrorCategory = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED,
+                                    ),
+                            ),
+                    )
+            }
+            true
         }
     }
 }
