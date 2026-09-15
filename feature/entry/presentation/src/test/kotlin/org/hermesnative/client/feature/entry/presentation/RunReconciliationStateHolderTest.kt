@@ -412,6 +412,22 @@ class RunReconciliationStateHolderTest {
             assertTrue(gateway.observedRunIds.isEmpty())
             assertEquals(1, gateway.runRequests.size)
             assertEquals(2, gateway.historyRequests)
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+            }
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            awaitState(holder) { it.sessionList?.openedSession == null }
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+            }
+            assertTrue(gateway.statusRequests.isEmpty())
+            assertTrue(gateway.observedRunIds.isEmpty())
+            assertEquals(4, gateway.historyRequests)
         } finally {
             gateway.releaseRun.countDown()
             holder.close()
@@ -428,7 +444,7 @@ class RunReconciliationStateHolderTest {
                 histories.add(SessionHistory(session.id, emptyList(), null))
                 histories.add(SessionHistory(session.id, emptyList(), null))
                 histories.add(SessionHistory(session.id, emptyList(), null))
-                statuses.add(run.copy(status = "failed"))
+                statuses.add(run.copy(status = "cancelled"))
                 runs.add(run)
                 observations.add(observation)
             }

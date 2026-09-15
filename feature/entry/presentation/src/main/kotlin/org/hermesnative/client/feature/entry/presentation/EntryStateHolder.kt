@@ -594,12 +594,18 @@ class EntryStateHolder(
     ) {
         val run =
             synchronized(sessionRequestLock) {
-                sessionRuns[sessionId].orEmpty().lastOrNull { it.id == runIdToReconcile }
-                    ?: runIdToReconcile?.let { runId ->
-                        runObservationStates[sessionId]?.takeIf { it.run.id == runId }?.run
-                    }
-                    ?: sessionRuns[sessionId].orEmpty().latestActiveRun()
-                    ?: runObservationStates[sessionId]?.takeIf { state -> !state.state.isTerminal() }?.run
+                if (runIdToReconcile?.isUncertainSendRun() == true) {
+                    null
+                } else {
+                    val candidate =
+                        sessionRuns[sessionId].orEmpty().lastOrNull { it.id == runIdToReconcile }
+                            ?: runIdToReconcile?.let { runId ->
+                                runObservationStates[sessionId]?.takeIf { it.run.id == runId }?.run
+                            }
+                            ?: sessionRuns[sessionId].orEmpty().latestActiveRun()
+                            ?: runObservationStates[sessionId]?.takeIf { state -> !state.state.isTerminal() }?.run
+                    candidate?.takeUnless { it.isUncertainSendRun() }
+                }
             }
         if (run == null) {
             if (clearRefreshWhenNoRun) {
@@ -745,7 +751,7 @@ class EntryStateHolder(
                     reconciliation.history.runs() + run,
                 )
             sessionRuns[sessionId] = knownRuns
-            if (reconciliation.run.toRunPresentationState().isTerminal()) {
+            if (!reconciliation.run.isActive()) {
                 observationJobToCancel = runObservationJobs.remove(sessionId)
                 observationToClose = runObservations.remove(sessionId)
             }
@@ -758,6 +764,7 @@ class EntryStateHolder(
                                 openedSession =
                                     opened.copy(
                                         messages = reconciliation.history.messages.map { it.toSessionMessageUiState() }.chronological(),
+                                        sendErrorCategory = null,
                                         latestRun = knownRuns.latestRun(),
                                         activeRuns = knownRuns.activeRuns(),
                                         latestRunState = reconciliation.run.toRunPresentationState(),
@@ -849,7 +856,11 @@ class EntryStateHolder(
     private fun uncertainSendRun(sessionId: SessionId): Run =
         Run(RunId("$UNCERTAIN_SEND_RUN_PREFIX${sessionId.value}"), sessionId, UNCERTAIN_RUN_STATUS)
 
-    private fun List<Run>.withoutUncertainSendRun(): List<Run> = filterNot { run -> run.id.value.startsWith(UNCERTAIN_SEND_RUN_PREFIX) }
+    private fun RunId.isUncertainSendRun(): Boolean = value.startsWith(UNCERTAIN_SEND_RUN_PREFIX)
+
+    private fun Run.isUncertainSendRun(): Boolean = id.isUncertainSendRun()
+
+    private fun List<Run>.withoutUncertainSendRun(): List<Run> = filterNot { run -> run.isUncertainSendRun() }
 
     private fun markTimedOutSendUncertain(
         sessionId: SessionId,
@@ -2094,7 +2105,7 @@ class EntryStateHolder(
                         ) {
                             synchronized(sessionRequestLock) {
                                 sessionRuns[sessionId].orEmpty().latestActiveRun()
-                                    ?.takeUnless { it.id.value.startsWith(UNCERTAIN_SEND_RUN_PREFIX) }
+                                    ?.takeUnless { it.isUncertainSendRun() }
                             }?.let { activeRun -> startRunObservation(sessionId, activeRun) }
                             onRunSubmissionCompleted?.invoke()
                         }
