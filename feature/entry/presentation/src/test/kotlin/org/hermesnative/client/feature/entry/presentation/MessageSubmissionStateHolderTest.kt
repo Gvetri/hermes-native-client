@@ -256,6 +256,94 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun repeated_history_statuses_use_the_latest_status_for_one_run() {
+        val session = session("session-1")
+        val gateway =
+            FakeGateway(
+                sessions = listOf(session),
+                histories =
+                    mapOf(
+                        session.id to
+                            SessionHistory(
+                                session.id,
+                                listOf(
+                                    GatewayHistoryMessage(
+                                        "run-message-started",
+                                        "user",
+                                        "Run",
+                                        RunId("run-1"),
+                                        "running",
+                                    ),
+                                    GatewayHistoryMessage(
+                                        "run-message-completed",
+                                        "assistant",
+                                        "Done",
+                                        RunId("run-1"),
+                                        "succeeded",
+                                    ),
+                                ),
+                                null,
+                            ),
+                    ),
+            )
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway, session.id)
+            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertEquals("succeeded", opened.latestRun?.status)
+            assertTrue(opened.activeRuns.isEmpty())
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Send after completion"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertEquals(listOf(session.id to "Send after completion"), gateway.runRequests)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun late_run_completion_after_removal_cannot_pollute_a_reconnected_gateway() {
+        val session = session("session-1")
+        val oldRun = Run(RunId("run-old"), session.id, "starting")
+        val newRun = Run(RunId("run-new"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(oldRun)
+                enqueueRun(newRun)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Old request"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+            gateway.blockRunCreation = false
+            gateway.releaseRun.countDown()
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            Thread.sleep(100)
+
+            connect(holder, gateway)
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == session.id }
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("New request"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
+
+            assertEquals(
+                listOf(session.id to "Old request", session.id to "New request"),
+                gateway.runRequests,
+            )
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun an_active_run_in_one_session_does_not_disable_a_different_session() {
         val first = session("session-1")
         val second = session("session-2")
@@ -409,6 +497,7 @@ class MessageSubmissionStateHolderTest {
         val runRequests = mutableListOf<Pair<SessionId, String>>()
         private val runResults = ArrayDeque<Result<Run>>()
         val runStarted = CountDownLatch(1)
+        val runFinished = CountDownLatch(1)
         val releaseRun = CountDownLatch(1)
         var blockRunCreation = false
 
@@ -449,7 +538,7 @@ class MessageSubmissionStateHolderTest {
                 runStarted.countDown()
                 check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Timed out waiting for Run release." }
             }
-            return runResults.removeFirst().getOrThrow()
+            return runResults.removeFirst().getOrThrow().also { runFinished.countDown() }
         }
 
         override fun getRunStatus(runId: RunId): Run = error("not used")

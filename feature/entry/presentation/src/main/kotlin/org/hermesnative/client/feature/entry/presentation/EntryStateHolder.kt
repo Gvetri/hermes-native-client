@@ -28,6 +28,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
+import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
@@ -164,6 +165,7 @@ class EntryStateHolder(
     private var runGateway: RunGatewayPort? = null
     private val sessionRequestLock = Any()
     private var sessionRequestGeneration = 0L
+    private var connectionGeneration = 0L
     private val mutationJobs = mutableMapOf<SessionId, Job>()
     private val runJobs = mutableMapOf<SessionId, Job>()
     private val sessionDrafts = mutableMapOf<SessionId, String>()
@@ -308,6 +310,7 @@ class EntryStateHolder(
         val jobsToCancel =
             synchronized(sessionRequestLock) {
                 sessionRequestGeneration += 1
+                connectionGeneration += 1
                 sessionGateway = null
                 runGateway = null
                 sessionDrafts.clear()
@@ -1587,6 +1590,7 @@ class EntryStateHolder(
                 val current = _uiState.value.sessionList ?: return@synchronized null
                 val opened = current.openedSession ?: return@synchronized null
                 val sessionId = opened.session.id
+                val requestConnectionGeneration = connectionGeneration
                 val knownRuns =
                     sessionRuns[sessionId].orEmpty().ifEmpty {
                         (opened.activeRuns + listOfNotNull(opened.latestRun)).distinctBy { it.id }
@@ -1622,13 +1626,13 @@ class EntryStateHolder(
                 createRunJob(sessionId) {
                     try {
                         val run = SubmitMessage(gateway).execute(sessionId, opened.composerText)
-                        applySubmittedRun(sessionId, run)
+                        applySubmittedRun(sessionId, run, requestConnectionGeneration)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
-                        showMessageSendFailure(sessionId)
+                        showMessageSendFailure(sessionId, requestConnectionGeneration)
                     } catch (_: Exception) {
-                        showMessageSendFailure(sessionId)
+                        showMessageSendFailure(sessionId, requestConnectionGeneration)
                     }
                 }
             }
@@ -1638,8 +1642,10 @@ class EntryStateHolder(
     private fun applySubmittedRun(
         sessionId: SessionId,
         run: Run,
+        requestConnectionGeneration: Long,
     ) {
         synchronized(sessionRequestLock) {
+            if (connectionGeneration != requestConnectionGeneration) return
             val submittedDraft = pendingRunDrafts.remove(sessionId)
             if (sessionDrafts[sessionId] == submittedDraft) {
                 sessionDrafts.remove(sessionId)
@@ -1666,8 +1672,12 @@ class EntryStateHolder(
         }
     }
 
-    private fun showMessageSendFailure(sessionId: SessionId) {
+    private fun showMessageSendFailure(
+        sessionId: SessionId,
+        requestConnectionGeneration: Long,
+    ) {
         synchronized(sessionRequestLock) {
+            if (connectionGeneration != requestConnectionGeneration) return
             pendingRunDrafts.remove(sessionId)
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
@@ -1701,12 +1711,18 @@ private fun OpenedSession.toOpenSessionUiState(
         isSending = isSending,
     )
 
-private fun SessionHistory.runs(): List<Run> =
-    messages.mapNotNull { message ->
-        val runId = message.runId ?: return@mapNotNull null
-        val status = message.runStatus ?: return@mapNotNull null
-        Run(runId, sessionId, status)
+private fun SessionHistory.runs(): List<Run> {
+    val runsById = linkedMapOf<RunId, Run>()
+    messages.forEach { message ->
+        val runId = message.runId
+        val status = message.runStatus
+        if (runId != null && status != null) {
+            runsById.remove(runId)
+            runsById[runId] = Run(runId, sessionId, status)
+        }
     }
+    return runsById.values.toList()
+}
 
 private fun SessionHistory.latestRun(): Run? = runs().latestRun()
 
