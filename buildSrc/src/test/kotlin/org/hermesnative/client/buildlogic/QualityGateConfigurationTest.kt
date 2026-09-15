@@ -128,7 +128,8 @@ class QualityGateConfigurationTest {
         assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 15"))
         assertTrue("The workflow must preserve successful test classification.", emulatorJob.contains("category=success"))
         assertTrue("The Android test action must have a stable step id.", emulatorJob.contains("        id: android_tests"))
-        assertTrue("The Android test action must have a bounded step timeout.", emulatorJob.contains("        timeout-minutes: 10"))
+        assertTrue("The Android test action must have a bounded step timeout.", emulatorJob.contains("        timeout-minutes: 14"))
+        assertTrue("The wrapper must have an explicit bounded deadline.", emulatorJob.contains("          ANDROID_TEST_TIMEOUT_SECONDS: '480'"))
         assertTrue("The Android test action must run the evidence wrapper.", emulatorJob.contains("            .github/scripts/android-test-evidence.sh"))
         assertTrue("The workflow must upload only sanitized evidence.", emulatorJob.contains("steps.finalize_android_evidence.outputs.redaction_ready == 'true'"))
         assertTrue("Failure evidence must have an explicit retention period.", emulatorJob.contains("          retention-days: 14"))
@@ -137,6 +138,7 @@ class QualityGateConfigurationTest {
         assertTrue("The failure step must exit non-zero.", failureStep.contains("exit 1"))
 
         assertTrue("The wrapper must capture logcat.", evidenceScript.contains("logcat -d"))
+        assertTrue("The wrapper must record incomplete diagnostic capture.", evidenceScript.contains("capture_incomplete"))
         assertTrue("The wrapper must preserve instrumentation output.", evidenceScript.contains("androidTest-results"))
         assertTrue("The wrapper must preserve test runner output.", evidenceScript.contains("runner-output.log"))
         assertTrue("The wrapper must identify timeouts.", evidenceScript.contains("timeout"))
@@ -221,6 +223,88 @@ class QualityGateConfigurationTest {
                 )
             }
             assertTrue("The sanitization marker must be removed after success.", !Files.exists(pendingMarker))
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun evidence_wrapper_preserves_capture_failures_as_sanitized_evidence() {
+        assumePosixWrapperSupport()
+        val tempDir = Files.createTempDirectory("android-test-evidence-capture-failure-test")
+        try {
+            val evidenceDir = tempDir.resolve("artifacts/android-test-evidence")
+            Files.createDirectories(evidenceDir)
+            val pendingMarker = tempDir.resolve("artifacts/android-test-evidence-redaction-pending")
+            Files.writeString(pendingMarker, "pending")
+            Files.writeString(evidenceDir.resolve("android-test-start-epoch.txt"), "0")
+
+            val report =
+                tempDir.resolve(
+                    "feature/entry/presentation/build/outputs/androidTest-results/connected/debug/result.xml",
+                )
+            Files.createDirectories(report.parent)
+            Files.writeString(report, "<testsuite />")
+
+            val fakeGradle = tempDir.resolve("gradlew")
+            Files.writeString(
+                fakeGradle,
+                """
+                    #!/usr/bin/env bash
+                    printf '%s\\n' 'Bearer test-secret'
+                    exit 17
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeGradle, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val fakeAdb = tempDir.resolve("adb")
+            Files.writeString(
+                fakeAdb,
+                """
+                    #!/usr/bin/env bash
+                    printf '%s\\n' 'adb-capture-failed'
+                    exit 17
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeAdb, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val fakeCp = tempDir.resolve("cp")
+            Files.writeString(
+                fakeCp,
+                """
+                    #!/usr/bin/env bash
+                    exit 17
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeCp, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val process =
+                ProcessBuilder("bash", repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").absolutePath)
+                    .directory(tempDir.toFile())
+            process.environment()["GITHUB_WORKSPACE"] = tempDir.toString()
+            process.environment()["ANDROID_TEST_TIMEOUT_SECONDS"] = "30"
+            process.environment()["PATH"] =
+                "${tempDir}${File.pathSeparator}${System.getenv("PATH") ?: ""}"
+            process.redirectErrorStream(true)
+            val startedProcess = process.start()
+            startedProcess.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = startedProcess.waitFor()
+
+            assertEquals(17, exitCode)
+            assertTrue("Capture failures must not keep the redaction marker.", !Files.exists(pendingMarker))
+            assertTrue(
+                "The wrapper must record incomplete diagnostic capture.",
+                Files.readString(evidenceDir.resolve("wrapper-started.txt")).contains("capture_incomplete=1"),
+            )
+            assertTrue("Failed logcat capture must remain as evidence.", Files.exists(evidenceDir.resolve("logcat.log")))
+            assertTrue(
+                "Failed report copying must remain represented.",
+                Files.exists(evidenceDir.resolve("instrumentation-output/NOT_AVAILABLE.txt")),
+            )
+            assertTrue(
+                "The runner output must be sanitized before upload.",
+                !Files.readString(evidenceDir.resolve("runner-output.log")).contains("test-secret"),
+            )
         } finally {
             tempDir.toFile().deleteRecursively()
         }

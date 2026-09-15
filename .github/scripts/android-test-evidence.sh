@@ -216,15 +216,19 @@ write_context() {
 on_exit() {
     local status=$?
     local cleanup_failed=0
+    local capture_failed=0
     trap - EXIT
     trap '' TERM INT
     set +e
     cleanup_deadline_seconds=$((SECONDS + cleanup_budget_seconds))
 
     if ! capture_logcat; then
-        cleanup_failed=1
+        capture_failed=1
     fi
     if ! copy_instrumentation_output; then
+        capture_failed=1
+    fi
+    if ! printf 'capture_incomplete=%s\n' "$capture_failed" >> "$evidence_dir/wrapper-started.txt"; then
         cleanup_failed=1
     fi
 

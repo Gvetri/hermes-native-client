@@ -156,8 +156,10 @@ jobs:
       - name: Run connected Android tests
         id: android_tests
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 14
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ANDROID_TEST_TIMEOUT_SECONDS: '480'
         with:
           api-level: 24
           target: default
