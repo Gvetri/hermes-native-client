@@ -11,35 +11,55 @@ internal class GatewayRunEventObservation(
     private val mapTransportFailure: (Exception) -> GatewayException,
 ) : RunEventObservation {
     private var started = false
+
+    @Volatile
     private var closed = false
     private var stream: GatewayEventStream? = null
+    private val lifecycleLock = Any()
 
     override fun iterator(): Iterator<RunEvent> {
-        check(!started) { "Gateway run observation can only be collected once." }
-        check(!closed) { "Gateway run observation is closed." }
-        started = true
+        synchronized(lifecycleLock) {
+            check(!started) { "Gateway run observation can only be collected once." }
+            check(!closed) { "Gateway run observation is closed." }
+            started = true
+        }
         val openedStream =
             try {
                 openStream()
             } catch (error: GatewayException) {
-                closed = true
+                synchronized(lifecycleLock) { closed = true }
                 throw error
             } catch (error: Exception) {
-                closed = true
+                synchronized(lifecycleLock) { closed = true }
                 throw mapTransportFailure(error)
             }
-        stream = openedStream
+        val published =
+            synchronized(lifecycleLock) {
+                if (closed) {
+                    false
+                } else {
+                    stream = openedStream
+                    true
+                }
+            }
+        if (!published) {
+            openedStream.close()
+            throw IllegalStateException("Gateway run observation is closed.")
+        }
         val frames = GatewaySseParser.frames(openedStream.lines, operation).iterator()
         return object : Iterator<RunEvent> {
             private var buffered: RunEvent? = null
             private var hasBuffered = false
+            private val seenEventKeys = mutableSetOf<String>()
 
             override fun hasNext(): Boolean {
                 if (closed) return false
                 if (hasBuffered) return true
                 try {
                     while (frames.hasNext()) {
-                        val event = parseFrame(frames.next()) ?: continue
+                        val frame = frames.next()
+                        if (!seenEventKeys.add(frame.dedupeKey)) continue
+                        val event = parseFrame(frame) ?: continue
                         buffered = event
                         hasBuffered = true
                         return true
@@ -64,10 +84,15 @@ internal class GatewayRunEventObservation(
     }
 
     override fun close() {
-        if (!closed) {
-            closed = true
-            stream?.close()
-            stream = null
-        }
+        val streamToClose =
+            synchronized(lifecycleLock) {
+                if (closed) {
+                    null
+                } else {
+                    closed = true
+                    stream.also { stream = null }
+                }
+            }
+        streamToClose?.close()
     }
 }

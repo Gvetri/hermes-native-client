@@ -105,16 +105,45 @@ internal object GatewayJsonParser {
     ): RunEvent? {
         val eventType =
             when (frame.eventType) {
-                "run.started" -> RunEventType.STARTED
-                "run.running" -> RunEventType.RUNNING
+                "run.queued", "run.started", "message.start" -> RunEventType.STARTED
+                "run.running", "tool.started", "tool.completed", "reasoning.available" -> RunEventType.RUNNING
+                "run.completing", "message.complete" -> RunEventType.COMPLETING
+                "message.delta" -> RunEventType.MESSAGE_DELTA
                 "run.completed" -> RunEventType.COMPLETED
+                "run.succeeded" -> RunEventType.SUCCEEDED
+                "run.failed" -> RunEventType.FAILED
+                "run.interrupted", "run.cancelled", "run.canceled" -> RunEventType.INTERRUPTED
                 else -> return null
             }
         val root = parseObject("$operation.${frame.eventType}", frame.data)
+        val status =
+            optionalString(root, "status", operation)
+                ?: when (eventType) {
+                    RunEventType.STARTED -> "starting"
+                    RunEventType.RUNNING,
+                    RunEventType.MESSAGE_DELTA,
+                    -> "running"
+                    RunEventType.COMPLETING -> "completing"
+                    RunEventType.SUCCEEDED -> "succeeded"
+                    RunEventType.FAILED -> "failed"
+                    RunEventType.INTERRUPTED -> "interrupted"
+                    RunEventType.COMPLETED -> "succeeded"
+                    RunEventType.TEXT_DELTA -> "running"
+                }
+        val text =
+            if (eventType == RunEventType.MESSAGE_DELTA) {
+                optionalString(root, "delta", operation)
+                    ?: optionalString(root, "text", operation)
+                    ?: invalid("$operation.${frame.eventType}", "missing required field 'delta'")
+            } else {
+                null
+            }
         return RunEvent(
             type = eventType,
             runId = RunId(requiredNonBlankString(root, "run_id", operation)),
-            status = requiredNonBlankString(root, "status", operation),
+            status = status,
+            text = text,
+            eventId = frame.id ?: frame.dedupeKey,
         )
     }
 
@@ -257,7 +286,11 @@ internal object GatewayJsonParser {
 internal data class GatewaySseFrame(
     val eventType: String,
     val data: String,
-)
+    val id: String? = null,
+) {
+    val dedupeKey: String
+        get() = id?.takeIf(String::isNotBlank)?.let { "id:$it" } ?: "frame:$eventType\u0000$data"
+}
 
 internal object GatewaySseParser {
     fun frames(
@@ -269,7 +302,7 @@ internal object GatewaySseParser {
             for (line in lines) {
                 if (line.isEmpty()) {
                     if (record.isNotEmpty()) {
-                        yield(parseRecord(record, operation))
+                        parseRecord(record, operation)?.let { frame -> yield(frame) }
                         record.clear()
                     }
                 } else {
@@ -277,17 +310,25 @@ internal object GatewaySseParser {
                 }
             }
             if (record.isNotEmpty()) {
-                yield(parseRecord(record, operation))
+                parseRecord(record, operation)?.let { frame -> yield(frame) }
             }
         }
 
     private fun parseRecord(
         lines: List<String>,
         operation: String,
-    ): GatewaySseFrame {
-        val eventLines = lines.filter { it.startsWith("event:") }
-        val dataLines = lines.filter { it.startsWith("data:") }
-        if (eventLines.size != 1 || dataLines.isEmpty() || lines.size != eventLines.size + dataLines.size) {
+    ): GatewaySseFrame? {
+        val contentLines = lines.filterNot { it.startsWith(":") }
+        if (contentLines.isEmpty()) return null
+        val eventLines = contentLines.filter { it.startsWith("event:") }
+        val dataLines = contentLines.filter { it.startsWith("data:") }
+        val idLines = contentLines.filter { it.startsWith("id:") }
+        if (
+            eventLines.size != 1 ||
+            dataLines.isEmpty() ||
+            idLines.size > 1 ||
+            contentLines.size != eventLines.size + dataLines.size + idLines.size
+        ) {
             throw GatewayException(
                 GatewayErrorCategory.INVALID_RESPONSE,
                 "Invalid Gateway response for $operation: invalid SSE event framing.",
@@ -303,6 +344,7 @@ internal object GatewaySseParser {
         return GatewaySseFrame(
             eventType = eventType,
             data = dataLines.joinToString("\n") { it.removePrefix("data:").trimStart() },
+            id = idLines.singleOrNull()?.removePrefix("id:")?.trim()?.takeIf(String::isNotEmpty),
         )
     }
 }

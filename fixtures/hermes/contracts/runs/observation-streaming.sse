@@ -1,0 +1,29 @@
+event: fixture.metadata
+data: {"hermes_revision":"d9833c5615b80e199a174cd67d90ab430695a972"}
+
+event: run.started
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","status":"starting"}
+
+event: run.running
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","status":"running"}
+
+id: delta-1
+event: message.delta
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","delta":"Hello"}
+
+id: delta-1
+event: message.delta
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","delta":"Hello"}
+
+event: future.additive
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","future_payload":"ignored"}
+
+id: delta-2
+event: message.delta
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","delta":" world"}
+
+event: run.completing
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","status":"completing"}
+
+event: run.succeeded
+data: {"run_id":"9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8","status":"succeeded"}

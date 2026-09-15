@@ -732,10 +732,16 @@ private fun SessionDetailContent(
         state.latestRun?.let { run ->
             Spacer(modifier = Modifier.height(12.dp))
             Text(text = "Latest Run: ${run.id.value}")
-            Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
+            state.latestRunState?.let { runState ->
+                Text(
+                    text = "Run state: ${runState.label}",
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            } ?: Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
         }
         Spacer(modifier = Modifier.height(16.dp))
-        if (state.messages.isEmpty()) {
+        val displayedMessages = state.messages + listOfNotNull(state.activeResponse)
+        if (displayedMessages.isEmpty()) {
             Text(text = "No messages in this Session.")
         } else {
             LazyColumn(
@@ -743,7 +749,7 @@ private fun SessionDetailContent(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(
-                    items = state.messages,
+                    items = displayedMessages,
                     key = { message -> message.id },
                 ) { message ->
                     SessionMessageContent(message)
@@ -813,11 +819,29 @@ private fun SessionMessageContent(message: SessionMessageUiState) {
         message.content?.takeIf(String::isNotBlank)?.let { content ->
             Text(text = content)
         }
+        message.runState?.let { runState ->
+            Text(
+                text = "Run state: ${runState.label}",
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        } ?: message.runStatus?.let { status ->
+            Text(text = "Run status: ${status.stableRunStatusLabel()}")
+        }
+        if (message.isStreaming) {
+            Text(
+                text = "Streaming response…",
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        if (message.streamInterrupted) {
+            Text(
+                text = "Stream interrupted. Run result is uncertain.",
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
         message.runResult?.let { result ->
             Text(text = "Run result: $result")
-        }
-        message.runStatus?.let { status ->
-            Text(text = "Run status: ${status.stableRunStatusLabel()}")
         }
         message.timestamp?.let { timestamp ->
             Text(text = "Timestamp: ${formatGatewayTimestamp(timestamp)}")

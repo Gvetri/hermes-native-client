@@ -4,11 +4,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -17,6 +19,9 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.application.EntryState
+import org.hermesnative.client.feature.entry.domain.Run
+import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -742,5 +747,62 @@ class EntryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Refresh").assertIsNotEnabled()
+    }
+
+    @Test
+    fun streamed_response_exposes_only_truthful_run_state_and_interruption_semantics() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session =
+                                                SessionItemUiState(
+                                                    id = SessionId("session-one"),
+                                                    title = "Streaming Session",
+                                                    preview = null,
+                                                    pinned = false,
+                                                ),
+                                            messages = emptyList(),
+                                            latestRun = Run(RunId("run-one"), SessionId("session-one"), "running"),
+                                            latestRunState = RunPresentationState.RUNNING,
+                                            activeResponse =
+                                                SessionMessageUiState(
+                                                    id = "active-response:run-one",
+                                                    role = "assistant",
+                                                    content = "Partial answer",
+                                                    runId = RunId("run-one"),
+                                                    isStreaming = true,
+                                                    runState = RunPresentationState.RUNNING,
+                                                ),
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule
+            .onNodeWithText("Partial answer")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Streaming response…")
+            .performScrollTo()
+            .assertIsDisplayed()
+        val runStateNodes = composeTestRule.onAllNodesWithText("Run state: Running")
+        runStateNodes.assertCountEquals(2)
+        runStateNodes[0].assertIsDisplayed()
+        runStateNodes[1].assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run status: Running").assertDoesNotExist()
     }
 }

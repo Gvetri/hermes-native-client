@@ -355,6 +355,43 @@ class ContractFixtureParserTest {
         }
     }
 
+    @Test
+    fun streaming_fixture_covers_supported_unknown_and_duplicate_events() {
+        val fixture = parseSse("runs/observation-streaming.sse")
+
+        assertEquals(
+            listOf(
+                "fixture.metadata",
+                "run.started",
+                "run.running",
+                "message.delta",
+                "message.delta",
+                "future.additive",
+                "message.delta",
+                "run.completing",
+                "run.succeeded",
+            ),
+            fixture.events.map { it.eventType },
+        )
+        assertEquals(
+            listOf("delta-1", "delta-1", "delta-2"),
+            fixture.events.filter { it.eventType == "message.delta" }.map { it.id },
+        )
+        assertEquals("Hello", fixture.events[3].requiredString("delta"))
+        assertEquals(" world", fixture.events[6].requiredString("delta"))
+        assertTrue(fixture.events.any { it.eventType == "future.additive" })
+        assertEquals(descriptor.provenanceValue, fixture.provenanceValue)
+    }
+
+    @Test
+    fun interrupted_fixture_has_no_false_terminal_event() {
+        val fixture = parseSse("runs/observation-interrupted.sse")
+
+        assertEquals("run.interrupted", fixture.events.last().eventType)
+        assertEquals("interrupted", fixture.events.last().requiredString("status"))
+        assertTrue(fixture.events.none { it.eventType == "run.succeeded" || it.eventType == "run.completed" })
+    }
+
     private fun parseJson(path: String): ContractJsonFixture =
         ContractFixtureParser.parseJson(path, contractsRoot.resolve(path).readText(), descriptor)
 
