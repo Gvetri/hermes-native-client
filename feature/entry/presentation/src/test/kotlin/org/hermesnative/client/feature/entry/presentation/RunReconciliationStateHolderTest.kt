@@ -203,12 +203,83 @@ class RunReconciliationStateHolderTest {
             awaitState(holder) {
                 it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
                     gateway.statusRequests.size == 2 &&
-                    gateway.historyRequests == 4 &&
-                    gateway.observedRunIds.size == 2
+                    gateway.historyRequests == 4
             }
+            assertTrue(secondObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertEquals(2, gateway.observedRunIds.size)
 
             assertEquals(listOf(run.id, run.id), gateway.observedRunIds)
         } finally {
+            firstObservation.release.countDown()
+            secondObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun return_and_reopen_during_reconciliation_drops_the_stale_result() {
+        val session = session()
+        val run = Run(RunId("run-1"), session.id, "running")
+
+        fun history(
+            content: String,
+            status: String,
+        ) = SessionHistory(
+            session.id,
+            listOf(GatewayHistoryMessage("message-1", "assistant", content, run.id, status)),
+            null,
+        )
+        val firstObservation = BlockingObservation()
+        val secondObservation = BlockingObservation()
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(history("initial-open", "running"))
+                histories.add(history("initial-authoritative", "running"))
+                histories.add(history("refresh-open", "running"))
+                histories.add(history("reopen-open", "running"))
+                histories.add(history("reopen-authoritative", "running"))
+                histories.add(history("stale-refresh", "succeeded"))
+                statuses.add(run.copy(status = "running"))
+                statuses.add(run.copy(status = "succeeded"))
+                statuses.add(run.copy(status = "running"))
+                observations.add(firstObservation)
+                observations.add(secondObservation)
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) { gateway.statusRequests.size == 1 && gateway.historyRequests == 2 }
+            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            gateway.blockNextStatus = true
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            awaitState(holder) { it.sessionList?.openedSession == null }
+            assertTrue(firstObservation.finished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    it.sessionList?.openedSession?.messages?.lastOrNull()?.content == "reopen-open"
+            }
+            assertTrue(secondObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertEquals(3, gateway.statusRequests.size)
+            assertEquals(5, gateway.historyRequests)
+            assertEquals(2, gateway.observedRunIds.size)
+
+            gateway.releaseStatus.countDown()
+            assertTrue(gateway.statusFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.staleHistoryLoaded.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) {
+                gateway.staleHistoryLoaded.count == 0L &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    it.sessionList?.openedSession?.messages?.lastOrNull()?.content == "reopen-open"
+            }
+        } finally {
+            gateway.releaseStatus.countDown()
             firstObservation.release.countDown()
             secondObservation.release.countDown()
             holder.close()
@@ -312,9 +383,14 @@ class RunReconciliationStateHolderTest {
         var historyRequests = 0
         var observation: RunEventObservation = ScriptedObservation(emptyList())
         var blockRunCreation = false
+        var blockNextStatus = false
         val runStarted = CountDownLatch(1)
         val runFinished = CountDownLatch(1)
         val releaseRun = CountDownLatch(1)
+        val statusStarted = CountDownLatch(1)
+        val statusFinished = CountDownLatch(1)
+        val releaseStatus = CountDownLatch(1)
+        val staleHistoryLoaded = CountDownLatch(1)
 
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
 
@@ -323,12 +399,19 @@ class RunReconciliationStateHolderTest {
         override fun openSession(sessionId: SessionId): Session = session
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory {
-            historyRequests += 1
-            return if (histories.isEmpty()) {
-                SessionHistory(sessionId, emptyList(), null)
-            } else {
-                histories.removeFirst()
+            val history =
+                synchronized(this) {
+                    historyRequests += 1
+                    if (histories.isEmpty()) {
+                        SessionHistory(sessionId, emptyList(), null)
+                    } else {
+                        histories.removeFirst()
+                    }
+                }
+            if (history.messages.any { it.content == "stale-refresh" }) {
+                staleHistoryLoaded.countDown()
             }
+            return history
         }
 
         override fun renameSession(
@@ -362,13 +445,32 @@ class RunReconciliationStateHolderTest {
         }
 
         override fun getRunStatus(runId: RunId): Run {
-            statusRequests += runId
-            return if (statuses.isEmpty()) error("missing status") else statuses.removeFirst()
+            val (shouldBlock, status) =
+                synchronized(this) {
+                    statusRequests += runId
+                    val shouldBlock = blockNextStatus.also { blockNextStatus = false }
+                    val status = if (statuses.isEmpty()) error("missing status") else statuses.removeFirst()
+                    shouldBlock to status
+                }
+            if (shouldBlock) {
+                statusStarted.countDown()
+                try {
+                    check(releaseStatus.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Status was not released." }
+                } catch (error: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw error
+                } finally {
+                    statusFinished.countDown()
+                }
+            }
+            return status
         }
 
         override fun observeRun(runId: RunId): RunEventObservation {
-            observedRunIds += runId
-            return if (observations.isEmpty()) observation else observations.removeFirst()
+            return synchronized(this) {
+                observedRunIds += runId
+                if (observations.isEmpty()) observation else observations.removeFirst()
+            }
         }
     }
 
@@ -411,8 +513,11 @@ class RunReconciliationStateHolderTest {
                 override fun hasNext(): Boolean {
                     return try {
                         started.countDown()
-                        release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                        release.await()
                         false
+                    } catch (error: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        throw error
                     } finally {
                         finished.countDown()
                     }

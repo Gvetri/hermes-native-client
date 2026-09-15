@@ -202,7 +202,7 @@ class EntryStateHolder(
     private val runObservationJobs = mutableMapOf<SessionId, Job>()
     private val runObservations = mutableMapOf<SessionId, RunEventObservation>()
     private val runObservationStates = mutableMapOf<SessionId, RunObservationState>()
-    private val reconcilingSessions = mutableSetOf<SessionId>()
+    private val reconcilingSessions = mutableMapOf<SessionId, Long>()
 
     fun onEvent(event: EntryUiEvent) {
         when (event) {
@@ -565,6 +565,7 @@ class EntryStateHolder(
             if (applied) {
                 reconcileOpenedRun(
                     sessionId = sessionId,
+                    requestSessionGeneration = request.generation,
                     requestConnectionGeneration = requestConnectionGeneration,
                     sessionGateway = gateway,
                     restartObservation = true,
@@ -583,6 +584,7 @@ class EntryStateHolder(
 
     private suspend fun reconcileOpenedRun(
         sessionId: SessionId,
+        requestSessionGeneration: Long,
         requestConnectionGeneration: Long,
         sessionGateway: SessionGatewayPort,
         restartObservation: Boolean,
@@ -600,7 +602,7 @@ class EntryStateHolder(
             }
         if (run == null) {
             if (clearRefreshWhenNoRun) {
-                finishReconciliation(sessionId, requestConnectionGeneration)
+                finishReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)
             }
             return
         }
@@ -609,9 +611,13 @@ class EntryStateHolder(
             sessionId = sessionId,
             runId = run.id,
             requestConnectionGeneration = requestConnectionGeneration,
+            requestSessionGeneration = requestSessionGeneration,
             sessionGateway = sessionGateway,
         )
-        if (restartObservation) {
+        if (
+            restartObservation &&
+            shouldReconcileCurrentSession(requestConnectionGeneration, requestSessionGeneration, sessionId)
+        ) {
             synchronized(sessionRequestLock) {
                 sessionRuns[sessionId].orEmpty().latestActiveRun()
             }?.let { activeRun -> startRunObservation(sessionId, activeRun) }
@@ -622,46 +628,51 @@ class EntryStateHolder(
         sessionId: SessionId,
         runId: RunId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
         sessionGateway: SessionGatewayPort,
     ): AuthoritativeRunReconciliation? {
-        if (!beginReconciliation(sessionId, requestConnectionGeneration)) return null
+        if (!beginReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)) return null
         return try {
             val runGateway =
                 synchronized(sessionRequestLock) {
                     runGateway?.takeIf {
                         connectionGeneration == requestConnectionGeneration &&
+                            sessionRequestGeneration == requestSessionGeneration &&
                             _uiState.value.sessionList?.openedSession?.session?.id == sessionId
                     }
                 } ?: return null
             val result = ReconcileRun(runGateway, sessionGateway).execute(runId, sessionId)
-            applyAuthoritativeRunReconciliation(sessionId, requestConnectionGeneration, result)
+            applyAuthoritativeRunReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration, result)
             result
         } catch (error: CancellationException) {
             throw error
         } catch (_: GatewayException) {
-            showRunReconciliationFailure(sessionId, runId, requestConnectionGeneration)
+            showRunReconciliationFailure(sessionId, runId, requestConnectionGeneration, requestSessionGeneration)
             null
         } catch (_: Exception) {
-            showRunReconciliationFailure(sessionId, runId, requestConnectionGeneration)
+            showRunReconciliationFailure(sessionId, runId, requestConnectionGeneration, requestSessionGeneration)
             null
         } finally {
-            finishReconciliation(sessionId, requestConnectionGeneration)
+            finishReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)
         }
     }
 
     private fun beginReconciliation(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
     ): Boolean =
         synchronized(sessionRequestLock) {
             val opened = _uiState.value.sessionList?.openedSession
             if (
                 connectionGeneration != requestConnectionGeneration ||
+                sessionRequestGeneration != requestSessionGeneration ||
                 opened?.session?.id != sessionId ||
-                !reconcilingSessions.add(sessionId)
+                reconcilingSessions[sessionId] == requestSessionGeneration
             ) {
                 false
             } else {
+                reconcilingSessions[sessionId] = requestSessionGeneration
                 _uiState.value =
                     _uiState.value.copy(
                         sessionList =
@@ -681,10 +692,18 @@ class EntryStateHolder(
     private fun finishReconciliation(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
     ) {
         synchronized(sessionRequestLock) {
-            reconcilingSessions.remove(sessionId)
-            if (connectionGeneration != requestConnectionGeneration) return
+            if (reconcilingSessions[sessionId] == requestSessionGeneration) {
+                reconcilingSessions.remove(sessionId)
+            }
+            if (
+                connectionGeneration != requestConnectionGeneration ||
+                sessionRequestGeneration != requestSessionGeneration
+            ) {
+                return
+            }
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             _uiState.value =
@@ -704,10 +723,16 @@ class EntryStateHolder(
     private fun applyAuthoritativeRunReconciliation(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
         reconciliation: AuthoritativeRunReconciliation,
     ) {
         synchronized(sessionRequestLock) {
-            if (connectionGeneration != requestConnectionGeneration) return
+            if (
+                connectionGeneration != requestConnectionGeneration ||
+                sessionRequestGeneration != requestSessionGeneration
+            ) {
+                return
+            }
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             val run = reconciliation.run
@@ -762,9 +787,15 @@ class EntryStateHolder(
         sessionId: SessionId,
         runId: RunId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
     ) {
         synchronized(sessionRequestLock) {
-            if (connectionGeneration != requestConnectionGeneration) return
+            if (
+                connectionGeneration != requestConnectionGeneration ||
+                sessionRequestGeneration != requestSessionGeneration
+            ) {
+                return
+            }
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             val knownRun =
@@ -1855,6 +1886,7 @@ class EntryStateHolder(
                         if (applied) {
                             reconcileOpenedRun(
                                 sessionId = sessionId,
+                                requestSessionGeneration = request.generation,
                                 requestConnectionGeneration = requestConnectionGeneration,
                                 sessionGateway = gateway,
                                 restartObservation = true,
@@ -1953,6 +1985,7 @@ class EntryStateHolder(
                 val opened = current.openedSession ?: return@synchronized null
                 val sessionId = opened.session.id
                 val requestConnectionGeneration = connectionGeneration
+                val requestSessionGeneration = sessionRequestGeneration
                 val knownRuns =
                     sessionRuns[sessionId].orEmpty().ifEmpty {
                         (opened.activeRuns + listOfNotNull(opened.latestRun)).distinctBy { it.id }
@@ -1999,7 +2032,13 @@ class EntryStateHolder(
                             onRunSubmissionCompleted?.invoke()
                         }
                     } catch (_: TimeoutCancellationException) {
-                        if (reconcileTimedOutSend(sessionId, requestConnectionGeneration, knownRunIds)) {
+                        if (reconcileTimedOutSend(
+                                sessionId,
+                                requestConnectionGeneration,
+                                requestSessionGeneration,
+                                knownRunIds,
+                            )
+                        ) {
                             synchronized(sessionRequestLock) {
                                 sessionRuns[sessionId].orEmpty().latestActiveRun()
                             }?.let { activeRun -> startRunObservation(sessionId, activeRun) }
@@ -2026,9 +2065,10 @@ class EntryStateHolder(
     private suspend fun reconcileTimedOutSend(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
         knownRunIds: Set<RunId>,
     ): Boolean {
-        if (!beginReconciliation(sessionId, requestConnectionGeneration)) return false
+        if (!beginReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)) return false
         return try {
             val gateways =
                 synchronized(sessionRequestLock) {
@@ -2036,6 +2076,7 @@ class EntryStateHolder(
                     val runGateway = runGateway
                     if (
                         connectionGeneration != requestConnectionGeneration ||
+                        sessionRequestGeneration != requestSessionGeneration ||
                         sessionGateway == null ||
                         runGateway == null
                     ) {
@@ -2045,32 +2086,38 @@ class EntryStateHolder(
                     }
                 }
             if (gateways == null) {
-                showTimedOutSendFailure(sessionId, requestConnectionGeneration)
+                showTimedOutSendFailure(sessionId, requestConnectionGeneration, requestSessionGeneration)
                 true
             } else {
                 val result = ReconcileSession(gateways.first, gateways.second).execute(sessionId, knownRunIds)
-                applyTimedOutSendReconciliation(sessionId, requestConnectionGeneration, result)
+                applyTimedOutSendReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration, result)
             }
         } catch (error: CancellationException) {
             throw error
         } catch (_: GatewayException) {
-            showTimedOutSendFailure(sessionId, requestConnectionGeneration)
+            showTimedOutSendFailure(sessionId, requestConnectionGeneration, requestSessionGeneration)
             true
         } catch (_: Exception) {
-            showTimedOutSendFailure(sessionId, requestConnectionGeneration)
+            showTimedOutSendFailure(sessionId, requestConnectionGeneration, requestSessionGeneration)
             true
         } finally {
-            finishReconciliation(sessionId, requestConnectionGeneration)
+            finishReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)
         }
     }
 
     private fun applyTimedOutSendReconciliation(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
         reconciliation: org.hermesnative.client.feature.entry.domain.SessionReconciliation,
     ): Boolean =
         synchronized(sessionRequestLock) {
-            if (connectionGeneration != requestConnectionGeneration) return@synchronized false
+            if (
+                connectionGeneration != requestConnectionGeneration ||
+                sessionRequestGeneration != requestSessionGeneration
+            ) {
+                return@synchronized false
+            }
             val current = _uiState.value.sessionList ?: return@synchronized false
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return@synchronized false
             val discoveredRun = reconciliation.discoveredRuns.singleOrNull()
@@ -2154,9 +2201,15 @@ class EntryStateHolder(
     private fun showTimedOutSendFailure(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
     ) {
         synchronized(sessionRequestLock) {
-            if (connectionGeneration != requestConnectionGeneration) return
+            if (
+                connectionGeneration != requestConnectionGeneration ||
+                sessionRequestGeneration != requestSessionGeneration
+            ) {
+                return
+            }
             pendingRunDrafts.remove(sessionId)
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
@@ -2356,9 +2409,13 @@ class EntryStateHolder(
                 sessionId = sessionId,
                 runId = run.id,
                 requestConnectionGeneration = requestConnectionGeneration,
+                requestSessionGeneration = requestSessionGeneration,
                 sessionGateway =
                     synchronized(sessionRequestLock) {
-                        sessionGateway?.takeIf { connectionGeneration == requestConnectionGeneration }
+                        sessionGateway?.takeIf {
+                            connectionGeneration == requestConnectionGeneration &&
+                                sessionRequestGeneration == requestSessionGeneration
+                        }
                     } ?: return,
             )
         }
