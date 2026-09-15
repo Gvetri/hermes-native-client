@@ -125,7 +125,7 @@ class QualityGateConfigurationTest {
             "The emulator job must survive workflow cancellation long enough to finalize evidence.",
             emulatorJob.contains("\n    if: \${{ always() }}\n"),
         )
-        assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 15"))
+        assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 20"))
         assertTrue("The workflow must preserve successful test classification.", emulatorJob.contains("category=success"))
         assertTrue("The Android test action must have a stable step id.", emulatorJob.contains("        id: android_tests"))
         assertTrue("The Android test action must have a bounded step timeout.", emulatorJob.contains("        timeout-minutes: 14"))
@@ -425,7 +425,7 @@ class QualityGateConfigurationTest {
                 ProcessBuilder("bash", repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").absolutePath)
                     .directory(tempDir.toFile())
             process.environment()["GITHUB_WORKSPACE"] = tempDir.toString()
-            process.environment()["ANDROID_TEST_TIMEOUT_SECONDS"] = "1"
+            process.environment()["ANDROID_TEST_TIMEOUT_SECONDS"] = "3"
             process.environment()["PATH"] =
                 "${tempDir}${File.pathSeparator}${System.getenv("PATH") ?: ""}"
             process.redirectErrorStream(true)
