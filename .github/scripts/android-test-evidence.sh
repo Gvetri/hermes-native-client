@@ -290,6 +290,9 @@ run_gradle_step \
     "presentation_unit_tests" \
     ./gradlew :feature:entry:presentation:testDebugUnitTest --no-daemon --console=plain --info
 run_gradle_step \
+    "required_unit_test_evidence" \
+    ./gradlew verifyRequiredUnitTests --no-daemon --console=plain --info
+run_gradle_step \
     "app_instrumentation" \
     ./gradlew :app:verifyConnectedAndroidTests --no-daemon --console=plain --info \
     -Pandroid.testInstrumentationRunnerArguments.class=org.hermesnative.client.MainActivityTest,org.hermesnative.client.MainActivitySystemLightThemeTest,org.hermesnative.client.MainActivitySystemDarkThemeTest

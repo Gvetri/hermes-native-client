@@ -141,6 +141,10 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must record incomplete diagnostic capture.", evidenceScript.contains("capture_incomplete"))
         assertTrue("The wrapper must preserve instrumentation output.", evidenceScript.contains("androidTest-results"))
         assertTrue("The wrapper must preserve test runner output.", evidenceScript.contains("runner-output.log"))
+        assertTrue(
+            "The wrapper must verify required unit-test evidence.",
+            evidenceScript.contains("./gradlew verifyRequiredUnitTests --no-daemon --console=plain --info"),
+        )
         assertTrue("The wrapper must identify timeouts.", evidenceScript.contains("timeout"))
         assertTrue("The wrapper must identify cancellations.", evidenceScript.contains("cancellation"))
         assertTrue("The wrapper must identify test failures.", evidenceScript.contains("test_failure"))
