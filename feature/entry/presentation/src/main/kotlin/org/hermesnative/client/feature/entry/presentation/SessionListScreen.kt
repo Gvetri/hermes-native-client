@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.isActive
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -744,12 +745,14 @@ private fun SessionDetailContent(
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        val runIsActive = state.latestRun?.isActive() == true
-        val composerEnabled =
-            !state.isSending &&
-                !state.isRefreshing &&
-                !listRequestActive
-        val sendEnabled = composerEnabled && !runIsActive && state.composerText.isNotBlank()
+        val runIsActive = state.activeRuns.any(Run::isActive) || state.latestRun?.isActive() == true
+        val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null
+        val sendEnabled =
+            composerEnabled &&
+                !state.isSending &&
+                !listRequestActive &&
+                !runIsActive &&
+                state.composerText.isNotBlank()
         OutlinedTextField(
             value = state.composerText,
             onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },

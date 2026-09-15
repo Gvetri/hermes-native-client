@@ -125,6 +125,92 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun reopening_a_pending_submission_preserves_a_changed_draft_and_blocks_duplicate_send() {
+        val session = session("session-1")
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run once"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) { it.sessionList?.openedSession?.isSending == true }
+            assertEquals(
+                "Run once",
+                requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).composerText,
+            )
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("New draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertEquals(listOf(session.id to "Run once"), gateway.runRequests)
+
+            gateway.releaseRun.countDown()
+            awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
+            val completed = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertEquals("New draft", completed.composerText)
+            assertEquals(run, completed.latestRun)
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun an_older_active_run_blocks_submission_when_the_latest_run_is_terminal() {
+        val session = session("session-1")
+        val gateway =
+            FakeGateway(
+                sessions = listOf(session),
+                histories =
+                    mapOf(
+                        session.id to
+                            SessionHistory(
+                                session.id,
+                                listOf(
+                                    GatewayHistoryMessage(
+                                        "run-1-message",
+                                        "user",
+                                        "First",
+                                        RunId("run-1"),
+                                        "running",
+                                    ),
+                                    GatewayHistoryMessage(
+                                        "run-2-message",
+                                        "user",
+                                        "Second",
+                                        RunId("run-2"),
+                                        "succeeded",
+                                    ),
+                                ),
+                                null,
+                            ),
+                    ),
+            )
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+
+            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertTrue(opened.activeRuns.any { it.id == RunId("run-1") })
+            assertEquals(emptyList<Pair<SessionId, String>>(), gateway.runRequests)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun an_active_run_in_one_session_does_not_disable_a_different_session() {
         val first = session("session-1")
         val second = session("session-2")

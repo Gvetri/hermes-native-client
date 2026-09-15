@@ -34,6 +34,7 @@ import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
+import org.hermesnative.client.feature.entry.domain.isActive
 
 sealed interface EntryUiEvent {
     data object AddGatewayConnectionClicked : EntryUiEvent
@@ -166,7 +167,8 @@ class EntryStateHolder(
     private val mutationJobs = mutableMapOf<SessionId, Job>()
     private val runJobs = mutableMapOf<SessionId, Job>()
     private val sessionDrafts = mutableMapOf<SessionId, String>()
-    private val latestRuns = mutableMapOf<SessionId, Run>()
+    private val pendingRunDrafts = mutableMapOf<SessionId, String>()
+    private val sessionRuns = mutableMapOf<SessionId, List<Run>>()
 
     fun onEvent(event: EntryUiEvent) {
         when (event) {
@@ -213,7 +215,8 @@ class EntryStateHolder(
                 runJobs.values.toList().also {
                     runJobs.clear()
                     sessionDrafts.clear()
-                    latestRuns.clear()
+                    pendingRunDrafts.clear()
+                    sessionRuns.clear()
                 }
             }
         mutationJobsToCancel.forEach(Job::cancel)
@@ -308,7 +311,8 @@ class EntryStateHolder(
                 sessionGateway = null
                 runGateway = null
                 sessionDrafts.clear()
-                latestRuns.clear()
+                pendingRunDrafts.clear()
+                sessionRuns.clear()
                 (mutationJobs.values + runJobs.values).toList().also {
                     mutationJobs.clear()
                     runJobs.clear()
@@ -442,6 +446,7 @@ class EntryStateHolder(
                     current
                 } else {
                     val authoritativeSession = openedSession.session.toSessionItemUiState()
+                    val knownRuns = rememberSessionRuns(sessionId, openedSession)
                     current.copy(
                         sessions =
                             current.sessions
@@ -450,7 +455,9 @@ class EntryStateHolder(
                         openedSession =
                             openedSession.toOpenSessionUiState(
                                 composerText = sessionDrafts[sessionId] ?: previous.composerText,
-                                latestRun = rememberLatestRun(sessionId, openedSession, previous.latestRun),
+                                latestRun = knownRuns.latestRun(),
+                                activeRuns = knownRuns.activeRuns(),
+                                isSending = previous.isSending || runJobs.containsKey(sessionId),
                             ),
                         errorCategory = null,
                     )
@@ -765,18 +772,15 @@ class EntryStateHolder(
         }
     }
 
-    private fun rememberLatestRun(
+    private fun rememberSessionRuns(
         sessionId: SessionId,
         openedSession: OpenedSession,
-        previousRun: Run?,
-    ): Run? {
-        val confirmedRun = openedSession.history.latestRun()
-        return if (confirmedRun != null) {
-            latestRuns[sessionId] = confirmedRun
-            confirmedRun
-        } else {
-            latestRuns[sessionId] ?: previousRun
+    ): List<Run> {
+        val confirmedRuns = openedSession.history.runs()
+        if (confirmedRuns.isNotEmpty()) {
+            sessionRuns[sessionId] = confirmedRuns
         }
+        return sessionRuns[sessionId].orEmpty()
     }
 
     private fun createMutationJob(
@@ -1472,6 +1476,7 @@ class EntryStateHolder(
                         val openedSession = OpenSession(gateway).execute(sessionId)
                         updateCurrentSessionRequest(request.generation, request.query) { current ->
                             val authoritativeSession = openedSession.session.toSessionItemUiState()
+                            val knownRuns = rememberSessionRuns(sessionId, openedSession)
                             current.copy(
                                 sessions =
                                     current.sessions
@@ -1486,7 +1491,9 @@ class EntryStateHolder(
                                 openedSession =
                                     openedSession.toOpenSessionUiState(
                                         composerText = sessionDrafts[sessionId].orEmpty(),
-                                        latestRun = rememberLatestRun(sessionId, openedSession, latestRuns[sessionId]),
+                                        latestRun = knownRuns.latestRun(),
+                                        activeRuns = knownRuns.activeRuns(),
+                                        isSending = runJobs.containsKey(sessionId),
                                     ),
                                 errorCategory = null,
                             )
@@ -1552,7 +1559,6 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession ?: return
-            if (opened.isSending) return
             sessionDrafts[opened.session.id] = value
             _uiState.value =
                 _uiState.value.copy(
@@ -1575,14 +1581,20 @@ class EntryStateHolder(
                 val current = _uiState.value.sessionList ?: return@synchronized null
                 val opened = current.openedSession ?: return@synchronized null
                 val sessionId = opened.session.id
-                val latestRun = latestRuns[sessionId] ?: opened.latestRun
+                val knownRuns =
+                    sessionRuns[sessionId].orEmpty().ifEmpty {
+                        (opened.activeRuns + listOfNotNull(opened.latestRun)).distinctBy { it.id }
+                    }
+                val latestRun = knownRuns.latestRun() ?: opened.latestRun
                 val submissionState =
                     RunSubmissionState(
                         latestRun = latestRun,
+                        activeRuns = knownRuns.activeRuns(),
                         isSubmissionPending = opened.isSending || runJobs.containsKey(sessionId),
                     )
                 if (
                     !submissionState.canSubmit ||
+                    opened.composerText.isBlank() ||
                     opened.isRefreshing ||
                     current.hasPendingMutation
                 ) {
@@ -1599,6 +1611,8 @@ class EntryStateHolder(
                                     ),
                             ),
                     )
+                pendingRunDrafts[sessionId] = opened.composerText
+                sessionDrafts[sessionId] = opened.composerText
                 createRunJob(sessionId) {
                     try {
                         val run = SubmitMessage(gateway).execute(sessionId, opened.composerText)
@@ -1620,8 +1634,13 @@ class EntryStateHolder(
         run: Run,
     ) {
         synchronized(sessionRequestLock) {
-            latestRuns[sessionId] = run
-            sessionDrafts.remove(sessionId)
+            val submittedDraft = pendingRunDrafts.remove(sessionId)
+            if (sessionDrafts[sessionId] == submittedDraft) {
+                sessionDrafts.remove(sessionId)
+            }
+            val knownRuns =
+                (sessionRuns[sessionId].orEmpty().filterNot { it.id == run.id } + run)
+                    .also { sessionRuns[sessionId] = it }
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             _uiState.value =
@@ -1630,8 +1649,9 @@ class EntryStateHolder(
                         current.copy(
                             openedSession =
                                 opened.copy(
-                                    composerText = "",
-                                    latestRun = run,
+                                    composerText = sessionDrafts[sessionId].orEmpty(),
+                                    latestRun = knownRuns.latestRun() ?: run,
+                                    activeRuns = knownRuns.activeRuns(),
                                     isSending = false,
                                     sendErrorCategory = null,
                                 ),
@@ -1642,6 +1662,7 @@ class EntryStateHolder(
 
     private fun showMessageSendFailure(sessionId: SessionId) {
         synchronized(sessionRequestLock) {
+            pendingRunDrafts.remove(sessionId)
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             _uiState.value =
@@ -1662,20 +1683,30 @@ class EntryStateHolder(
 private fun OpenedSession.toOpenSessionUiState(
     composerText: String = "",
     latestRun: Run? = null,
+    activeRuns: List<Run> = history.runs().activeRuns(),
+    isSending: Boolean = false,
 ): OpenSessionUiState =
     OpenSessionUiState(
         session = session.toSessionItemUiState(),
         messages = history.messages.map { it.toSessionMessageUiState() }.chronological(),
         composerText = composerText,
         latestRun = latestRun ?: history.latestRun(),
+        activeRuns = activeRuns,
+        isSending = isSending,
     )
 
-private fun SessionHistory.latestRun(): Run? =
-    messages.asReversed().mapNotNull { message ->
+private fun SessionHistory.runs(): List<Run> =
+    messages.mapNotNull { message ->
         val runId = message.runId ?: return@mapNotNull null
         val status = message.runStatus ?: return@mapNotNull null
         Run(runId, sessionId, status)
-    }.firstOrNull()
+    }
+
+private fun SessionHistory.latestRun(): Run? = runs().latestRun()
+
+private fun List<Run>.latestRun(): Run? = lastOrNull()
+
+private fun List<Run>.activeRuns(): List<Run> = filter(Run::isActive)
 
 private data class SessionRequestContext(
     val generation: Long,

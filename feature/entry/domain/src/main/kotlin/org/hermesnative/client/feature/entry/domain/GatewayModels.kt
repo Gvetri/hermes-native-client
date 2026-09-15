@@ -76,10 +76,14 @@ fun Run.isActive(): Boolean = status.trim().lowercase(Locale.ROOT) !in terminalR
 
 data class RunSubmissionState(
     val latestRun: Run? = null,
+    val activeRuns: List<Run> = emptyList(),
     val isSubmissionPending: Boolean = false,
 ) {
     val canSubmit: Boolean
-        get() = !isSubmissionPending && latestRun?.isActive() != true
+        get() =
+            !isSubmissionPending &&
+                activeRuns.none(Run::isActive) &&
+                latestRun?.isActive() != true
 }
 
 enum class RunEventType {

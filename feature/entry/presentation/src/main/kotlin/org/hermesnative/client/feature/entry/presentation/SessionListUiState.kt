@@ -79,6 +79,7 @@ data class OpenSessionUiState(
     val isStale: Boolean = false,
     val errorCategory: SessionHistoryErrorCategory? = null,
     val latestRun: Run? = null,
+    val activeRuns: List<Run> = emptyList(),
     val isSending: Boolean = false,
     val sendErrorCategory: MessageSendErrorCategory? = null,
 )
