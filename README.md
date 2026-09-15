@@ -44,7 +44,7 @@ The gate runs Kotlin formatting, Android lint, unit tests, architecture checks, 
 ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests :app:verifyConnectedAndroidTests
 ```
 
-The repository workflow runs these checks on GitHub-hosted runners. Its `api24-launch-themes` emulator job uses an API 24-compatible x86_64 image and explicitly runs the light- and dark-system-theme `MainActivity` launch tests. It fails when instrumentation results are missing, empty, skipped, or unsuccessful.
+The repository workflow runs these checks on GitHub-hosted runners. Its `api24-launch-themes` emulator job uses an API 24-compatible x86_64 image and explicitly runs the light- and dark-system-theme `MainActivity` launch tests. It fails when instrumentation results are missing, empty, skipped, or unsuccessful. Failed, cancelled, and timed-out Android test runs upload sanitized runner output, logcat, instrumentation reports, and timeout context for 14 days when sanitization completes.
 
 ## Deterministic fixture provenance
 
