@@ -1,16 +1,20 @@
 package org.hermesnative.client.feature.entry.presentation
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Rule
 import org.junit.Test
@@ -112,6 +116,68 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Preserved draft").assertIsDisplayed()
         composeTestRule.onNodeWithText("Refreshing Session history…").assertIsDisplayed()
         composeTestRule.onNodeWithText("Refresh history").assertIsNotEnabled()
+    }
+
+    @Test
+    fun uncertain_run_preserves_temporary_content_and_disables_send() {
+        val runId = RunId("run-1")
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "Connected",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            messages =
+                                                listOf(
+                                                    SessionMessageUiState(
+                                                        id = "message-1",
+                                                        role = "user",
+                                                        content = "Preserved content",
+                                                    ),
+                                                ),
+                                            composerText = "Preserved draft",
+                                            latestRun = Run(runId, SessionId("session-1"), "running"),
+                                            latestRunState = RunPresentationState.UNCERTAIN,
+                                            activeResponse =
+                                                SessionMessageUiState(
+                                                    id = "active-response:run-1",
+                                                    role = "assistant",
+                                                    content = "Partial response",
+                                                    runId = runId,
+                                                    runState = RunPresentationState.UNCERTAIN,
+                                                    streamInterrupted = true,
+                                                ),
+                                            isStale = true,
+                                            errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Preserved content").assertExists()
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        composeTestRule.onNodeWithText("Partial response").assertExists()
+        composeTestRule.onNodeWithText("Preserved draft").assertIsDisplayed()
+        val uncertainRunStateNodes = composeTestRule.onAllNodesWithText("Run state: Uncertain")
+        uncertainRunStateNodes.assertCountEquals(2)
+        uncertainRunStateNodes[0].assertIsDisplayed()
+        uncertainRunStateNodes[1].assertExists()
+        composeTestRule.onNodeWithText("The displayed Session history may be stale.").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(SessionHistoryErrorCategory.RECONCILIATION_FAILED.safeMessage)
+            .assertExists()
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
     }
 
     @Test

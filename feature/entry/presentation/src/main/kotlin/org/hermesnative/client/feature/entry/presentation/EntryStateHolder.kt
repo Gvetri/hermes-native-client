@@ -487,6 +487,12 @@ class EntryStateHolder(
             val openedSession = sessionList.openedSession ?: return@synchronized null
             if (openedSession.isRefreshing || sessionList.hasActiveRequest) return@synchronized null
 
+            val runIdToReconcile =
+                sessionRuns[openedSession.session.id]
+                    .orEmpty()
+                    .latestActiveRun()
+                    ?.id
+                    ?: runObservationStates[openedSession.session.id]?.run?.id
             val requestGeneration = beginSessionRequest()
             val requestConnectionGeneration = connectionGeneration
             val request = SessionRequestContext(requestGeneration, sessionList.searchQuery, cursor = null)
@@ -508,6 +514,7 @@ class EntryStateHolder(
                     request = request,
                     sessionId = openedSession.session.id,
                     requestConnectionGeneration = requestConnectionGeneration,
+                    runIdToReconcile = runIdToReconcile,
                 )
             }
         }
@@ -517,6 +524,7 @@ class EntryStateHolder(
         request: SessionRequestContext,
         sessionId: SessionId,
         requestConnectionGeneration: Long,
+        runIdToReconcile: RunId? = null,
     ) {
         try {
             val openedSession = OpenSession(gateway).execute(sessionId)
@@ -560,6 +568,8 @@ class EntryStateHolder(
                     requestConnectionGeneration = requestConnectionGeneration,
                     sessionGateway = gateway,
                     restartObservation = true,
+                    runIdToReconcile = runIdToReconcile,
+                    clearRefreshWhenNoRun = true,
                 )
             }
         } catch (error: CancellationException) {
@@ -576,27 +586,35 @@ class EntryStateHolder(
         requestConnectionGeneration: Long,
         sessionGateway: SessionGatewayPort,
         restartObservation: Boolean,
+        runIdToReconcile: RunId? = null,
+        clearRefreshWhenNoRun: Boolean = false,
     ) {
-        val activeRun =
+        val run =
             synchronized(sessionRequestLock) {
-                sessionRuns[sessionId].orEmpty().latestActiveRun()
+                sessionRuns[sessionId].orEmpty().lastOrNull { it.id == runIdToReconcile }
+                    ?: runIdToReconcile?.let { runId ->
+                        runObservationStates[sessionId]?.takeIf { it.run.id == runId }?.run
+                    }
+                    ?: sessionRuns[sessionId].orEmpty().latestActiveRun()
+                    ?: runObservationStates[sessionId]?.takeIf { state -> !state.state.isTerminal() }?.run
             }
-        if (activeRun == null) {
-            finishReconciliation(sessionId, requestConnectionGeneration)
+        if (run == null) {
+            if (clearRefreshWhenNoRun) {
+                finishReconciliation(sessionId, requestConnectionGeneration)
+            }
             return
         }
 
-        val result =
-            reconcileRun(
-                sessionId = sessionId,
-                runId = activeRun.id,
-                requestConnectionGeneration = requestConnectionGeneration,
-                sessionGateway = sessionGateway,
-            )
-        if (restartObservation && result != null) {
+        reconcileRun(
+            sessionId = sessionId,
+            runId = run.id,
+            requestConnectionGeneration = requestConnectionGeneration,
+            sessionGateway = sessionGateway,
+        )
+        if (restartObservation) {
             synchronized(sessionRequestLock) {
                 sessionRuns[sessionId].orEmpty().latestActiveRun()
-            }?.let { run -> startRunObservation(sessionId, run) }
+            }?.let { activeRun -> startRunObservation(sessionId, activeRun) }
         }
     }
 
@@ -1093,12 +1111,8 @@ class EntryStateHolder(
         val confirmedRuns = openedSession.history.runs()
         if (confirmedRuns.isNotEmpty()) {
             val localRuns = sessionRuns[sessionId].orEmpty()
-            val confirmedIds = confirmedRuns.mapTo(mutableSetOf()) { it.id }
-            val retainedLocalRuns =
-                localRuns.filter { localRun ->
-                    localRun.id !in confirmedIds && localRun.isActive()
-                }
-            sessionRuns[sessionId] = confirmedRuns + retainedLocalRuns
+            val retainedLocalRuns = localRuns.filter(Run::isActive)
+            sessionRuns[sessionId] = mergeRuns(confirmedRuns, retainedLocalRuns)
         }
         return sessionRuns[sessionId].orEmpty()
     }
@@ -1791,6 +1805,7 @@ class EntryStateHolder(
 
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
+                val requestConnectionGeneration = connectionGeneration
                 val request = SessionRequestContext(requestGeneration, query, cursor = null)
                 _uiState.value =
                     state.copy(
@@ -1838,11 +1853,12 @@ class EntryStateHolder(
                                 )
                             }
                         if (applied) {
-                            val activeRun =
-                                synchronized(sessionRequestLock) {
-                                    sessionRuns[sessionId].orEmpty().latestActiveRun()
-                                }
-                            activeRun?.let { run -> startRunObservation(sessionId, run) }
+                            reconcileOpenedRun(
+                                sessionId = sessionId,
+                                requestConnectionGeneration = requestConnectionGeneration,
+                                sessionGateway = gateway,
+                                restartObservation = true,
+                            )
                         }
                     } catch (error: CancellationException) {
                         throw error
@@ -2251,10 +2267,16 @@ class EntryStateHolder(
                 )
             lateinit var observationJob: Job
             val requestConnectionGeneration = connectionGeneration
+            val requestSessionGeneration = sessionRequestGeneration
             observationJob =
                 scope.launch(start = CoroutineStart.LAZY) {
                     try {
-                        observeRun(sessionId, run, requestConnectionGeneration)
+                        observeRun(
+                            sessionId = sessionId,
+                            run = run,
+                            requestConnectionGeneration = requestConnectionGeneration,
+                            requestSessionGeneration = requestSessionGeneration,
+                        )
                     } finally {
                         synchronized(sessionRequestLock) {
                             if (runObservationJobs[sessionId] === observationJob) {
@@ -2273,6 +2295,7 @@ class EntryStateHolder(
         sessionId: SessionId,
         run: Run,
         requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
     ) {
         var observation: RunEventObservation? = null
         var shouldReconcile = false
@@ -2328,7 +2351,7 @@ class EntryStateHolder(
                 }
             }
         }
-        if (shouldReconcile) {
+        if (shouldReconcile && shouldReconcileCurrentSession(requestConnectionGeneration, requestSessionGeneration, sessionId)) {
             reconcileRun(
                 sessionId = sessionId,
                 runId = run.id,
@@ -2340,6 +2363,17 @@ class EntryStateHolder(
             )
         }
     }
+
+    private fun shouldReconcileCurrentSession(
+        requestConnectionGeneration: Long,
+        requestSessionGeneration: Long,
+        sessionId: SessionId,
+    ): Boolean =
+        synchronized(sessionRequestLock) {
+            connectionGeneration == requestConnectionGeneration &&
+                sessionRequestGeneration == requestSessionGeneration &&
+                _uiState.value.sessionList?.openedSession?.session?.id == sessionId
+        }
 
     private fun applyRunEvent(
         sessionId: SessionId,

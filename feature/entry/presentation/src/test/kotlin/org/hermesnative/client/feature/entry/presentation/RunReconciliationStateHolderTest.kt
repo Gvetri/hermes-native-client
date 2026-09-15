@@ -163,6 +163,59 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun reopening_an_observed_run_reconciles_before_resuming_observation() {
+        val session = session()
+        val run = Run(RunId("run-1"), session.id, "running")
+        val activeHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("message-1", "user", "Run this", run.id, "running")),
+                null,
+            )
+        val firstObservation = BlockingObservation()
+        val secondObservation = BlockingObservation()
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(activeHistory)
+                histories.add(activeHistory)
+                histories.add(activeHistory)
+                histories.add(activeHistory)
+                statuses.add(run)
+                statuses.add(run)
+                observations.add(firstObservation)
+                observations.add(secondObservation)
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    gateway.statusRequests.size == 1
+            }
+            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            awaitState(holder) { it.sessionList?.openedSession == null }
+            assertTrue(firstObservation.finished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    gateway.statusRequests.size == 2 &&
+                    gateway.historyRequests == 4 &&
+                    gateway.observedRunIds.size == 2
+            }
+
+            assertEquals(listOf(run.id, run.id), gateway.observedRunIds)
+        } finally {
+            firstObservation.release.countDown()
+            secondObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun send_timeout_refetches_session_history_and_does_not_submit_again() {
         val session = session()
         val gateway =
@@ -255,6 +308,7 @@ class RunReconciliationStateHolderTest {
         val runRequests = mutableListOf<Pair<SessionId, String>>()
         val statusRequests = mutableListOf<RunId>()
         val observedRunIds = mutableListOf<RunId>()
+        val observations = ArrayDeque<RunEventObservation>()
         var historyRequests = 0
         var observation: RunEventObservation = ScriptedObservation(emptyList())
         var blockRunCreation = false
@@ -314,7 +368,7 @@ class RunReconciliationStateHolderTest {
 
         override fun observeRun(runId: RunId): RunEventObservation {
             observedRunIds += runId
-            return observation
+            return if (observations.isEmpty()) observation else observations.removeFirst()
         }
     }
 
@@ -348,21 +402,27 @@ class RunReconciliationStateHolderTest {
     private class BlockingObservation : RunEventObservation {
         val started = CountDownLatch(1)
         val closed = CountDownLatch(1)
+        val finished = CountDownLatch(1)
         val release = CountDownLatch(1)
         private val closeCount = AtomicInteger(0)
 
         override fun iterator(): Iterator<RunEvent> =
             object : Iterator<RunEvent> {
                 override fun hasNext(): Boolean {
-                    started.countDown()
-                    release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-                    return false
+                    return try {
+                        started.countDown()
+                        release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+                        false
+                    } finally {
+                        finished.countDown()
+                    }
                 }
 
                 override fun next(): RunEvent = error("not used")
             }
 
         override fun close() {
+            release.countDown()
             if (closeCount.incrementAndGet() == 1) closed.countDown()
         }
     }
