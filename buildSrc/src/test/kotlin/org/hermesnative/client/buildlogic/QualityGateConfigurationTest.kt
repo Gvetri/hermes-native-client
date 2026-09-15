@@ -1,10 +1,12 @@
 package org.hermesnative.client.buildlogic
 
 import java.io.File
+import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume
 import org.junit.Test
 
 class QualityGateConfigurationTest {
@@ -14,6 +16,21 @@ class QualityGateConfigurationTest {
                 "architecture.projectDir must identify the repository root"
             },
         )
+
+    private fun assumePosixWrapperSupport() {
+        Assume.assumeTrue(
+            "The evidence wrapper requires a POSIX filesystem.",
+            FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+        )
+        listOf("bash", "timeout", "python3").forEach { tool ->
+            Assume.assumeTrue(
+                "The evidence wrapper requires $tool.",
+                System.getenv("PATH").orEmpty().split(File.pathSeparator).any { directory ->
+                    File(directory, tool).canExecute()
+                },
+            )
+        }
+    }
 
     @Test
     fun gradle_wrapper_declares_official_distribution_checksum() {
@@ -146,6 +163,7 @@ class QualityGateConfigurationTest {
 
     @Test
     fun evidence_wrapper_redacts_quoted_json_credentials() {
+        assumePosixWrapperSupport()
         val tempDir = Files.createTempDirectory("android-test-evidence-test")
         try {
             val evidenceDir = tempDir.resolve("artifacts/android-test-evidence")
@@ -209,7 +227,78 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun evidence_wrapper_redaction_timeout_keeps_marker_and_unsanitized_file() {
+        assumePosixWrapperSupport()
+        val tempDir = Files.createTempDirectory("android-test-evidence-redaction-timeout-test")
+        try {
+            val evidenceDir = tempDir.resolve("artifacts/android-test-evidence")
+            Files.createDirectories(evidenceDir)
+            val pendingMarker = tempDir.resolve("artifacts/android-test-evidence-redaction-pending")
+            Files.writeString(pendingMarker, "pending")
+            Files.writeString(evidenceDir.resolve("android-test-start-epoch.txt"), "0")
+
+            val fakeGradle = tempDir.resolve("gradlew")
+            Files.writeString(
+                fakeGradle,
+                """
+                    #!/usr/bin/env bash
+                    printf '%s\\n' 'Bearer timeout-secret'
+                    exit 0
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeGradle, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val fakeAdb = tempDir.resolve("adb")
+            Files.writeString(
+                fakeAdb,
+                """
+                    #!/usr/bin/env bash
+                    exit 0
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeAdb, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val fakePython = tempDir.resolve("python3")
+            Files.writeString(
+                fakePython,
+                """
+                    #!/usr/bin/env bash
+                    if [[ "${'$'}{2:-}" == *"/runner-output.log" ]]; then
+                        sleep 30
+                    fi
+                    exit 1
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakePython, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val process =
+                ProcessBuilder("bash", repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").absolutePath)
+                    .directory(tempDir.toFile())
+            process.environment()["GITHUB_WORKSPACE"] = tempDir.toString()
+            process.environment()["ANDROID_TEST_TIMEOUT_SECONDS"] = "30"
+            process.environment()["PATH"] =
+                "${tempDir}${File.pathSeparator}${System.getenv("PATH") ?: ""}"
+            process.redirectErrorStream(true)
+            val startedProcess = process.start()
+            startedProcess.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = startedProcess.waitFor()
+
+            assertEquals(0, exitCode)
+            assertTrue("A redaction timeout must keep the pending marker.", Files.exists(pendingMarker))
+            val runnerOutput = evidenceDir.resolve("runner-output.log")
+            assertTrue("A redaction timeout must keep the affected evidence file.", Files.exists(runnerOutput))
+            assertTrue(
+                "The affected evidence must not be uploaded as sanitized content.",
+                Files.readString(runnerOutput).contains("timeout-secret"),
+            )
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun evidence_wrapper_timeout_stops_descendant_before_marker_removal() {
+        assumePosixWrapperSupport()
         val tempDir = Files.createTempDirectory("android-test-evidence-timeout-test")
         try {
             val evidenceDir = tempDir.resolve("artifacts/android-test-evidence")

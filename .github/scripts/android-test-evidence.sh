@@ -46,7 +46,8 @@ run_cleanup_command() {
 
 redact_file() {
     local file="$1"
-    if ! run_cleanup_command python3 - "$file" "$repo_root" <<'PY'
+    local status=0
+    run_cleanup_command python3 - "$file" "$repo_root" <<'PY' || status=$?
 from pathlib import Path
 import re
 import sys
@@ -88,14 +89,12 @@ try:
 except OSError:
     raise SystemExit(3)
 PY
-    then
-        return 1
-    fi
-    return 0
+    status=$?
+    return "$status"
 }
 
 redact_evidence() {
-    local manifest failed file
+    local manifest failed file redact_status
     if ! manifest="$(mktemp)"; then
         return 1
     fi
@@ -105,11 +104,19 @@ redact_evidence() {
     fi
     failed=0
     while IFS= read -r -d '' file; do
-        if ! redact_file "$file"; then
-            if ! run_cleanup_command rm -f -- "$file"; then
+        redact_status=0
+        redact_file "$file" || redact_status=$?
+        case "$redact_status" in
+            0) ;;
+            1|2|3)
+                if ! run_cleanup_command rm -f -- "$file"; then
+                    failed=1
+                fi
+                ;;
+            *)
                 failed=1
-            fi
-        fi
+                ;;
+        esac
     done < "$manifest"
     if ! run_cleanup_command rm -f -- "$manifest"; then
         failed=1
