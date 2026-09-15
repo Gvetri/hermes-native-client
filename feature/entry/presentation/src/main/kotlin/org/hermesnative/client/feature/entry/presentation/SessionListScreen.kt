@@ -690,7 +690,12 @@ private fun SessionDetailContent(
         if (state.isRefreshing) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Refreshing Session history…",
+                text =
+                    if (state.isReconciliationInProgress) {
+                        "Refreshing Run and Session state…"
+                    } else {
+                        "Refreshing Session history…"
+                    },
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
         }

@@ -39,32 +39,31 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-class RunObservationStateHolderTest {
+class RunReconciliationStateHolderTest {
     @Test
-    fun one_foreground_observer_appends_deltas_and_reaches_succeeded_without_duplicate_content() {
-        val session = session("session-1")
+    fun terminal_observation_replaces_temporary_response_with_authoritative_history() {
+        val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")
+        val authoritativeHistory =
+            SessionHistory(
+                session.id,
+                listOf(
+                    GatewayHistoryMessage("user-1", "user", "Run this"),
+                    GatewayHistoryMessage("assistant-1", "assistant", "Confirmed result", run.id, "succeeded"),
+                ),
+                null,
+            )
         val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
-                enqueueHistory(
-                    SessionHistory(
-                        session.id,
-                        listOf(GatewayHistoryMessage("assistant-1", "assistant", "Hello world", run.id, "succeeded")),
-                        null,
-                    ),
-                )
-                enqueueStatus(run.copy(status = "succeeded"))
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(authoritativeHistory)
+                statuses.add(run.copy(status = "succeeded"))
+                runs.add(run)
                 observation =
                     ScriptedObservation(
                         listOf(
                             RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
-                            RunEvent(RunEventType.RUNNING, run.id, "running", eventId = "running"),
-                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Hello", "delta-1"),
-                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Hello", "delta-1"),
-                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", " world", "delta-2"),
-                            RunEvent(RunEventType.COMPLETING, run.id, "completing", eventId = "completing"),
+                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Temporary", "delta"),
                             RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded"),
                         ),
                     )
@@ -72,39 +71,45 @@ class RunObservationStateHolderTest {
         val holder = holder(gateway)
 
         try {
-            open(holder, gateway, session.id)
+            open(holder, gateway)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
 
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-            assertEquals(listOf(run.id), gateway.observedRunIds)
+            assertEquals(listOf("user-1", "assistant-1"), opened.messages.map { it.id })
+            assertEquals("Confirmed result", opened.messages.last().content)
+            assertEquals(null, opened.activeResponse)
             assertEquals(RunPresentationState.SUCCEEDED, opened.latestRunState)
-            assertEquals(listOf("Hello world"), opened.messages.map { it.content })
-            assertTrue(opened.activeResponse == null)
+            assertFalse(opened.isRefreshing)
+            assertEquals(listOf(run.id), gateway.statusRequests)
+            assertEquals(2, gateway.historyRequests)
         } finally {
             holder.close()
         }
     }
 
     @Test
-    fun interrupted_observation_preserves_partial_text_and_exposes_uncertain_state() {
-        val session = session("session-1")
+    fun interrupted_observation_refetches_and_remains_uncertain_without_resubmitting() {
+        val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")
         val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                statuses.add(run.copy(status = "running"))
+                runs.add(run)
                 observation =
                     ThrowingObservation(
                         listOf(
                             RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
-                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Partial", "delta-1"),
+                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Partial", "delta"),
                         ),
                     )
             }
         val holder = holder(gateway)
 
         try {
-            open(holder, gateway, session.id)
+            open(holder, gateway)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
 
@@ -112,45 +117,85 @@ class RunObservationStateHolderTest {
             assertEquals(RunPresentationState.UNCERTAIN, opened.latestRunState)
             assertEquals("Partial", opened.activeResponse?.content)
             assertTrue(requireNotNull(opened.activeResponse).streamInterrupted)
-            assertFalse(requireNotNull(opened.activeResponse).isStreaming)
-            assertTrue(opened.activeRuns.any { it.id == run.id })
+            assertFalse(opened.isRefreshing)
+            assertEquals(listOf(run.id), gateway.statusRequests)
+            assertEquals(2, gateway.historyRequests)
+
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertEquals(1, gateway.runRequests.size)
         } finally {
             holder.close()
         }
     }
 
     @Test
-    fun returning_to_sessions_closes_only_the_screen_observer_and_does_not_cancel_the_remote_run() {
-        val session = session("session-1")
+    fun refreshing_an_observed_run_keeps_the_single_observer_open() {
+        val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")
         val observation = BlockingObservation()
         val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                runs.add(run)
+                statuses.add(run.copy(status = "running"))
                 this.observation = observation
             }
         val holder = holder(gateway, Dispatchers.Default)
 
         try {
-            open(holder, gateway, session.id)
+            open(holder, gateway)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
-            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) { it.sessionList?.openedSession?.isRefreshing == false }
 
-            assertTrue(observation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertEquals(emptyList<SessionId>(), gateway.cancelledRunIds)
-            assertTrue(holder.uiState.value.sessionList?.openedSession == null)
+            assertEquals(listOf(run.id), gateway.observedRunIds)
+            assertFalse(observation.closed.await(100, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.statusRequests.contains(run.id))
         } finally {
             observation.release.countDown()
             holder.close()
         }
     }
 
+    @Test
+    fun send_timeout_refetches_session_history_and_does_not_submit_again() {
+        val session = session()
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default, sendTimeoutMillis = 50L)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            awaitState(holder) {
+                it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
+            }
+            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertEquals("Keep this draft", opened.composerText)
+            assertFalse(opened.isSending)
+            assertEquals(1, gateway.runRequests.size)
+            assertEquals(2, gateway.historyRequests)
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
     private fun holder(
-        gateway: ScriptedGateway,
+        gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
+        sendTimeoutMillis: Long = 30_000L,
     ): EntryStateHolder {
         val repository: GatewayConnectionRepository =
             DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())
@@ -164,21 +209,21 @@ class RunObservationStateHolderTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+            sendTimeoutMillis = sendTimeoutMillis,
         )
     }
 
     private fun open(
         holder: EntryStateHolder,
-        gateway: ScriptedGateway,
-        sessionId: SessionId,
+        gateway: FakeGateway,
     ) {
         holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
         holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-        holder.onEvent(EntryUiEvent.BearerCredentialChanged("[REDACTED]"))
+        holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
         holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
         awaitState(holder) { it.sessionList?.sessions == listOf(gateway.session.toSessionItemUiState()) }
-        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
-        awaitState(holder) { it.sessionList?.openedSession?.session?.id == sessionId }
+        holder.onEvent(EntryUiEvent.SessionClicked(gateway.session.id))
+        awaitState(holder) { it.sessionList?.openedSession?.session?.id == gateway.session.id }
     }
 
     private fun awaitState(
@@ -192,36 +237,30 @@ class RunObservationStateHolderTest {
         }
     }
 
-    private fun session(id: String): Session =
+    private fun session(): Session =
         Session(
-            id = SessionId(id),
-            title = "Session $id",
+            id = SessionId("session-1"),
+            title = "Session",
             preview = "Preview",
             pinned = false,
             updatedAt = null,
         )
 
-    private class ScriptedGateway(
+    private class FakeGateway(
         val session: Session,
     ) : SessionGatewayPort, RunGatewayPort {
-        private val runResults = ArrayDeque<Run>()
-        private val historyResults = ArrayDeque<SessionHistory>()
-        private val statusResults = ArrayDeque<Run>()
-        var observation: RunEventObservation = ScriptedObservation(emptyList())
+        val histories = ArrayDeque<SessionHistory>()
+        val statuses = ArrayDeque<Run>()
+        val runs = ArrayDeque<Run>()
+        val runRequests = mutableListOf<Pair<SessionId, String>>()
+        val statusRequests = mutableListOf<RunId>()
         val observedRunIds = mutableListOf<RunId>()
-        val cancelledRunIds = mutableListOf<RunId>()
-
-        fun enqueueRun(run: Run) {
-            runResults += run
-        }
-
-        fun enqueueHistory(history: SessionHistory) {
-            historyResults += history
-        }
-
-        fun enqueueStatus(run: Run) {
-            statusResults += run
-        }
+        var historyRequests = 0
+        var observation: RunEventObservation = ScriptedObservation(emptyList())
+        var blockRunCreation = false
+        val runStarted = CountDownLatch(1)
+        val runFinished = CountDownLatch(1)
+        val releaseRun = CountDownLatch(1)
 
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
 
@@ -229,19 +268,21 @@ class RunObservationStateHolderTest {
 
         override fun openSession(sessionId: SessionId): Session = session
 
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            if (historyResults.isEmpty()) {
+        override fun loadSessionHistory(sessionId: SessionId): SessionHistory {
+            historyRequests += 1
+            return if (histories.isEmpty()) {
                 SessionHistory(sessionId, emptyList(), null)
             } else {
-                historyResults.removeFirst()
+                histories.removeFirst()
             }
+        }
 
         override fun renameSession(
             sessionId: SessionId,
             title: String,
         ): Session = error("not used")
 
-        override fun deleteSession(sessionId: SessionId): Unit = error("not used")
+        override fun deleteSession(sessionId: SessionId) = error("not used")
 
         override fun pinSession(sessionId: SessionId): SessionPinResult = error("not used")
 
@@ -250,14 +291,26 @@ class RunObservationStateHolderTest {
         override fun createRun(
             sessionId: SessionId,
             input: String,
-        ): Run = runResults.removeFirst()
-
-        override fun getRunStatus(runId: RunId): Run =
-            if (statusResults.isEmpty()) {
-                error("not used")
-            } else {
-                statusResults.removeFirst()
+        ): Run {
+            runRequests += sessionId to input
+            if (blockRunCreation) {
+                runStarted.countDown()
+                try {
+                    check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Run was not released." }
+                } catch (error: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw error
+                } finally {
+                    runFinished.countDown()
+                }
             }
+            return if (runs.isEmpty()) error("missing run") else runs.removeFirst()
+        }
+
+        override fun getRunStatus(runId: RunId): Run {
+            statusRequests += runId
+            return if (statuses.isEmpty()) error("missing status") else statuses.removeFirst()
+        }
 
         override fun observeRun(runId: RunId): RunEventObservation {
             observedRunIds += runId
@@ -279,12 +332,13 @@ class RunObservationStateHolderTest {
         override fun iterator(): Iterator<RunEvent> {
             val delegate = super.iterator()
             return object : Iterator<RunEvent> {
-                override fun hasNext(): Boolean =
-                    if (delegate.hasNext()) {
+                override fun hasNext(): Boolean {
+                    return if (delegate.hasNext()) {
                         true
                     } else {
                         throw IllegalStateException("stream interrupted")
                     }
+                }
 
                 override fun next(): RunEvent = delegate.next()
             }
@@ -309,10 +363,7 @@ class RunObservationStateHolderTest {
             }
 
         override fun close() {
-            if (closeCount.incrementAndGet() == 1) {
-                closed.countDown()
-            }
-            release.countDown()
+            if (closeCount.incrementAndGet() == 1) closed.countDown()
         }
     }
 
