@@ -8,6 +8,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class GatewaySseParserTest {
     private val runId = RunId("run-1")
@@ -141,5 +144,66 @@ class GatewaySseParserTest {
 
         assertEquals(GatewayErrorCategory.GATEWAY_REQUEST_FAILED, (error as? GatewayException)?.category)
         assertTrue(closed)
+    }
+
+    @Test
+    fun closing_during_stream_open_does_not_block_and_closes_the_late_stream() {
+        val timeoutMillis = 5_000L
+        val openStarted = CountDownLatch(1)
+        val releaseOpen = CountDownLatch(1)
+        val closeReturned = CountDownLatch(1)
+        val streamClosed = CountDownLatch(1)
+        val iteratorFailure = AtomicReference<Throwable?>()
+        val observation =
+            GatewayRunEventObservation(
+                operation = "run observation",
+                openStream = {
+                    openStarted.countDown()
+                    check(releaseOpen.await(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                        "stream opening was not released"
+                    }
+                    GatewayEventStream(
+                        statusCode = 200,
+                        lines = emptySequence(),
+                        closeAction = { streamClosed.countDown() },
+                    )
+                },
+                parseFrame = { frame -> GatewayJsonParser.parseRunEvent("run observation", frame) },
+                mapTransportFailure = { GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED) },
+            )
+        val iteratorThread =
+            Thread {
+                try {
+                    observation.iterator()
+                } catch (error: Throwable) {
+                    iteratorFailure.set(error)
+                }
+            }
+        val closeThread =
+            Thread {
+                try {
+                    observation.close()
+                } finally {
+                    closeReturned.countDown()
+                }
+            }
+
+        iteratorThread.start()
+        val closeCompletedBeforeOpenReleased =
+            try {
+                assertTrue(openStarted.await(timeoutMillis, TimeUnit.MILLISECONDS))
+                closeThread.start()
+                closeReturned.await(timeoutMillis, TimeUnit.MILLISECONDS)
+            } finally {
+                releaseOpen.countDown()
+            }
+        iteratorThread.join(timeoutMillis)
+        closeThread.join(timeoutMillis)
+
+        assertTrue(closeCompletedBeforeOpenReleased)
+        assertFalse(iteratorThread.isAlive)
+        assertFalse(closeThread.isAlive)
+        assertTrue(streamClosed.await(timeoutMillis, TimeUnit.MILLISECONDS))
+        assertTrue(iteratorFailure.get() is IllegalStateException)
     }
 }

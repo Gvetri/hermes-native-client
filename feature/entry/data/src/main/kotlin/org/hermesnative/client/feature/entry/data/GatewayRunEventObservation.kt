@@ -18,24 +18,34 @@ internal class GatewayRunEventObservation(
     private val lifecycleLock = Any()
 
     override fun iterator(): Iterator<RunEvent> {
+        synchronized(lifecycleLock) {
+            check(!started) { "Gateway run observation can only be collected once." }
+            check(!closed) { "Gateway run observation is closed." }
+            started = true
+        }
         val openedStream =
-            synchronized(lifecycleLock) {
-                check(!started) { "Gateway run observation can only be collected once." }
-                check(!closed) { "Gateway run observation is closed." }
-                started = true
-                val opened =
-                    try {
-                        openStream()
-                    } catch (error: GatewayException) {
-                        closed = true
-                        throw error
-                    } catch (error: Exception) {
-                        closed = true
-                        throw mapTransportFailure(error)
-                    }
-                stream = opened
-                opened
+            try {
+                openStream()
+            } catch (error: GatewayException) {
+                synchronized(lifecycleLock) { closed = true }
+                throw error
+            } catch (error: Exception) {
+                synchronized(lifecycleLock) { closed = true }
+                throw mapTransportFailure(error)
             }
+        val published =
+            synchronized(lifecycleLock) {
+                if (closed) {
+                    false
+                } else {
+                    stream = openedStream
+                    true
+                }
+            }
+        if (!published) {
+            openedStream.close()
+            throw IllegalStateException("Gateway run observation is closed.")
+        }
         val frames = GatewaySseParser.frames(openedStream.lines, operation).iterator()
         return object : Iterator<RunEvent> {
             private var buffered: RunEvent? = null
@@ -74,12 +84,15 @@ internal class GatewayRunEventObservation(
     }
 
     override fun close() {
-        synchronized(lifecycleLock) {
-            if (!closed) {
-                closed = true
-                stream?.close()
-                stream = null
+        val streamToClose =
+            synchronized(lifecycleLock) {
+                if (closed) {
+                    null
+                } else {
+                    closed = true
+                    stream.also { stream = null }
+                }
             }
-        }
+        streamToClose?.close()
     }
 }
