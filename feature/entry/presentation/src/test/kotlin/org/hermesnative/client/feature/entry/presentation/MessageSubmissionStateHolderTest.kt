@@ -211,6 +211,51 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun a_returned_active_run_is_retained_when_reopened_history_omits_it() {
+        val session = session("session-1")
+        val returnedRun = Run(RunId("run-new"), session.id, "starting")
+        val gateway =
+            FakeGateway(
+                sessions = listOf(session),
+                histories =
+                    mapOf(
+                        session.id to
+                            SessionHistory(
+                                session.id,
+                                listOf(
+                                    GatewayHistoryMessage(
+                                        "old-run-message",
+                                        "user",
+                                        "Previous",
+                                        RunId("run-old"),
+                                        "succeeded",
+                                    ),
+                                ),
+                                null,
+                            ),
+                    ),
+            ).apply { enqueueRun(returnedRun) }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Create active run"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == returnedRun.id }
+
+            val reopened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertTrue(reopened.activeRuns.any { it.id == returnedRun.id })
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send twice"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertEquals(listOf(session.id to "Create active run"), gateway.runRequests)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun an_active_run_in_one_session_does_not_disable_a_different_session() {
         val first = session("session-1")
         val second = session("session-2")

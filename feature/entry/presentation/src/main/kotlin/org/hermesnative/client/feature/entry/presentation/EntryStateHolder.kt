@@ -778,7 +778,13 @@ class EntryStateHolder(
     ): List<Run> {
         val confirmedRuns = openedSession.history.runs()
         if (confirmedRuns.isNotEmpty()) {
-            sessionRuns[sessionId] = confirmedRuns
+            val localRuns = sessionRuns[sessionId].orEmpty()
+            val confirmedIds = confirmedRuns.mapTo(mutableSetOf()) { it.id }
+            val retainedLocalRuns =
+                localRuns.filter { localRun ->
+                    localRun.id !in confirmedIds && localRun.isActive()
+                }
+            sessionRuns[sessionId] = confirmedRuns + retainedLocalRuns
         }
         return sessionRuns[sessionId].orEmpty()
     }

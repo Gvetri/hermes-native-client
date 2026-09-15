@@ -30,8 +30,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import org.hermesnative.client.feature.entry.domain.Run
-import org.hermesnative.client.feature.entry.domain.isActive
+import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -75,6 +74,13 @@ internal fun SessionListContent(
             modifier = Modifier.semantics { heading() },
         )
         Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Remove Gateway Connection")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
         if (state.showFirstUseGuidance) {
             Text(
                 text = "Select a Session to open its Gateway history. Refresh to load the latest server state.",
@@ -745,13 +751,16 @@ private fun SessionDetailContent(
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        val runIsActive = state.activeRuns.any(Run::isActive) || state.latestRun?.isActive() == true
         val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null
+        val canSubmit =
+            RunSubmissionState(
+                latestRun = state.latestRun,
+                activeRuns = state.activeRuns,
+                isSubmissionPending = state.isSending || listRequestActive,
+            ).canSubmit
         val sendEnabled =
             composerEnabled &&
-                !state.isSending &&
-                !listRequestActive &&
-                !runIsActive &&
+                canSubmit &&
                 state.composerText.isNotBlank()
         OutlinedTextField(
             value = state.composerText,

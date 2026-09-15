@@ -196,6 +196,30 @@ class EntryScreenTest {
     }
 
     @Test
+    fun connected_session_list_exposes_gateway_removal() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList = SessionListUiState(),
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Remove Gateway Connection").assertHasClickAction().performClick()
+
+        assertEquals(listOf(EntryUiEvent.RemoveGatewayConnectionClicked), events)
+    }
+
+    @Test
     fun no_search_results_keep_the_query_visible_and_expose_clear_search() {
         val events = mutableListOf<EntryUiEvent>()
         composeTestRule.setContent {
