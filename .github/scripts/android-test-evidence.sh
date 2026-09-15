@@ -48,7 +48,7 @@ sensitive_key = r"(?:authorization|token|password|secret|api[_-]?key|access[_-]?
 patterns = (
     (re.compile(r"(?i)(authorization\s*[:=]\s*)[^\r\n]+"), r"\1<redacted>"),
     (
-        re.compile(rf'''(?i)(["']?{sensitive_key}["']?\s*[:=]\s*)"[^"\r\n]*"'''),
+        re.compile(rf'''(?i)(["']?{sensitive_key}["']?\s*[:=]\s*)"(?:\\.|[^"\\\r\n])*"'''),
         r'\1"<redacted>"',
     ),
     (

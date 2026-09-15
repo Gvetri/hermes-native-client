@@ -145,7 +145,7 @@ class QualityGateConfigurationTest {
                 fakeGradle,
                 """
                     #!/usr/bin/env bash
-                    printf '%s' '{"token":"token-secret","authToken":"auth-secret","access_token":"access-secret"}'
+                    printf '%s' '{"token":"escaped-prefix\"escaped-secret","authToken":"auth-secret","access_token":"access-secret"}'
                     exit 17
                 """.trimIndent(),
             )
@@ -163,7 +163,7 @@ class QualityGateConfigurationTest {
 
             assertEquals(17, exitCode)
             val sanitizedOutput = Files.readString(evidenceDir.resolve("runner-output.log"))
-            listOf("token-secret", "auth-secret", "access-secret").forEach { secret ->
+            listOf("escaped-secret", "auth-secret", "access-secret").forEach { secret ->
                 assertTrue("The sanitized output must not contain $secret.", !sanitizedOutput.contains(secret))
             }
             listOf("token", "authToken", "access_token").forEach { key ->
