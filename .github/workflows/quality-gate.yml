@@ -128,6 +128,7 @@ jobs:
 
   compose_test:
     name: api24-launch-themes
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -143,6 +144,8 @@ jobs:
         run: |
           rm -rf artifacts/android-test-evidence
           mkdir -p artifacts/android-test-evidence
+          rm -f artifacts/android-test-evidence-redaction-pending
+          printf '%s\n' 'Evidence sanitization is pending.' > artifacts/android-test-evidence-redaction-pending
           date +%s > artifacts/android-test-evidence/android-test-start-epoch.txt
           chmod +x .github/scripts/android-test-evidence.sh
       - name: Enable KVM group perms
@@ -167,6 +170,7 @@ jobs:
             .github/scripts/android-test-evidence.sh
 
       - name: Finalize Android test evidence
+        id: finalize_android_evidence
         if: ${{ always() }}
         env:
           ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
@@ -225,8 +229,19 @@ jobs:
               printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
             } > "$evidence_dir/timeout-context.txt"
           fi
+          pending_marker=artifacts/android-test-evidence-redaction-pending
+          wrapper_started="$evidence_dir/wrapper-started.txt"
+          if [[ ! -e "$wrapper_started" ]]; then
+            rm -f -- "$pending_marker" || true
+          fi
+          if [[ -e "$pending_marker" ]]; then
+            printf '%s\n' 'Evidence sanitization did not complete; skipping artifact upload.' >&2
+            printf '%s\n' 'redaction_ready=false' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          printf '%s\n' 'redaction_ready=true' >> "$GITHUB_OUTPUT"
       - name: Upload Android test failure evidence
-        if: ${{ always() && steps.android_tests.outcome != 'success' }}
+        if: ${{ always() && steps.android_tests.outcome != 'success' && steps.finalize_android_evidence.outputs.redaction_ready == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: android-test-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
@@ -235,7 +250,7 @@ jobs:
           # Sanitized Android failure evidence is retained for 14 days.
           retention-days: 14
       - name: Fail when Android tests fail
-        if: ${{ always() && steps.android_tests.outcome != 'success' }}
+        if: ${{ always() && (steps.android_tests.outcome != 'success' || steps.finalize_android_evidence.outcome != 'success') }}
         run: |
           printf '%s\n' 'Android instrumentation failed. See the sanitized failure evidence artifact.' >&2
           exit 1

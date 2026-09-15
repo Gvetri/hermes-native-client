@@ -95,15 +95,18 @@ class QualityGateConfigurationTest {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val evidenceScript = repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").readText()
         val emulatorJob = workflow.substringAfter("  compose_test:").substringBefore("  quality-gate:")
+        val failureStep = emulatorJob.substringAfter("      - name: Fail when Android tests fail")
 
+        assertTrue("The emulator job must survive workflow cancellation long enough to finalize evidence.", emulatorJob.contains("    if: \${{ always() }}"))
         assertTrue("The emulator job must keep a bounded job timeout.", emulatorJob.contains("    timeout-minutes: 12"))
         assertTrue("The Android test action must have a stable step id.", emulatorJob.contains("        id: android_tests"))
         assertTrue("The Android test action must have a bounded step timeout.", emulatorJob.contains("        timeout-minutes: 10"))
         assertTrue("The Android test action must run the evidence wrapper.", emulatorJob.contains("            .github/scripts/android-test-evidence.sh"))
-        assertTrue("The workflow must upload evidence after failed Android tests.", emulatorJob.contains("if: \${{ always() && steps.android_tests.outcome != 'success' }}"))
+        assertTrue("The workflow must upload only sanitized evidence.", emulatorJob.contains("steps.finalize_android_evidence.outputs.redaction_ready == 'true'"))
         assertTrue("Failure evidence must have an explicit retention period.", emulatorJob.contains("          retention-days: 14"))
         assertTrue("Missing evidence must fail the upload step.", emulatorJob.contains("          if-no-files-found: error"))
-        assertTrue("The workflow must fail when the Android test action fails.", emulatorJob.contains("steps.android_tests.outcome != 'success'"))
+        assertTrue("The failure step must run when Android tests or finalization fail.", failureStep.contains("steps.android_tests.outcome != 'success'"))
+        assertTrue("The failure step must exit non-zero.", failureStep.contains("exit 1"))
 
         assertTrue("The wrapper must capture logcat.", evidenceScript.contains("logcat -d"))
         assertTrue("The wrapper must preserve instrumentation output.", evidenceScript.contains("androidTest-results"))
@@ -114,6 +117,9 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must identify installation failures.", evidenceScript.contains("installation_failure"))
         assertTrue("The wrapper must identify emulator failures.", evidenceScript.contains("emulator_failure"))
         assertTrue("The wrapper must redact sensitive values.", evidenceScript.contains("<redacted>"))
+        assertTrue("The wrapper must detect NUL-containing files as unsanitizable.", evidenceScript.contains("\\x00"))
+        assertTrue("The wrapper must delete unsanitizable files when possible.", evidenceScript.contains("rm -f --"))
+        assertTrue("The wrapper must preserve a fail-closed sanitization marker.", evidenceScript.contains("redaction_pending_marker"))
         assertTrue(
             "The wrapper must redact Authorization values independent of authentication scheme.",
             evidenceScript.contains("authorization\\s*[:=]"),

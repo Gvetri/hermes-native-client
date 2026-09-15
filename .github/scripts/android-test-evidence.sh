@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 repo_root="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must identify the repository root}"
 evidence_dir="${repo_root}/artifacts/android-test-evidence"
+redaction_pending_marker="${repo_root}/artifacts/android-test-evidence-redaction-pending"
 runner_output="${evidence_dir}/runner-output.log"
 logcat_output="${evidence_dir}/logcat.log"
 instrumentation_dir="${evidence_dir}/instrumentation-output"
@@ -10,6 +11,7 @@ category_file="${evidence_dir}/failure-category.txt"
 context_file="${evidence_dir}/timeout-context.txt"
 
 mkdir -p "$evidence_dir" "$instrumentation_dir"
+printf '%s\n' 'Android test evidence wrapper started.' > "$evidence_dir/wrapper-started.txt"
 
 current_stage="emulator_setup"
 received_signal=""
@@ -39,7 +41,7 @@ try:
 except OSError:
     raise SystemExit(0)
 if b"\x00" in raw_content:
-    raise SystemExit(0)
+    raise SystemExit(2)
 content = raw_content.decode("utf-8", errors="replace")
 
 patterns = (
@@ -59,16 +61,31 @@ for pattern, replacement in patterns:
 try:
     path.write_text(content, encoding="utf-8")
 except OSError:
-    pass
+    raise SystemExit(3)
 PY
 }
 
 redact_evidence() {
+    local manifest failed file
+    if ! manifest="$(mktemp)"; then
+        return 1
+    fi
+    if ! find "$evidence_dir" -type f -print0 > "$manifest"; then
+        rm -f -- "$manifest" || true
+        return 1
+    fi
+    failed=0
     while IFS= read -r -d '' file; do
-        redact_file "$file"
-    done < <(
-        find "$evidence_dir" -type f -print0
-    )
+        if ! redact_file "$file"; then
+            if ! rm -f -- "$file"; then
+                failed=1
+            fi
+        fi
+    done < "$manifest"
+    if ! rm -f -- "$manifest"; then
+        failed=1
+    fi
+    return "$failed"
 }
 
 capture_logcat() {
@@ -158,7 +175,11 @@ on_exit() {
     fi
     printf 'category=%s\n' "$category" > "$category_file"
     write_context "$category" "$status"
-    redact_evidence
+    if ! redact_evidence; then
+        printf '%s\n' 'Evidence sanitization failed; artifact upload will be skipped.' >&2
+    elif ! rm -f -- "$redaction_pending_marker"; then
+        printf '%s\n' 'Evidence sanitization completed but its success marker could not be removed; artifact upload will be skipped.' >&2
+    fi
     exit "$status"
 }
 
