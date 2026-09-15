@@ -39,7 +39,7 @@ repository_root = sys.argv[2]
 try:
     raw_content = path.read_bytes()
 except OSError:
-    raise SystemExit(0)
+    raise SystemExit(1)
 if b"\x00" in raw_content:
     raise SystemExit(2)
 content = raw_content.decode("utf-8", errors="replace")

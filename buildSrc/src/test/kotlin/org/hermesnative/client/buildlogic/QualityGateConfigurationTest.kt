@@ -118,6 +118,7 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must identify emulator failures.", evidenceScript.contains("emulator_failure"))
         assertTrue("The wrapper must redact sensitive values.", evidenceScript.contains("<redacted>"))
         assertTrue("The wrapper must detect NUL-containing files as unsanitizable.", evidenceScript.contains("\\x00"))
+        assertTrue("The wrapper must fail closed when a file cannot be read.", evidenceScript.contains("raise SystemExit(1)"))
         assertTrue("The wrapper must delete unsanitizable files when possible.", evidenceScript.contains("rm -f --"))
         assertTrue("The wrapper must preserve a fail-closed sanitization marker.", evidenceScript.contains("redaction_pending_marker"))
         assertTrue(
