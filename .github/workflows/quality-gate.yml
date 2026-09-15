@@ -139,12 +139,22 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare Android test evidence
+        run: |
+          rm -rf artifacts/android-test-evidence
+          mkdir -p artifacts/android-test-evidence
+          date +%s > artifacts/android-test-evidence/android-test-start-epoch.txt
+          chmod +x .github/scripts/android-test-evidence.sh
       - name: Enable KVM group perms
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - name: Run connected Android tests
+        id: android_tests
+        continue-on-error: true
+        timeout-minutes: 10
+        uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 24
           target: default
@@ -154,12 +164,81 @@ jobs:
           emulator-options: -no-window -no-audio -no-boot-anim
           disable-animations: true
           script: |
-            set -eu
-            printf '%s\n' 'Starting presentation connected Android tests.'
-            ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests --no-daemon --console=plain --info
-            printf '%s\n' 'Presentation connected Android tests passed. Starting app connected Android tests.'
-            ./gradlew :app:verifyConnectedAndroidTests --no-daemon --console=plain --info -Pandroid.testInstrumentationRunnerArguments.class=org.hermesnative.client.MainActivityTest,org.hermesnative.client.MainActivitySystemLightThemeTest,org.hermesnative.client.MainActivitySystemDarkThemeTest
-            printf '%s\n' 'App connected Android tests passed.'
+            .github/scripts/android-test-evidence.sh
+
+      - name: Finalize Android test evidence
+        if: ${{ always() }}
+        env:
+          ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          evidence_dir=artifacts/android-test-evidence
+          mkdir -p "$evidence_dir/instrumentation-output"
+
+          category_file="$evidence_dir/failure-category.txt"
+          start_epoch=0
+          if [[ -s "$evidence_dir/android-test-start-epoch.txt" ]]; then
+            read -r start_epoch < "$evidence_dir/android-test-start-epoch.txt"
+          fi
+          if ! [[ "$start_epoch" =~ ^[0-9]+$ ]]; then
+            start_epoch=0
+          fi
+          elapsed_seconds=0
+          if (( start_epoch > 0 )); then
+            elapsed_seconds=$(( $(date +%s) - start_epoch ))
+          fi
+          if [[ "$ANDROID_TEST_OUTCOME" == "cancelled" ]]; then
+            printf '%s\n' 'category=cancellation' > "$category_file"
+          elif [[ ! -s "$category_file" ]] || grep -qx 'category=success' "$category_file"; then
+            if [[ "$ANDROID_TEST_OUTCOME" == "failure" ]]; then
+              if (( elapsed_seconds >= 600 )); then
+                printf '%s\n' 'category=timeout' > "$category_file"
+              else
+                printf '%s\n' 'category=emulator_failure' > "$category_file"
+              fi
+            else
+              printf '%s\n' 'category=test_failure' > "$category_file"
+            fi
+          fi
+
+          if [[ ! -s "$evidence_dir/runner-output.log" ]]; then
+            printf 'The emulator action stopped before the test wrapper started. Step outcome: %s.\n' "$ANDROID_TEST_OUTCOME" > "$evidence_dir/runner-output.log"
+          fi
+          if [[ ! -s "$evidence_dir/logcat.log" ]]; then
+            printf 'No logcat was available when the evidence step finalized.\n' > "$evidence_dir/logcat.log"
+          fi
+          if [[ ! -e "$evidence_dir/instrumentation-output/NOT_AVAILABLE.txt" ]] && ! find "$evidence_dir/instrumentation-output" -type f -print -quit | grep -q .; then
+            printf 'No instrumentation reports were available when the evidence step finalized.\n' > "$evidence_dir/instrumentation-output/NOT_AVAILABLE.txt"
+          fi
+          if [[ ! -s "$evidence_dir/timeout-context.txt" ]]; then
+            {
+              printf 'category=%s\n' "$(cut -d= -f2- "$category_file")"
+              printf 'android_test_step_outcome=%s\n' "$ANDROID_TEST_OUTCOME"
+              printf 'job_status_at_finalize=%s\n' "$JOB_STATUS"
+              printf 'github_run_id=%s\n' "${GITHUB_RUN_ID:-unknown}"
+              printf 'github_run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT:-unknown}"
+              printf 'github_sha=%s\n' "${GITHUB_SHA:-unknown}"
+              printf 'github_workflow=%s\n' "${GITHUB_WORKFLOW:-unknown}"
+              printf 'github_job=%s\n' "${GITHUB_JOB:-unknown}"
+              printf 'github_ref_name=%s\n' "${GITHUB_REF_NAME:-unknown}"
+              printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
+            } > "$evidence_dir/timeout-context.txt"
+          fi
+      - name: Upload Android test failure evidence
+        if: ${{ always() && steps.android_tests.outcome != 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/android-test-evidence
+          if-no-files-found: error
+          # Sanitized Android failure evidence is retained for 14 days.
+          retention-days: 14
+      - name: Fail when Android tests fail
+        if: ${{ always() && steps.android_tests.outcome != 'success' }}
+        run: |
+          printf '%s\n' 'Android instrumentation failed. See the sanitized failure evidence artifact.' >&2
+          exit 1
 
   quality-gate:
     name: quality-gate

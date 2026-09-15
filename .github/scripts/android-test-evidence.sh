@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_root="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must identify the repository root}"
+evidence_dir="${repo_root}/artifacts/android-test-evidence"
+runner_output="${evidence_dir}/runner-output.log"
+logcat_output="${evidence_dir}/logcat.log"
+instrumentation_dir="${evidence_dir}/instrumentation-output"
+category_file="${evidence_dir}/failure-category.txt"
+context_file="${evidence_dir}/timeout-context.txt"
+
+mkdir -p "$evidence_dir" "$instrumentation_dir"
+
+current_stage="emulator_setup"
+received_signal=""
+start_time_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+timeout_seconds="${ANDROID_TEST_TIMEOUT_SECONDS:-480}"
+if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || (( timeout_seconds == 0 )); then
+    timeout_seconds=480
+fi
+deadline_seconds=$((SECONDS + timeout_seconds))
+
+{
+    printf 'Android connected test runner started.\n'
+    printf 'Combined test timeout seconds: %s\n' "$timeout_seconds"
+} > "$runner_output"
+
+redact_file() {
+    local file="$1"
+    python3 - "$file" "$repo_root" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+repository_root = sys.argv[2]
+try:
+    raw_content = path.read_bytes()
+except OSError:
+    raise SystemExit(0)
+if b"\x00" in raw_content:
+    raise SystemExit(0)
+content = raw_content.decode("utf-8", errors="replace")
+
+patterns = (
+    (re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s]+"), r"\1<redacted>"),
+    (
+        re.compile(
+            r"(?i)((?:token|password|secret|api[_-]?key|access[_-]?token|client[_-]?secret|private[_-]?key)\s*[=:]\s*)[^\s,;]+"
+        ),
+        r"\1<redacted>",
+    ),
+    (re.compile(r"https?://[^\s<>\"']+"), "<redacted-url>"),
+    (re.compile(re.escape(repository_root)), "<workspace>"),
+    (re.compile(r"/home/runner/work/[^\s]+"), "<runner-workspace>"),
+)
+for pattern, replacement in patterns:
+    content = pattern.sub(replacement, content)
+try:
+    path.write_text(content, encoding="utf-8")
+except OSError:
+    pass
+PY
+}
+
+redact_evidence() {
+    while IFS= read -r -d '' file; do
+        redact_file "$file"
+    done < <(
+        find "$evidence_dir" -type f -print0
+    )
+}
+
+capture_logcat() {
+    local adb_prefix=()
+    if [[ -n "${ANDROID_SERIAL:-}" ]]; then
+        adb_prefix=(-s "$ANDROID_SERIAL")
+    fi
+
+    if ! command -v adb >/dev/null 2>&1; then
+        printf 'adb was not available when evidence capture started.\n' > "$logcat_output"
+        return 0
+    fi
+
+    adb "${adb_prefix[@]}" logcat -d -v threadtime -t 5000 > "$logcat_output" 2>&1 || true
+    adb "${adb_prefix[@]}" get-state > "$evidence_dir/adb-state.txt" 2>&1 || true
+}
+
+copy_instrumentation_output() {
+    local module relative source destination
+    for module in "feature/entry/presentation" "app"; do
+        for relative in \
+            "build/outputs/androidTest-results/connected/debug" \
+            "build/reports/androidTests/connected/debug"; do
+            source="$repo_root/$module/$relative"
+            [[ -e "$source" ]] || continue
+            destination="$instrumentation_dir/$module/$(dirname "$relative")"
+            mkdir -p "$destination"
+            cp -R "$source" "$destination/" || true
+        done
+    done
+
+    if ! find "$instrumentation_dir" -type f -print -quit | grep -q .; then
+        printf 'No instrumentation reports were produced before the runner stopped.\n' > "$instrumentation_dir/NOT_AVAILABLE.txt"
+    fi
+}
+
+classify_failure() {
+    local status="$1"
+    if [[ -n "$received_signal" ]]; then
+        printf 'cancellation\n'
+    elif [[ "$status" == "124" ]]; then
+        printf 'timeout\n'
+    elif grep -Eqi 'INSTALL_(FAILED|PARSE_FAILED)|Failure \[INSTALL|unable to install|could not install|installation .*failed' "$runner_output"; then
+        printf 'installation_failure\n'
+    elif grep -Eqi 'emulator.*(failed|crash|error|offline)|adb.*(offline|no devices|failed|error)|device.*(offline|not found|unavailable)|failed to connect to .*emulator|timed out.*emulator|no connected devices' "$runner_output"; then
+        printf 'emulator_failure\n'
+    else
+        printf 'test_failure\n'
+    fi
+}
+
+write_context() {
+    local category="$1"
+    local status="$2"
+    {
+        printf 'category=%s\n' "$category"
+        printf 'exit_code=%s\n' "$status"
+        printf 'stage=%s\n' "$current_stage"
+        printf 'signal=%s\n' "${received_signal:-none}"
+        printf 'start_time_utc=%s\n' "$start_time_utc"
+        printf 'end_time_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'timeout_seconds=%s\n' "$timeout_seconds"
+        printf 'github_run_id=%s\n' "${GITHUB_RUN_ID:-unknown}"
+        printf 'github_run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT:-unknown}"
+        printf 'github_sha=%s\n' "${GITHUB_SHA:-unknown}"
+        printf 'github_workflow=%s\n' "${GITHUB_WORKFLOW:-unknown}"
+        printf 'github_job=%s\n' "${GITHUB_JOB:-unknown}"
+        printf 'github_ref_name=%s\n' "${GITHUB_REF_NAME:-unknown}"
+        printf 'runner_os=%s\n' "${RUNNER_OS:-unknown}"
+        printf 'android_serial_present=%s\n' "$(if [[ -n "${ANDROID_SERIAL:-}" ]]; then printf true; else printf false; fi)"
+    } > "$context_file"
+}
+
+on_exit() {
+    local status=$?
+    trap - EXIT
+    set +e
+
+    capture_logcat
+    copy_instrumentation_output
+
+    local category
+    if (( status == 0 )); then
+        category="success"
+    else
+        category="$(classify_failure "$status")"
+    fi
+    printf 'category=%s\n' "$category" > "$category_file"
+    write_context "$category" "$status"
+    redact_evidence
+    exit "$status"
+}
+
+on_signal() {
+    received_signal="$1"
+    printf 'Received %s while running %s.\n' "$received_signal" "$current_stage" >> "$runner_output"
+    exit 143
+}
+
+run_gradle_step() {
+    local name="$1"
+    shift
+    current_stage="$name"
+    local remaining_seconds=$((deadline_seconds - SECONDS))
+    if (( remaining_seconds <= 0 )); then
+        return 124
+    fi
+
+    printf '\n=== %s ===\n' "$name" >> "$runner_output"
+    set +e
+    timeout --foreground --signal=TERM --kill-after=30s "${remaining_seconds}s" "$@" 2>&1 | tee -a "$runner_output"
+    local pipeline_status=("${PIPESTATUS[@]}")
+    set -e
+    local command_status="${pipeline_status[0]}"
+    printf '=== %s exit code: %s ===\n' "$name" "$command_status" >> "$runner_output"
+    if [[ "$command_status" != "0" ]]; then
+        return "$command_status"
+    fi
+}
+
+trap on_exit EXIT
+trap 'on_signal TERM' TERM
+trap 'on_signal INT' INT
+
+run_gradle_step \
+    "presentation_instrumentation" \
+    ./gradlew :feature:entry:presentation:verifyConnectedAndroidTests --no-daemon --console=plain --info
+run_gradle_step \
+    "app_instrumentation" \
+    ./gradlew :app:verifyConnectedAndroidTests --no-daemon --console=plain --info \
+    -Pandroid.testInstrumentationRunnerArguments.class=org.hermesnative.client.MainActivityTest,org.hermesnative.client.MainActivitySystemLightThemeTest,org.hermesnative.client.MainActivitySystemDarkThemeTest
