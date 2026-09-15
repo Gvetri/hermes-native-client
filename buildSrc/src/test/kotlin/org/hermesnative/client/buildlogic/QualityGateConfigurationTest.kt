@@ -205,6 +205,73 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun evidence_wrapper_timeout_stops_descendant_before_marker_removal() {
+        val tempDir = Files.createTempDirectory("android-test-evidence-timeout-test")
+        try {
+            val evidenceDir = tempDir.resolve("artifacts/android-test-evidence")
+            Files.createDirectories(evidenceDir)
+            val pendingMarker = tempDir.resolve("artifacts/android-test-evidence-redaction-pending")
+            Files.writeString(pendingMarker, "pending")
+            Files.writeString(evidenceDir.resolve("android-test-start-epoch.txt"), "0")
+
+            val fakeGradle = tempDir.resolve("gradlew")
+            Files.writeString(
+                fakeGradle,
+                """
+                    #!/usr/bin/env bash
+                    child_output="${'$'}GITHUB_WORKSPACE/artifacts/android-test-evidence/child-output.log"
+                    printf '%s\\n' 'child-started' > "${'$'}child_output"
+                    (
+                        while :; do
+                            printf '%s\\n' 'child-write' >> "${'$'}child_output"
+                            sleep 0.05
+                        done
+                    ) &
+                    while :; do
+                        sleep 1
+                    done
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeGradle, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val fakeAdb = tempDir.resolve("adb")
+            Files.writeString(
+                fakeAdb,
+                """
+                    #!/usr/bin/env bash
+                    exit 0
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeAdb, PosixFilePermissions.fromString("rwxr-xr-x"))
+
+            val process =
+                ProcessBuilder("bash", repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").absolutePath)
+                    .directory(tempDir.toFile())
+            process.environment()["GITHUB_WORKSPACE"] = tempDir.toString()
+            process.environment()["ANDROID_TEST_TIMEOUT_SECONDS"] = "1"
+            process.environment()["PATH"] =
+                "${tempDir}${File.pathSeparator}${System.getenv("PATH") ?: ""}"
+            process.redirectErrorStream(true)
+            val startedProcess = process.start()
+            startedProcess.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = startedProcess.waitFor()
+
+            assertEquals(124, exitCode)
+            assertTrue("The timeout test must create descendant output.", Files.exists(evidenceDir.resolve("child-output.log")))
+            val sizeAtExit = Files.size(evidenceDir.resolve("child-output.log"))
+            Thread.sleep(300)
+            assertEquals(
+                "The timed-out descendant must stop before the marker is removed.",
+                sizeAtExit,
+                Files.size(evidenceDir.resolve("child-output.log")),
+            )
+            assertTrue("The redaction marker must be removed after safe timeout cleanup.", !Files.exists(pendingMarker))
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun checkout_steps_are_immutable_and_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->

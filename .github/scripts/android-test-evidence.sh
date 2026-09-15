@@ -36,7 +36,7 @@ run_cleanup_command() {
             command_timeout_seconds="$remaining_seconds"
         fi
     fi
-    timeout --foreground --signal=TERM --kill-after=2s "${command_timeout_seconds}s" "$@"
+    timeout --signal=TERM --kill-after=2s "${command_timeout_seconds}s" "$@"
 }
 
 {
@@ -263,7 +263,7 @@ run_gradle_step() {
 
     printf '\n=== %s ===\n' "$name" >> "$runner_output"
     set +e
-    timeout --foreground --signal=TERM --kill-after=30s "${remaining_seconds}s" "$@" >> "$runner_output" 2>&1
+    timeout --signal=TERM --kill-after=30s "${remaining_seconds}s" "$@" >> "$runner_output" 2>&1
     local command_status=$?
     set -e
     printf '=== %s exit code: %s ===\n' "$name" "$command_status" >> "$runner_output"
