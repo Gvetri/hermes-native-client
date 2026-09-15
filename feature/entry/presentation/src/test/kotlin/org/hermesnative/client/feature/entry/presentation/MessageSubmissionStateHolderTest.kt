@@ -324,7 +324,6 @@ class MessageSubmissionStateHolderTest {
             gateway.blockRunCreation = false
             gateway.releaseRun.countDown()
             assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            Thread.sleep(100)
 
             connect(holder, gateway)
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
@@ -444,6 +443,7 @@ class MessageSubmissionStateHolderTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+            onRunSubmissionCompleted = gateway.runFinished::countDown,
         )
 
     private fun connect(
@@ -538,7 +538,7 @@ class MessageSubmissionStateHolderTest {
                 runStarted.countDown()
                 check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Timed out waiting for Run release." }
             }
-            return runResults.removeFirst().getOrThrow().also { runFinished.countDown() }
+            return runResults.removeFirst().getOrThrow()
         }
 
         override fun getRunStatus(runId: RunId): Run = error("not used")

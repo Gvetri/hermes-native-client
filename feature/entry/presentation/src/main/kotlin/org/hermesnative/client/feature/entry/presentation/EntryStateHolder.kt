@@ -156,6 +156,7 @@ class EntryStateHolder(
     private val sessionGatewayFactory: ((endpoint: String, bearerCredential: String) -> SessionGatewayPort)? = null,
     private val runGatewayFactory: ((endpoint: String, bearerCredential: String) -> RunGatewayPort)? = null,
     private val removeGatewayConnectionUseCase: RemoveGatewayConnection? = null,
+    private val onRunSubmissionCompleted: (() -> Unit)? = null,
 ) {
     private val _uiState = MutableStateFlow(initialState.toUiState())
     val uiState: StateFlow<EntryUiState> = _uiState.asStateFlow()
@@ -1627,6 +1628,7 @@ class EntryStateHolder(
                     try {
                         val run = SubmitMessage(gateway).execute(sessionId, opened.composerText)
                         applySubmittedRun(sessionId, run, requestConnectionGeneration)
+                        onRunSubmissionCompleted?.invoke()
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
