@@ -21,6 +21,23 @@ if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || (( timeout_seconds == 0 )); then
     timeout_seconds=480
 fi
 deadline_seconds=$((SECONDS + timeout_seconds))
+cleanup_timeout_seconds=5
+cleanup_budget_seconds=60
+cleanup_deadline_seconds=0
+
+run_cleanup_command() {
+    local command_timeout_seconds="$cleanup_timeout_seconds"
+    if (( cleanup_deadline_seconds > 0 )); then
+        local remaining_seconds=$((cleanup_deadline_seconds - SECONDS))
+        if (( remaining_seconds <= 0 )); then
+            return 124
+        fi
+        if (( remaining_seconds < command_timeout_seconds )); then
+            command_timeout_seconds="$remaining_seconds"
+        fi
+    fi
+    timeout --foreground --signal=TERM --kill-after=2s "${command_timeout_seconds}s" "$@"
+}
 
 {
     printf 'Android connected test runner started.\n'
@@ -29,7 +46,7 @@ deadline_seconds=$((SECONDS + timeout_seconds))
 
 redact_file() {
     local file="$1"
-    python3 - "$file" "$repo_root" <<'PY'
+    if ! run_cleanup_command python3 - "$file" "$repo_root" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -70,6 +87,10 @@ try:
 except OSError:
     raise SystemExit(3)
 PY
+    then
+        return 1
+    fi
+    return 0
 }
 
 redact_evidence() {
@@ -77,19 +98,19 @@ redact_evidence() {
     if ! manifest="$(mktemp)"; then
         return 1
     fi
-    if ! find "$evidence_dir" -type f -print0 > "$manifest"; then
-        rm -f -- "$manifest" || true
+    if ! run_cleanup_command find "$evidence_dir" -type f -print0 > "$manifest"; then
+        run_cleanup_command rm -f -- "$manifest" || true
         return 1
     fi
     failed=0
     while IFS= read -r -d '' file; do
         if ! redact_file "$file"; then
-            if ! rm -f -- "$file"; then
+            if ! run_cleanup_command rm -f -- "$file"; then
                 failed=1
             fi
         fi
     done < "$manifest"
-    if ! rm -f -- "$manifest"; then
+    if ! run_cleanup_command rm -f -- "$manifest"; then
         failed=1
     fi
     return "$failed"
@@ -97,21 +118,30 @@ redact_evidence() {
 
 capture_logcat() {
     local adb_prefix=()
+    local failed=0
     if [[ -n "${ANDROID_SERIAL:-}" ]]; then
         adb_prefix=(-s "$ANDROID_SERIAL")
     fi
 
     if ! command -v adb >/dev/null 2>&1; then
-        printf 'adb was not available when evidence capture started.\n' > "$logcat_output"
+        if ! printf 'adb was not available when evidence capture started.\n' > "$logcat_output"; then
+            return 1
+        fi
         return 0
     fi
 
-    adb "${adb_prefix[@]}" logcat -d -v threadtime -t 5000 > "$logcat_output" 2>&1 || true
-    adb "${adb_prefix[@]}" get-state > "$evidence_dir/adb-state.txt" 2>&1 || true
+    if ! run_cleanup_command adb "${adb_prefix[@]}" logcat -d -v threadtime -t 5000 > "$logcat_output" 2>&1; then
+        failed=1
+    fi
+    if ! run_cleanup_command adb "${adb_prefix[@]}" get-state > "$evidence_dir/adb-state.txt" 2>&1; then
+        failed=1
+    fi
+    return "$failed"
 }
 
 copy_instrumentation_output() {
-    local module relative source destination
+    local module relative source destination available
+    local failed=0
     for module in "feature/entry/presentation" "app"; do
         for relative in \
             "build/outputs/androidTest-results/connected/debug" \
@@ -119,14 +149,24 @@ copy_instrumentation_output() {
             source="$repo_root/$module/$relative"
             [[ -e "$source" ]] || continue
             destination="$instrumentation_dir/$module/$(dirname "$relative")"
-            mkdir -p "$destination"
-            cp -R "$source" "$destination/" || true
+            if ! mkdir -p "$destination"; then
+                failed=1
+                continue
+            fi
+            if ! run_cleanup_command cp -R "$source" "$destination/"; then
+                failed=1
+            fi
         done
     done
 
-    if ! find "$instrumentation_dir" -type f -print -quit | grep -q .; then
-        printf 'No instrumentation reports were produced before the runner stopped.\n' > "$instrumentation_dir/NOT_AVAILABLE.txt"
+    if available="$(run_cleanup_command find "$instrumentation_dir" -type f -print -quit)"; then
+        if [[ -z "$available" ]] && ! printf 'No instrumentation reports were produced before the runner stopped.\n' > "$instrumentation_dir/NOT_AVAILABLE.txt"; then
+            failed=1
+        fi
+    else
+        failed=1
     fi
+    return "$failed"
 }
 
 classify_failure() {
@@ -168,11 +208,18 @@ write_context() {
 
 on_exit() {
     local status=$?
+    local cleanup_failed=0
     trap - EXIT
+    trap '' TERM INT
     set +e
+    cleanup_deadline_seconds=$((SECONDS + cleanup_budget_seconds))
 
-    capture_logcat
-    copy_instrumentation_output
+    if ! capture_logcat; then
+        cleanup_failed=1
+    fi
+    if ! copy_instrumentation_output; then
+        cleanup_failed=1
+    fi
 
     local category
     if (( status == 0 )); then
@@ -180,12 +227,20 @@ on_exit() {
     else
         category="$(classify_failure "$status")"
     fi
-    printf 'category=%s\n' "$category" > "$category_file"
-    write_context "$category" "$status"
+    if ! printf 'category=%s\n' "$category" > "$category_file"; then
+        cleanup_failed=1
+    fi
+    if ! write_context "$category" "$status"; then
+        cleanup_failed=1
+    fi
     if ! redact_evidence; then
-        printf '%s\n' 'Evidence sanitization failed; artifact upload will be skipped.' >&2
-    elif ! rm -f -- "$redaction_pending_marker"; then
-        printf '%s\n' 'Evidence sanitization completed but its success marker could not be removed; artifact upload will be skipped.' >&2
+        cleanup_failed=1
+        printf '%s\n' 'Evidence cleanup or sanitization failed; artifact upload will be skipped.' >&2
+    fi
+    if (( cleanup_failed != 0 )); then
+        printf '%s\n' 'Evidence cleanup did not complete; artifact upload will be skipped.' >&2
+    elif ! run_cleanup_command rm -f -- "$redaction_pending_marker"; then
+        printf '%s\n' 'Evidence cleanup completed but its success marker could not be removed; artifact upload will be skipped.' >&2
     fi
     exit "$status"
 }

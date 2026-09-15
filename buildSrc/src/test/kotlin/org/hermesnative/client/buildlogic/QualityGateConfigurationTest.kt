@@ -120,6 +120,9 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must identify emulator failures.", evidenceScript.contains("emulator_failure"))
         assertTrue("The wrapper must redact sensitive values.", evidenceScript.contains("<redacted>"))
         assertTrue("The wrapper must redact quoted JSON sensitive values.", evidenceScript.contains("sensitive_key"))
+        assertTrue("The wrapper must bound cleanup commands.", evidenceScript.contains("run_cleanup_command"))
+        assertTrue("The wrapper must bound total cleanup time.", evidenceScript.contains("cleanup_budget_seconds"))
+        assertTrue("The wrapper must ignore cancellation signals during cleanup.", evidenceScript.contains("trap '' TERM INT"))
         assertTrue("The wrapper must detect NUL-containing files as unsanitizable.", evidenceScript.contains("\\x00"))
         assertTrue("The wrapper must fail closed when a file cannot be read.", evidenceScript.contains("raise SystemExit(1)"))
         assertTrue("The wrapper must delete unsanitizable files when possible.", evidenceScript.contains("rm -f --"))
@@ -151,11 +154,23 @@ class QualityGateConfigurationTest {
             )
             Files.setPosixFilePermissions(fakeGradle, PosixFilePermissions.fromString("rwxr-xr-x"))
 
+            val fakeAdb = tempDir.resolve("adb")
+            Files.writeString(
+                fakeAdb,
+                """
+                    #!/usr/bin/env bash
+                    exit 0
+                """.trimIndent(),
+            )
+            Files.setPosixFilePermissions(fakeAdb, PosixFilePermissions.fromString("rwxr-xr-x"))
+
             val process =
                 ProcessBuilder("bash", repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").absolutePath)
                     .directory(tempDir.toFile())
             process.environment()["GITHUB_WORKSPACE"] = tempDir.toString()
             process.environment()["ANDROID_TEST_TIMEOUT_SECONDS"] = "30"
+            process.environment()["PATH"] =
+                "${tempDir}${File.pathSeparator}${System.getenv("PATH") ?: ""}"
             process.redirectErrorStream(true)
             val startedProcess = process.start()
             startedProcess.inputStream.bufferedReader().use { it.readText() }
