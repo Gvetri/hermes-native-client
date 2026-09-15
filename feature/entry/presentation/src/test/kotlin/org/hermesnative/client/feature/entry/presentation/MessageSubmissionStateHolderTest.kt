@@ -407,6 +407,38 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun failed_submission_after_leaving_session_restores_try_again_when_reopened() {
+        val session = session("session-1")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRunFailure(GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED))
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            gateway.releaseRun.countDown()
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == session.id }
+            val reopened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertEquals("Keep this draft", reopened.composerText)
+            assertEquals(MessageSendErrorCategory.GATEWAY_REQUEST_FAILED, reopened.sendErrorCategory)
+            assertFalse(reopened.isSending)
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun removing_the_gateway_clears_persisted_connection_and_in_memory_drafts() {
         val session = session("session-1")
         val dataSource = InMemoryGatewayConnectionDataSource()

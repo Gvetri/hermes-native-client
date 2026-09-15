@@ -170,6 +170,7 @@ class EntryStateHolder(
     private val mutationJobs = mutableMapOf<SessionId, Job>()
     private val runJobs = mutableMapOf<SessionId, Job>()
     private val sessionDrafts = mutableMapOf<SessionId, String>()
+    private val sessionSendErrors = mutableMapOf<SessionId, MessageSendErrorCategory>()
     private val pendingRunDrafts = mutableMapOf<SessionId, String>()
     private val sessionRuns = mutableMapOf<SessionId, List<Run>>()
 
@@ -218,6 +219,7 @@ class EntryStateHolder(
                 runJobs.values.toList().also {
                     runJobs.clear()
                     sessionDrafts.clear()
+                    sessionSendErrors.clear()
                     pendingRunDrafts.clear()
                     sessionRuns.clear()
                 }
@@ -315,6 +317,7 @@ class EntryStateHolder(
                 sessionGateway = null
                 runGateway = null
                 sessionDrafts.clear()
+                sessionSendErrors.clear()
                 pendingRunDrafts.clear()
                 sessionRuns.clear()
                 (mutationJobs.values + runJobs.values).toList().also {
@@ -459,6 +462,7 @@ class EntryStateHolder(
                         openedSession =
                             openedSession.toOpenSessionUiState(
                                 composerText = sessionDrafts[sessionId] ?: previous.composerText,
+                                sendErrorCategory = sessionSendErrors[sessionId],
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
                                 isSending = previous.isSending || runJobs.containsKey(sessionId),
@@ -1501,6 +1505,7 @@ class EntryStateHolder(
                                 openedSession =
                                     openedSession.toOpenSessionUiState(
                                         composerText = sessionDrafts[sessionId].orEmpty(),
+                                        sendErrorCategory = sessionSendErrors[sessionId],
                                         latestRun = knownRuns.latestRun(),
                                         activeRuns = knownRuns.activeRuns(),
                                         isSending = runJobs.containsKey(sessionId),
@@ -1570,6 +1575,7 @@ class EntryStateHolder(
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession ?: return
             sessionDrafts[opened.session.id] = value
+            sessionSendErrors.remove(opened.session.id)
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -1622,6 +1628,7 @@ class EntryStateHolder(
                                     ),
                             ),
                     )
+                sessionSendErrors.remove(sessionId)
                 pendingRunDrafts[sessionId] = opened.composerText
                 sessionDrafts[sessionId] = opened.composerText
                 createRunJob(sessionId) {
@@ -1633,8 +1640,10 @@ class EntryStateHolder(
                         throw error
                     } catch (_: GatewayException) {
                         showMessageSendFailure(sessionId, requestConnectionGeneration)
+                        onRunSubmissionCompleted?.invoke()
                     } catch (_: Exception) {
                         showMessageSendFailure(sessionId, requestConnectionGeneration)
+                        onRunSubmissionCompleted?.invoke()
                     }
                 }
             }
@@ -1648,6 +1657,7 @@ class EntryStateHolder(
     ) {
         synchronized(sessionRequestLock) {
             if (connectionGeneration != requestConnectionGeneration) return
+            sessionSendErrors.remove(sessionId)
             val submittedDraft = pendingRunDrafts.remove(sessionId)
             if (sessionDrafts[sessionId] == submittedDraft) {
                 sessionDrafts.remove(sessionId)
@@ -1681,6 +1691,7 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             if (connectionGeneration != requestConnectionGeneration) return
             pendingRunDrafts.remove(sessionId)
+            sessionSendErrors[sessionId] = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             _uiState.value =
@@ -1700,6 +1711,7 @@ class EntryStateHolder(
 
 private fun OpenedSession.toOpenSessionUiState(
     composerText: String = "",
+    sendErrorCategory: MessageSendErrorCategory? = null,
     latestRun: Run? = null,
     activeRuns: List<Run> = history.runs().activeRuns(),
     isSending: Boolean = false,
@@ -1708,6 +1720,7 @@ private fun OpenedSession.toOpenSessionUiState(
         session = session.toSessionItemUiState(),
         messages = history.messages.map { it.toSessionMessageUiState() }.chronological(),
         composerText = composerText,
+        sendErrorCategory = sendErrorCategory,
         latestRun = latestRun ?: history.latestRun(),
         activeRuns = activeRuns,
         isSending = isSending,
