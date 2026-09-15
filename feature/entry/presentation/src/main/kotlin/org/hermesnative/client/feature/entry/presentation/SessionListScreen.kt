@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -26,7 +28,9 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import org.hermesnative.client.feature.entry.domain.isActive
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -718,6 +722,11 @@ private fun SessionDetailContent(
             enabled = actionsEnabled && mutation?.pendingAction == null,
             onEvent = onEvent,
         )
+        state.latestRun?.let { run ->
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(text = "Latest Run: ${run.id.value}")
+            Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
+        }
         Spacer(modifier = Modifier.height(16.dp))
         if (state.messages.isEmpty()) {
             Text(text = "No messages in this Session.")
@@ -735,13 +744,51 @@ private fun SessionDetailContent(
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
+        val runIsActive = state.latestRun?.isActive() == true
+        val composerEnabled =
+            !state.isSending &&
+                !state.isRefreshing &&
+                !listRequestActive
+        val sendEnabled = composerEnabled && !runIsActive && state.composerText.isNotBlank()
         OutlinedTextField(
             value = state.composerText,
             onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },
             label = { Text("Message") },
             placeholder = { Text("Write a message") },
             modifier = Modifier.fillMaxWidth(),
+            enabled = composerEnabled,
+            singleLine = false,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions =
+                KeyboardActions(
+                    onSend = {
+                        if (sendEnabled) onEvent(EntryUiEvent.SendMessageClicked)
+                    },
+                ),
         )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { onEvent(EntryUiEvent.SendMessageClicked) },
+            enabled = sendEnabled,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = if (state.sendErrorCategory == null) "Send" else "Try again")
+        }
+        if (state.isSending) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Sending message…",
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        state.sendErrorCategory?.let { category ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = category.safeMessage,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
     }
 }
 

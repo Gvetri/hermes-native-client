@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
+import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionId
@@ -64,6 +65,12 @@ enum class SessionHistoryErrorCategory(
     GATEWAY_REQUEST_FAILED("Session history could not be refreshed. The current content is preserved."),
 }
 
+enum class MessageSendErrorCategory(
+    val safeMessage: String,
+) {
+    GATEWAY_REQUEST_FAILED("Message was not sent. Your draft is preserved. Try again."),
+}
+
 data class OpenSessionUiState(
     val session: SessionItemUiState,
     val messages: List<SessionMessageUiState>,
@@ -71,6 +78,9 @@ data class OpenSessionUiState(
     val isRefreshing: Boolean = false,
     val isStale: Boolean = false,
     val errorCategory: SessionHistoryErrorCategory? = null,
+    val latestRun: Run? = null,
+    val isSending: Boolean = false,
+    val sendErrorCategory: MessageSendErrorCategory? = null,
 )
 
 data class SessionCreationUiState(
@@ -126,7 +136,8 @@ internal val SessionListUiState.hasActiveRequest: Boolean
             isSearching ||
             openingSessionId != null ||
             createSession != null ||
-            hasPendingMutation
+            hasPendingMutation ||
+            openedSession?.isSending == true
 
 internal fun SessionListUiState.allowsSessionMutation(): Boolean =
     !hasActiveRequest &&

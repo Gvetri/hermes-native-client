@@ -18,6 +18,10 @@ class SharedPreferencesGatewayConnectionDataSource(
         preferences.edit().putString(ENDPOINT_KEY, endpoint).apply()
     }
 
+    override fun clearEndpoint() {
+        preferences.edit().remove(ENDPOINT_KEY).apply()
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "gateway_connection"
         const val ENDPOINT_KEY = "endpoint"

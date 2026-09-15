@@ -4,6 +4,8 @@ interface GatewayConnectionDataSource {
     fun loadEndpoint(): String?
 
     fun saveEndpoint(endpoint: String)
+
+    fun clearEndpoint() = Unit
 }
 
 class InMemoryGatewayConnectionDataSource(
@@ -13,5 +15,9 @@ class InMemoryGatewayConnectionDataSource(
 
     override fun saveEndpoint(endpoint: String) {
         this.endpoint = endpoint
+    }
+
+    override fun clearEndpoint() {
+        endpoint = null
     }
 }

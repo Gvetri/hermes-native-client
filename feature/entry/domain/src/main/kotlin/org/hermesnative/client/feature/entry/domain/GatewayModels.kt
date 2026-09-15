@@ -1,5 +1,7 @@
 package org.hermesnative.client.feature.entry.domain
 
+import java.util.Locale
+
 @JvmInline
 value class SessionId(
     val value: String,
@@ -59,6 +61,26 @@ data class Run(
     val sessionId: SessionId,
     val status: String,
 )
+
+private val terminalRunStatuses =
+    setOf(
+        "completed",
+        "succeeded",
+        "failed",
+        "error",
+        "cancelled",
+        "canceled",
+    )
+
+fun Run.isActive(): Boolean = status.trim().lowercase(Locale.ROOT) !in terminalRunStatuses
+
+data class RunSubmissionState(
+    val latestRun: Run? = null,
+    val isSubmissionPending: Boolean = false,
+) {
+    val canSubmit: Boolean
+        get() = !isSubmissionPending && latestRun?.isActive() != true
+}
 
 enum class RunEventType {
     STARTED,
