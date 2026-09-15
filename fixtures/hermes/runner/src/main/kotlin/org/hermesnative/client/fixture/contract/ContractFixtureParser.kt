@@ -34,6 +34,7 @@ class ContractJsonFixture(
 data class ContractSseEvent(
     val eventType: String,
     val data: JsonObject,
+    val id: String? = null,
 ) {
     fun requiredString(path: String): String = fields().requiredString(path)
 
@@ -131,7 +132,13 @@ object ContractFixtureParser {
         val lines = record.split('\n')
         val eventLines = lines.filter { it.startsWith("event:") }
         val dataLines = lines.filter { it.startsWith("data:") }
-        if (eventLines.size != 1 || dataLines.isEmpty() || lines.size != eventLines.size + dataLines.size) {
+        val idLines = lines.filter { it.startsWith("id:") }
+        if (
+            eventLines.size != 1 ||
+            dataLines.isEmpty() ||
+            idLines.size > 1 ||
+            lines.size != eventLines.size + dataLines.size + idLines.size
+        ) {
             fail(
                 ContractFixtureFailureCategory.INVALID_SSE_FRAMING,
                 "$sourceName contains an SSE record with invalid event/data framing.",
@@ -161,7 +168,11 @@ object ContractFixtureParser {
                     error,
                 )
             }
-        return ContractSseEvent(eventType, data)
+        return ContractSseEvent(
+            eventType = eventType,
+            data = data,
+            id = idLines.singleOrNull()?.removePrefix("id:")?.trim()?.takeIf(String::isNotEmpty),
+        )
     }
 
     private fun validateProvenance(

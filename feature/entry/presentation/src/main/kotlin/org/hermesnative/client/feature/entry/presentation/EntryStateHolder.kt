@@ -7,7 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +18,7 @@ import org.hermesnative.client.feature.entry.application.CreateSession
 import org.hermesnative.client.feature.entry.application.DeleteSession
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.LoadSessionList
+import org.hermesnative.client.feature.entry.application.ObserveRun
 import org.hermesnative.client.feature.entry.application.OpenSession
 import org.hermesnative.client.feature.entry.application.OpenedSession
 import org.hermesnative.client.feature.entry.application.PinSession
@@ -27,8 +30,13 @@ import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.Run
+import org.hermesnative.client.feature.entry.domain.RunEvent
+import org.hermesnative.client.feature.entry.domain.RunEventObservation
+import org.hermesnative.client.feature.entry.domain.RunEventStateTransition
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunObservationState
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
@@ -36,6 +44,7 @@ import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.isActive
+import org.hermesnative.client.feature.entry.domain.isTerminal
 
 sealed interface EntryUiEvent {
     data object AddGatewayConnectionClicked : EntryUiEvent
@@ -174,6 +183,9 @@ class EntryStateHolder(
     private val sessionSendErrors = mutableMapOf<SessionId, MessageSendErrorCategory>()
     private val pendingRunDrafts = mutableMapOf<SessionId, String>()
     private val sessionRuns = mutableMapOf<SessionId, List<Run>>()
+    private val runObservationJobs = mutableMapOf<SessionId, Job>()
+    private val runObservations = mutableMapOf<SessionId, RunEventObservation>()
+    private val runObservationStates = mutableMapOf<SessionId, RunObservationState>()
 
     fun onEvent(event: EntryUiEvent) {
         when (event) {
@@ -209,6 +221,7 @@ class EntryStateHolder(
     }
 
     fun close() {
+        var observationsToClose: List<RunEventObservation> = emptyList()
         val jobsToCancel =
             synchronized(sessionRequestLock) {
                 sessionRequestGeneration += 1
@@ -219,9 +232,13 @@ class EntryStateHolder(
                 val sessionJobToCancel = sessionJob
                 verificationJob = null
                 sessionJob = null
-                val requestJobs = (mutationJobs.values + runJobs.values).toList()
+                val requestJobs = (mutationJobs.values + runJobs.values + runObservationJobs.values).toList()
+                observationsToClose = runObservations.values.toList()
                 mutationJobs.clear()
                 runJobs.clear()
+                runObservationJobs.clear()
+                runObservations.clear()
+                runObservationStates.clear()
                 sessionDrafts.clear()
                 sessionSendErrors.clear()
                 pendingRunDrafts.clear()
@@ -229,6 +246,7 @@ class EntryStateHolder(
                 requestJobs + listOfNotNull(verificationJobToCancel, sessionJobToCancel)
             }
         jobsToCancel.forEach(Job::cancel)
+        observationsToClose.forEach(RunEventObservation::close)
         scope.cancel()
     }
 
@@ -333,6 +351,7 @@ class EntryStateHolder(
         removeGatewayConnectionUseCase?.execute()
         verificationJob?.cancel()
         sessionJob?.cancel()
+        var observationsToClose: List<RunEventObservation> = emptyList()
         val jobsToCancel =
             synchronized(sessionRequestLock) {
                 sessionRequestGeneration += 1
@@ -343,12 +362,17 @@ class EntryStateHolder(
                 sessionSendErrors.clear()
                 pendingRunDrafts.clear()
                 sessionRuns.clear()
-                (mutationJobs.values + runJobs.values).toList().also {
+                observationsToClose = runObservations.values.toList()
+                (mutationJobs.values + runJobs.values + runObservationJobs.values).toList().also {
                     mutationJobs.clear()
                     runJobs.clear()
+                    runObservationJobs.clear()
+                    runObservations.clear()
+                    runObservationStates.clear()
                 }
             }
         jobsToCancel.forEach(Job::cancel)
+        observationsToClose.forEach(RunEventObservation::close)
         _uiState.value = EntryState().toUiState()
     }
 
@@ -489,6 +513,14 @@ class EntryStateHolder(
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
                                 isSending = previous.isSending || runJobs.containsKey(sessionId),
+                                latestRunState =
+                                    runObservationStates[sessionId]
+                                        ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
+                                        ?.state,
+                                activeResponse =
+                                    runObservationStates[sessionId]
+                                        ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
+                                        ?.toSessionMessageUiState(),
                             ),
                         errorCategory = null,
                     )
@@ -1128,10 +1160,17 @@ class EntryStateHolder(
     }
 
     private fun removeConfirmedSession(sessionId: SessionId) {
+        var observationJobToCancel: Job? = null
+        var observationToClose: RunEventObservation? = null
         val refreshJob =
             synchronized(sessionRequestLock) {
                 val current = _uiState.value.sessionList ?: return@synchronized null
                 val shouldRefresh = current.nextCursor != null
+                if (current.openedSession?.session?.id == sessionId) {
+                    observationJobToCancel = runObservationJobs.remove(sessionId)
+                    observationToClose = runObservations.remove(sessionId)
+                    runObservationStates.remove(sessionId)
+                }
                 _uiState.value =
                     _uiState.value.copy(
                         sessionList =
@@ -1155,6 +1194,8 @@ class EntryStateHolder(
                     null
                 }
             }
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
         refreshJob?.start()
     }
 
@@ -1511,30 +1552,44 @@ class EntryStateHolder(
                 createSessionJob {
                     try {
                         val openedSession = OpenSession(gateway).execute(sessionId)
-                        updateCurrentSessionRequest(request.generation, request.query) { current ->
-                            val authoritativeSession = openedSession.session.toSessionItemUiState()
-                            val knownRuns = rememberSessionRuns(sessionId, openedSession)
-                            current.copy(
-                                sessions =
-                                    current.sessions
-                                        .map { item ->
-                                            if (item.id == sessionId) authoritativeSession else item
-                                        }
-                                        .orderedSessions(),
-                                sessionMutations = retainRenameDraft(current.sessionMutations, sessionId),
-                                openingSessionId = null,
-                                isStale = false,
-                                isUnavailable = false,
-                                openedSession =
-                                    openedSession.toOpenSessionUiState(
-                                        composerText = sessionDrafts[sessionId].orEmpty(),
-                                        sendErrorCategory = sessionSendErrors[sessionId],
-                                        latestRun = knownRuns.latestRun(),
-                                        activeRuns = knownRuns.activeRuns(),
-                                        isSending = runJobs.containsKey(sessionId),
-                                    ),
-                                errorCategory = null,
-                            )
+                        val applied =
+                            updateCurrentSessionRequest(request.generation, request.query) { current ->
+                                val authoritativeSession = openedSession.session.toSessionItemUiState()
+                                val knownRuns = rememberSessionRuns(sessionId, openedSession)
+                                current.copy(
+                                    sessions =
+                                        current.sessions
+                                            .map { item ->
+                                                if (item.id == sessionId) authoritativeSession else item
+                                            }
+                                            .orderedSessions(),
+                                    sessionMutations = retainRenameDraft(current.sessionMutations, sessionId),
+                                    openingSessionId = null,
+                                    isStale = false,
+                                    isUnavailable = false,
+                                    openedSession =
+                                        openedSession.toOpenSessionUiState(
+                                            composerText = sessionDrafts[sessionId].orEmpty(),
+                                            sendErrorCategory = sessionSendErrors[sessionId],
+                                            latestRun = knownRuns.latestRun(),
+                                            activeRuns = knownRuns.activeRuns(),
+                                            isSending = runJobs.containsKey(sessionId),
+                                            latestRunState =
+                                                runObservationStates[sessionId]
+                                                    ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
+                                                    ?.state,
+                                            activeResponse =
+                                                runObservationStates[sessionId]
+                                                    ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
+                                                    ?.toSessionMessageUiState(),
+                                        ),
+                                    errorCategory = null,
+                                )
+                            }
+                        if (applied) {
+                            sessionRuns[sessionId].orEmpty()
+                                .latestActiveRun()
+                                ?.let { run -> startRunObservation(sessionId, run) }
                         }
                     } catch (error: CancellationException) {
                         throw error
@@ -1565,6 +1620,8 @@ class EntryStateHolder(
     }
 
     private fun returnToSessionList() {
+        var observationToClose: RunEventObservation? = null
+        var observationJobToCancel: Job? = null
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
             if (current.createSession != null) {
@@ -1580,6 +1637,10 @@ class EntryStateHolder(
                 }
                 return
             }
+            current.openedSession?.session?.id?.let { sessionId ->
+                observationJobToCancel = runObservationJobs.remove(sessionId)
+                observationToClose = runObservations.remove(sessionId)
+            }
             beginSessionRequest()
             _uiState.value =
                 _uiState.value.copy(
@@ -1591,6 +1652,8 @@ class EntryStateHolder(
                         ),
                 )
         }
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
     }
 
     private fun updateComposerText(value: String) {
@@ -1683,35 +1746,221 @@ class EntryStateHolder(
         run: Run,
         requestConnectionGeneration: Long,
     ): Boolean {
-        return synchronized(sessionRequestLock) {
-            if (connectionGeneration != requestConnectionGeneration) return false
-            sessionSendErrors.remove(sessionId)
-            val submittedDraft = pendingRunDrafts.remove(sessionId)
-            if (sessionDrafts[sessionId] == submittedDraft) {
-                sessionDrafts.remove(sessionId)
+        var shouldObserve = false
+        var observationJobToCancel: Job? = null
+        var observationToClose: RunEventObservation? = null
+        val applied =
+            synchronized(sessionRequestLock) {
+                if (connectionGeneration != requestConnectionGeneration) return@synchronized false
+                sessionSendErrors.remove(sessionId)
+                val submittedDraft = pendingRunDrafts.remove(sessionId)
+                if (sessionDrafts[sessionId] == submittedDraft) {
+                    sessionDrafts.remove(sessionId)
+                }
+                val knownRuns =
+                    (sessionRuns[sessionId].orEmpty().filterNot { it.id == run.id } + run)
+                        .also { sessionRuns[sessionId] = it }
+                val current = _uiState.value.sessionList
+                val opened = current?.openedSession?.takeIf { it.session.id == sessionId }
+                if (current != null && opened != null) {
+                    observationJobToCancel = runObservationJobs.remove(sessionId)
+                    observationToClose = runObservations.remove(sessionId)
+                    val observationState =
+                        runObservationStates[sessionId]
+                            ?.takeIf { state -> state.run.id == run.id }
+                            ?: RunEventStateTransition.initial(run)
+                    runObservationStates[sessionId] = observationState
+                    _uiState.value =
+                        _uiState.value.copy(
+                            sessionList =
+                                current.copy(
+                                    openedSession =
+                                        opened.copy(
+                                            composerText = sessionDrafts[sessionId].orEmpty(),
+                                            latestRun = knownRuns.latestRun() ?: run,
+                                            activeRuns = knownRuns.activeRuns(),
+                                            isSending = false,
+                                            sendErrorCategory = null,
+                                            latestRunState = observationState.state,
+                                            activeResponse = observationState.toSessionMessageUiState(),
+                                        ),
+                                ),
+                        )
+                    shouldObserve = run.isActive()
+                }
+                true
             }
-            val knownRuns =
-                (sessionRuns[sessionId].orEmpty().filterNot { it.id == run.id } + run)
-                    .also { sessionRuns[sessionId] = it }
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
+        if (applied && shouldObserve) {
+            startRunObservation(sessionId, run)
+        }
+        return applied
+    }
+
+    private fun startRunObservation(
+        sessionId: SessionId,
+        run: Run,
+    ) {
+        var jobToStart: Job? = null
+        synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList
-            val opened = current?.openedSession?.takeIf { it.session.id == sessionId }
-            if (current != null && opened != null) {
-                _uiState.value =
-                    _uiState.value.copy(
-                        sessionList =
-                            current.copy(
-                                openedSession =
-                                    opened.copy(
-                                        composerText = sessionDrafts[sessionId].orEmpty(),
-                                        latestRun = knownRuns.latestRun() ?: run,
-                                        activeRuns = knownRuns.activeRuns(),
-                                        isSending = false,
-                                        sendErrorCategory = null,
-                                    ),
-                            ),
-                    )
+            val opened = current?.openedSession
+            if (
+                opened == null ||
+                opened.session.id != sessionId ||
+                !run.isActive() ||
+                runObservationJobs.containsKey(sessionId)
+            ) {
+                return
             }
-            true
+            val state =
+                runObservationStates[sessionId]
+                    ?.takeIf { observationState -> observationState.run.id == run.id }
+                    ?: RunEventStateTransition.initial(run)
+            runObservationStates[sessionId] = state
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            openedSession =
+                                opened.copy(
+                                    latestRunState = state.state,
+                                    activeResponse = state.toSessionMessageUiState(),
+                                ),
+                        ),
+                )
+            lateinit var observationJob: Job
+            observationJob =
+                scope.launch(start = CoroutineStart.LAZY) {
+                    try {
+                        observeRun(sessionId, run)
+                    } finally {
+                        synchronized(sessionRequestLock) {
+                            if (runObservationJobs[sessionId] === observationJob) {
+                                runObservationJobs.remove(sessionId)
+                            }
+                        }
+                    }
+                }
+            runObservationJobs[sessionId] = observationJob
+            jobToStart = observationJob
+        }
+        jobToStart?.start()
+    }
+
+    private suspend fun observeRun(
+        sessionId: SessionId,
+        run: Run,
+    ) {
+        var observation: RunEventObservation? = null
+        try {
+            currentCoroutineContext().ensureActive()
+            val gateway =
+                synchronized(sessionRequestLock) {
+                    runGateway?.takeIf {
+                        _uiState.value.sessionList?.openedSession?.session?.id == sessionId
+                    }
+                } ?: return
+            observation = ObserveRun(gateway).execute(run.id)
+            val observationJob = currentCoroutineContext()[Job]
+            synchronized(sessionRequestLock) {
+                if (
+                    _uiState.value.sessionList?.openedSession?.session?.id != sessionId ||
+                    runObservationJobs[sessionId] !== observationJob
+                ) {
+                    return
+                }
+                runObservations[sessionId] = observation
+            }
+            var reachedTerminalState = false
+            val activeObservation = observation ?: return
+            for (event in activeObservation) {
+                currentCoroutineContext().ensureActive()
+                applyRunEvent(sessionId, event)
+                reachedTerminalState =
+                    synchronized(sessionRequestLock) {
+                        runObservationStates[sessionId]
+                            ?.takeIf { state -> state.run.id == run.id }
+                            ?.state
+                            ?.isTerminal() == true
+                    }
+                if (reachedTerminalState) break
+            }
+            if (!reachedTerminalState) {
+                markRunObservationUncertain(sessionId, run.id)
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            if (currentCoroutineContext()[Job]?.isActive == true) {
+                markRunObservationUncertain(sessionId, run.id)
+            }
+        } finally {
+            observation?.close()
+            synchronized(sessionRequestLock) {
+                if (runObservations[sessionId] === observation) {
+                    runObservations.remove(sessionId)
+                }
+            }
+        }
+    }
+
+    private fun applyRunEvent(
+        sessionId: SessionId,
+        event: RunEvent,
+    ) {
+        synchronized(sessionRequestLock) {
+            val previous = runObservationStates[sessionId] ?: return
+            if (previous.run.id != event.runId) return
+            val next = RunEventStateTransition.apply(previous, event)
+            runObservationStates[sessionId] = next
+            val knownRuns =
+                sessionRuns[sessionId].orEmpty()
+                    .map { knownRun -> if (knownRun.id == event.runId) next.run else knownRun }
+                    .ifEmpty { listOf(next.run) }
+            sessionRuns[sessionId] = knownRuns
+            val current = _uiState.value.sessionList ?: return
+            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+            val latestRun = knownRuns.latestRun() ?: next.run
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            openedSession =
+                                opened.copy(
+                                    latestRun = latestRun,
+                                    activeRuns = knownRuns.activeRuns(),
+                                    latestRunState = next.state,
+                                    activeResponse = next.toSessionMessageUiState(),
+                                ),
+                        ),
+                )
+        }
+    }
+
+    private fun markRunObservationUncertain(
+        sessionId: SessionId,
+        runId: RunId,
+    ) {
+        synchronized(sessionRequestLock) {
+            val previous = runObservationStates[sessionId]?.takeIf { state -> state.run.id == runId } ?: return
+            if (previous.state.isTerminal()) return
+            val next = RunEventStateTransition.interrupted(previous)
+            runObservationStates[sessionId] = next
+            val current = _uiState.value.sessionList ?: return
+            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            openedSession =
+                                opened.copy(
+                                    latestRunState = RunPresentationState.UNCERTAIN,
+                                    activeResponse = next.toSessionMessageUiState(),
+                                ),
+                        ),
+                )
         }
     }
 
@@ -1749,6 +1998,8 @@ private fun OpenedSession.toOpenSessionUiState(
     latestRun: Run? = null,
     activeRuns: List<Run> = history.runs().activeRuns(),
     isSending: Boolean = false,
+    latestRunState: RunPresentationState? = null,
+    activeResponse: SessionMessageUiState? = null,
 ): OpenSessionUiState =
     OpenSessionUiState(
         session = session.toSessionItemUiState(),
@@ -1758,7 +2009,22 @@ private fun OpenedSession.toOpenSessionUiState(
         latestRun = latestRun ?: history.latestRun(),
         activeRuns = activeRuns,
         isSending = isSending,
+        latestRunState = latestRunState,
+        activeResponse = activeResponse,
     )
+
+private fun RunObservationState.toSessionMessageUiState(): SessionMessageUiState =
+    SessionMessageUiState(
+        id = "active-response:${run.id.value}",
+        role = "assistant",
+        content = responseText.takeIf(String::isNotEmpty),
+        runId = run.id,
+        runState = state,
+        isStreaming = isStreaming,
+        streamInterrupted = isStreamInterrupted,
+    )
+
+private fun List<Run>.latestActiveRun(): Run? = lastOrNull(Run::isActive)
 
 private fun SessionHistory.runs(): List<Run> {
     val runsById = linkedMapOf<RunId, Run>()

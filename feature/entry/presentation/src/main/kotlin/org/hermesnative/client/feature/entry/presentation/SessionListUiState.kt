@@ -3,6 +3,7 @@ package org.hermesnative.client.feature.entry.presentation
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionId
 import java.time.Instant
@@ -57,6 +58,9 @@ data class SessionMessageUiState(
     val runStatus: String? = null,
     val runResult: String? = null,
     val timestamp: Instant? = null,
+    val isStreaming: Boolean = false,
+    val runState: RunPresentationState? = null,
+    val streamInterrupted: Boolean = false,
 )
 
 enum class SessionHistoryErrorCategory(
@@ -82,6 +86,8 @@ data class OpenSessionUiState(
     val activeRuns: List<Run> = emptyList(),
     val isSending: Boolean = false,
     val sendErrorCategory: MessageSendErrorCategory? = null,
+    val latestRunState: RunPresentationState? = null,
+    val activeResponse: SessionMessageUiState? = null,
 )
 
 data class SessionCreationUiState(

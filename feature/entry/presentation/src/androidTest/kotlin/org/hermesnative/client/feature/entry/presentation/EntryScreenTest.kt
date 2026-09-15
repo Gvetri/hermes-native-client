@@ -17,6 +17,9 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hermesnative.client.feature.entry.application.EntryState
+import org.hermesnative.client.feature.entry.domain.Run
+import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -742,5 +745,53 @@ class EntryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Refresh").assertIsNotEnabled()
+    }
+
+    @Test
+    fun streamed_response_exposes_only_truthful_run_state_and_interruption_semantics() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session =
+                                                SessionItemUiState(
+                                                    id = SessionId("session-one"),
+                                                    title = "Streaming Session",
+                                                    preview = null,
+                                                    pinned = false,
+                                                ),
+                                            messages = emptyList(),
+                                            latestRun = Run(RunId("run-one"), SessionId("session-one"), "running"),
+                                            latestRunState = RunPresentationState.RUNNING,
+                                            activeResponse =
+                                                SessionMessageUiState(
+                                                    id = "active-response:run-one",
+                                                    role = "assistant",
+                                                    content = "Partial answer",
+                                                    runId = RunId("run-one"),
+                                                    isStreaming = true,
+                                                    runState = RunPresentationState.RUNNING,
+                                                ),
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Partial answer").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run state: Running").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run status: running").assertDoesNotExist()
     }
 }

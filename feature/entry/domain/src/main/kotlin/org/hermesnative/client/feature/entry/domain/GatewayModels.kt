@@ -89,11 +89,25 @@ data class RunSubmissionState(
 enum class RunEventType {
     STARTED,
     RUNNING,
+    COMPLETING,
+    MESSAGE_DELTA,
+    TEXT_DELTA,
     COMPLETED,
+    SUCCEEDED,
+    FAILED,
+    INTERRUPTED,
 }
 
 data class RunEvent(
     val type: RunEventType,
     val runId: RunId,
-    val status: String,
-)
+    val status: String = "",
+    val text: String? = null,
+    val eventId: String? = null,
+) {
+    val delta: String?
+        get() = text
+
+    val content: String?
+        get() = text
+}

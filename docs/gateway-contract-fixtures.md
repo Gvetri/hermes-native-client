@@ -62,8 +62,12 @@ The required capability identifiers are:
 
 Unknown additive JSON fields and unknown capability identifiers are allowed when
 all required identifiers are present. Unknown SSE event types are retained by
-the fixture parser so a later observer can ignore them safely. Unknown fields
-and events must not be used to invent client behavior.
+the fixture parser so an observer can ignore them safely. Supported Run
+observation events include `run.started`, `run.running`, `run.completing`,
+`message.delta`, `run.succeeded`, `run.failed`, and `run.interrupted` (with the
+legacy `run.completed` terminal event also accepted). SSE `id` values identify
+repeated deliveries for client-side deduplication; they are not resume cursors.
+Unknown fields and events must not be used to invent client behavior.
 
 ## Identity and data policy
 
@@ -80,7 +84,8 @@ The `malformed` directory contains deterministic parser inputs for:
 - invalid JSON;
 - a missing required JSON field;
 - an invalid required JSON field type; and
-- invalid SSE event framing.
+- invalid SSE event framing;
+- a Run observation ending with an interruption event.
 
 The tests also construct missing-provenance and duplicate-provenance inputs.
 Failures use stable safe categories: `INVALID_JSON`,

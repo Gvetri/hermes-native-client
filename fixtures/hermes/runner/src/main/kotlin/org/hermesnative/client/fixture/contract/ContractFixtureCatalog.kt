@@ -44,6 +44,8 @@ object ContractFixtureCatalog {
             ContractFixtureDefinition("runs/status-request.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("runs/status-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("runs/observation.sse", ContractFixtureFormat.SSE),
+            ContractFixtureDefinition("runs/observation-streaming.sse", ContractFixtureFormat.SSE),
+            ContractFixtureDefinition("runs/observation-interrupted.sse", ContractFixtureFormat.SSE),
             ContractFixtureDefinition("malformed/invalid-json.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/missing-required-field.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/invalid-required-field-type.json", ContractFixtureFormat.JSON),

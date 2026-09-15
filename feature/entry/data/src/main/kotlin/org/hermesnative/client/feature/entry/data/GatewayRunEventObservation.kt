@@ -11,6 +11,8 @@ internal class GatewayRunEventObservation(
     private val mapTransportFailure: (Exception) -> GatewayException,
 ) : RunEventObservation {
     private var started = false
+
+    @Volatile
     private var closed = false
     private var stream: GatewayEventStream? = null
 
@@ -33,13 +35,16 @@ internal class GatewayRunEventObservation(
         return object : Iterator<RunEvent> {
             private var buffered: RunEvent? = null
             private var hasBuffered = false
+            private val seenEventKeys = mutableSetOf<String>()
 
             override fun hasNext(): Boolean {
                 if (closed) return false
                 if (hasBuffered) return true
                 try {
                     while (frames.hasNext()) {
-                        val event = parseFrame(frames.next()) ?: continue
+                        val frame = frames.next()
+                        if (!seenEventKeys.add(frame.dedupeKey)) continue
+                        val event = parseFrame(frame) ?: continue
                         buffered = event
                         hasBuffered = true
                         return true

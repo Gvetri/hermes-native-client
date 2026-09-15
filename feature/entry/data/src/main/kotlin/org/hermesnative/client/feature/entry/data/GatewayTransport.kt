@@ -28,6 +28,7 @@ class GatewayEventStream(
     val lines: Sequence<String>,
     private val closeAction: () -> Unit = {},
 ) : AutoCloseable {
+    @Volatile
     private var closed = false
 
     override fun close() {
