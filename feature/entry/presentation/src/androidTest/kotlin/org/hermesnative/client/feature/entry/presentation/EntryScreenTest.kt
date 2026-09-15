@@ -803,6 +803,6 @@ class EntryScreenTest {
         runStateNodes.assertCountEquals(2)
         runStateNodes[0].assertIsDisplayed()
         runStateNodes[1].assertIsDisplayed()
-        composeTestRule.onNodeWithText("Run status: running").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Run status: Running").assertDoesNotExist()
     }
 }

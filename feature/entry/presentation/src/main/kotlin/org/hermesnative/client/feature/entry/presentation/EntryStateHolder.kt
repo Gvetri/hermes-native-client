@@ -1587,9 +1587,11 @@ class EntryStateHolder(
                                 )
                             }
                         if (applied) {
-                            sessionRuns[sessionId].orEmpty()
-                                .latestActiveRun()
-                                ?.let { run -> startRunObservation(sessionId, run) }
+                            val activeRun =
+                                synchronized(sessionRequestLock) {
+                                    sessionRuns[sessionId].orEmpty().latestActiveRun()
+                                }
+                            activeRun?.let { run -> startRunObservation(sessionId, run) }
                         }
                     } catch (error: CancellationException) {
                         throw error

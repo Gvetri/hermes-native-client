@@ -84,8 +84,10 @@ The `malformed` directory contains deterministic parser inputs for:
 - invalid JSON;
 - a missing required JSON field;
 - an invalid required JSON field type; and
-- invalid SSE event framing;
-- a Run observation ending with an interruption event.
+- invalid SSE event framing.
+
+The `runs` directory also contains a valid Run observation stream that ends
+with an interruption event instead of a terminal event.
 
 The tests also construct missing-provenance and duplicate-provenance inputs.
 Failures use stable safe categories: `INVALID_JSON`,
