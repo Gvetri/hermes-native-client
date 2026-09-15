@@ -252,7 +252,12 @@ class EntryStateHolder(
         if (!state.connectionSetupRequested || state.isVerifying || state.isConnected) return
 
         verificationJob?.cancel()
-        _uiState.value = state.copy(isVerifying = true, errorCategory = null)
+        val requestConnectionGeneration =
+            synchronized(sessionRequestLock) {
+                connectionGeneration.also {
+                    _uiState.value = state.copy(isVerifying = true, errorCategory = null)
+                }
+            }
         verificationJob =
             scope.launch {
                 try {
@@ -261,49 +266,64 @@ class EntryStateHolder(
                         bearerCredential = state.bearerCredential,
                     )
                     val gateway =
-                        sessionGatewayFactory?.invoke(
-                            state.endpoint,
-                            state.bearerCredential,
-                        )
-                    sessionGateway = gateway
-                    runGateway =
-                        runGatewayFactory?.invoke(
-                            state.endpoint,
-                            state.bearerCredential,
-                        ) ?: (gateway as? RunGatewayPort)
-                    _uiState.value =
-                        _uiState.value.copy(
-                            title = "Gateway connected",
-                            supportingText = "The Gateway contract was verified successfully.",
-                            actionLabel = "Connected",
-                            isVerifying = false,
-                            isConnected = true,
-                            errorCategory = null,
-                            sessionList =
-                                gateway?.let {
-                                    SessionListUiState(
-                                        isLoading = true,
-                                        showFirstUseGuidance = true,
+                        synchronized(sessionRequestLock) {
+                            if (connectionGeneration != requestConnectionGeneration) {
+                                null
+                            } else {
+                                val gateway =
+                                    sessionGatewayFactory?.invoke(
+                                        state.endpoint,
+                                        state.bearerCredential,
                                     )
-                                },
-                        )
+                                sessionGateway = gateway
+                                runGateway =
+                                    runGatewayFactory?.invoke(
+                                        state.endpoint,
+                                        state.bearerCredential,
+                                    ) ?: (gateway as? RunGatewayPort)
+                                _uiState.value =
+                                    _uiState.value.copy(
+                                        title = "Gateway connected",
+                                        supportingText = "The Gateway contract was verified successfully.",
+                                        actionLabel = "Connected",
+                                        isVerifying = false,
+                                        isConnected = true,
+                                        errorCategory = null,
+                                        sessionList =
+                                            gateway?.let {
+                                                SessionListUiState(
+                                                    isLoading = true,
+                                                    showFirstUseGuidance = true,
+                                                )
+                                            },
+                                    )
+                                gateway
+                            }
+                        }
                     gateway?.let(::loadInitialSessions)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: GatewayException) {
-                    showFailure(error.category.toUserFacingCategory())
+                    showFailure(error.category.toUserFacingCategory(), requestConnectionGeneration)
                 } catch (_: Exception) {
-                    showFailure(EntryErrorCategory.GATEWAY_REQUEST_FAILED)
+                    showFailure(EntryErrorCategory.GATEWAY_REQUEST_FAILED, requestConnectionGeneration)
                 }
             }
     }
 
-    private fun showFailure(category: EntryErrorCategory) {
-        _uiState.value =
-            _uiState.value.copy(
-                isVerifying = false,
-                errorCategory = category,
-            )
+    private fun showFailure(
+        category: EntryErrorCategory,
+        requestConnectionGeneration: Long,
+    ) {
+        synchronized(sessionRequestLock) {
+            if (connectionGeneration == requestConnectionGeneration) {
+                _uiState.value =
+                    _uiState.value.copy(
+                        isVerifying = false,
+                        errorCategory = category,
+                    )
+            }
+        }
     }
 
     private fun removeGatewayConnection() {
