@@ -2,7 +2,7 @@
 
 Hermes Native Client is an independent Android application built with Kotlin and Jetpack Compose. It provides a native shell for connecting to a pre-existing, compatible Hermes Gateway.
 
-This repository does not embed a local Hermes runtime, agent execution engine, desktop web interface, Electron application, or WebView wrapper. It provides one explicit HTTPS Gateway connection flow with in-memory bearer credentials and endpoint-only persistence, followed by a Gateway-derived Session list with server-backed title and preview search and pagination, explicit in-memory Session creation, and read-only Session history entry with an in-memory message composer; message submission is planned for a later vertical slice.
+This repository does not embed a local Hermes runtime, agent execution engine, desktop web interface, Electron application, or WebView wrapper. It provides one explicit HTTPS Gateway connection flow with in-memory bearer credentials and endpoint-only persistence, followed by a Gateway-derived Session list with server-backed title and preview search and pagination, explicit in-memory Session creation, and read-only Session history entry with an in-memory message composer and explicit Gateway Run submission. Drafts remain memory-only per Session, Send is disabled while a submission or active Run exists, and failed submissions preserve the draft for retry.
 
 ## Current baseline
 

@@ -11,4 +11,8 @@ class DefaultGatewayConnectionRepository(
     override fun save(connection: GatewayConnection) {
         dataSource.saveEndpoint(connection.endpoint)
     }
+
+    override fun clear() {
+        dataSource.clearEndpoint()
+    }
 }

@@ -108,6 +108,44 @@ class EntryStateHolderTest {
     }
 
     @Test
+    fun removing_connection_while_verification_is_in_flight_cannot_restore_the_connection() {
+        val repository = FakeGatewayConnectionRepository()
+        val verificationStarted = CountDownLatch(1)
+        val releaseVerification = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        val dispatcher = executor.asCoroutineDispatcher()
+        val holder =
+            holder(
+                repository = repository,
+                verifier = { _, _ ->
+                    verificationStarted.countDown()
+                    assertTrue(
+                        releaseVerification.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS),
+                    )
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                },
+                gateway = FakeSessionGateway(),
+                dispatcher = dispatcher,
+            )
+
+        try {
+            verify(holder)
+            assertTrue(verificationStarted.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+            releaseVerification.countDown()
+            executor.submit {}.get(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+
+            assertFalse(holder.uiState.value.isConnected)
+            assertNull(holder.uiState.value.sessionList)
+        } finally {
+            releaseVerification.countDown()
+            holder.close()
+            dispatcher.close()
+        }
+    }
+
+    @Test
     fun successful_connection_loads_the_first_page_with_pinned_sessions_first() {
         val repository = FakeGatewayConnectionRepository()
         val gateway = FakeSessionGateway()
@@ -856,11 +894,12 @@ class EntryStateHolderTest {
         repository: FakeGatewayConnectionRepository,
         verifier: (String, String) -> GatewayCapabilities,
         gateway: SessionGatewayPort? = null,
+        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
     ): EntryStateHolder =
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection = VerifyGatewayConnection(repository, discoverCapabilities = verifier),
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory =
                 gateway?.let { sessionGateway ->
                     { _, _ -> sessionGateway }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -76,7 +77,7 @@ fun EntryScreen(
                 )
                 Spacer(modifier = Modifier.height(24.dp))
                 when {
-                    state.isConnected -> ConnectedGatewayContent()
+                    state.isConnected -> ConnectedGatewayContent(onEvent)
                     state.connectionSetupRequested ->
                         GatewayConnectionForm(
                             state = state,
@@ -140,6 +141,14 @@ private fun GatewayConnectionForm(
     ) {
         Text(text = if (state.errorCategory == null) state.actionLabel else "Try again")
     }
+    Spacer(modifier = Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
+        enabled = !state.isVerifying,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) {
+        Text(text = "Remove Gateway Connection")
+    }
     if (state.isVerifying) {
         Spacer(modifier = Modifier.height(16.dp))
         CircularProgressIndicator(
@@ -164,7 +173,7 @@ private fun GatewayConnectionForm(
 }
 
 @Composable
-private fun ConnectedGatewayContent() {
+private fun ConnectedGatewayContent(onEvent: (EntryUiEvent) -> Unit) {
     Text(
         text = "Connected to Gateway",
         style = MaterialTheme.typography.titleMedium,
@@ -173,4 +182,11 @@ private fun ConnectedGatewayContent() {
                 liveRegion = LiveRegionMode.Polite
             },
     )
+    Spacer(modifier = Modifier.height(16.dp))
+    OutlinedButton(
+        onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) {
+        Text(text = "Remove Gateway Connection")
+    }
 }

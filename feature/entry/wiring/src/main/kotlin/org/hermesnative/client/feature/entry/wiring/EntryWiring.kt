@@ -2,6 +2,7 @@ package org.hermesnative.client.feature.entry.wiring
 
 import android.content.Context
 import org.hermesnative.client.feature.entry.application.LoadEntryState
+import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayClient
 import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
@@ -22,6 +23,10 @@ object EntryWiring {
             sessionGatewayFactory = { endpoint, bearerCredential ->
                 DefaultGatewayClient(endpoint, bearerCredential)
             },
+            runGatewayFactory = { endpoint, bearerCredential ->
+                DefaultGatewayClient(endpoint, bearerCredential)
+            },
+            removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
         )
     }
 }

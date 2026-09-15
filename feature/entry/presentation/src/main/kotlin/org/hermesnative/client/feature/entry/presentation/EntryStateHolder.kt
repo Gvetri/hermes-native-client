@@ -19,15 +19,23 @@ import org.hermesnative.client.feature.entry.application.LoadSessionList
 import org.hermesnative.client.feature.entry.application.OpenSession
 import org.hermesnative.client.feature.entry.application.OpenedSession
 import org.hermesnative.client.feature.entry.application.PinSession
+import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.RenameSession
+import org.hermesnative.client.feature.entry.application.SubmitMessage
 import org.hermesnative.client.feature.entry.application.UnpinSession
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
+import org.hermesnative.client.feature.entry.domain.Run
+import org.hermesnative.client.feature.entry.domain.RunGatewayPort
+import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
+import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
+import org.hermesnative.client.feature.entry.domain.isActive
 
 sealed interface EntryUiEvent {
     data object AddGatewayConnectionClicked : EntryUiEvent
@@ -110,6 +118,10 @@ sealed interface EntryUiEvent {
     data class ComposerTextChanged(
         val value: String,
     ) : EntryUiEvent
+
+    data object SendMessageClicked : EntryUiEvent
+
+    data object RemoveGatewayConnectionClicked : EntryUiEvent
 }
 
 enum class EntryErrorCategory(
@@ -142,15 +154,26 @@ class EntryStateHolder(
     private val verifyGatewayConnection: VerifyGatewayConnection? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val sessionGatewayFactory: ((endpoint: String, bearerCredential: String) -> SessionGatewayPort)? = null,
+    private val runGatewayFactory: ((endpoint: String, bearerCredential: String) -> RunGatewayPort)? = null,
+    private val removeGatewayConnectionUseCase: RemoveGatewayConnection? = null,
+    private val onRunSubmissionCompleted: (() -> Unit)? = null,
+    private val onRunSubmissionSettled: (() -> Unit)? = null,
 ) {
     private val _uiState = MutableStateFlow(initialState.toUiState())
     val uiState: StateFlow<EntryUiState> = _uiState.asStateFlow()
     private var verificationJob: Job? = null
     private var sessionJob: Job? = null
     private var sessionGateway: SessionGatewayPort? = null
+    private var runGateway: RunGatewayPort? = null
     private val sessionRequestLock = Any()
     private var sessionRequestGeneration = 0L
+    private var connectionGeneration = 0L
     private val mutationJobs = mutableMapOf<SessionId, Job>()
+    private val runJobs = mutableMapOf<SessionId, Job>()
+    private val sessionDrafts = mutableMapOf<SessionId, String>()
+    private val sessionSendErrors = mutableMapOf<SessionId, MessageSendErrorCategory>()
+    private val pendingRunDrafts = mutableMapOf<SessionId, String>()
+    private val sessionRuns = mutableMapOf<SessionId, List<Run>>()
 
     fun onEvent(event: EntryUiEvent) {
         when (event) {
@@ -180,17 +203,32 @@ class EntryStateHolder(
             is EntryUiEvent.SessionClicked -> openSession(event.sessionId)
             EntryUiEvent.ReturnToSessionListClicked -> returnToSessionList()
             is EntryUiEvent.ComposerTextChanged -> updateComposerText(event.value)
+            EntryUiEvent.SendMessageClicked -> sendMessage()
+            EntryUiEvent.RemoveGatewayConnectionClicked -> removeGatewayConnection()
         }
     }
 
     fun close() {
-        verificationJob?.cancel()
-        sessionJob?.cancel()
-        val mutationJobsToCancel =
+        val jobsToCancel =
             synchronized(sessionRequestLock) {
-                mutationJobs.values.toList().also { mutationJobs.clear() }
+                sessionRequestGeneration += 1
+                connectionGeneration += 1
+                sessionGateway = null
+                runGateway = null
+                val verificationJobToCancel = verificationJob
+                val sessionJobToCancel = sessionJob
+                verificationJob = null
+                sessionJob = null
+                val requestJobs = (mutationJobs.values + runJobs.values).toList()
+                mutationJobs.clear()
+                runJobs.clear()
+                sessionDrafts.clear()
+                sessionSendErrors.clear()
+                pendingRunDrafts.clear()
+                sessionRuns.clear()
+                requestJobs + listOfNotNull(verificationJobToCancel, sessionJobToCancel)
             }
-        mutationJobsToCancel.forEach(Job::cancel)
+        jobsToCancel.forEach(Job::cancel)
         scope.cancel()
     }
 
@@ -217,7 +255,12 @@ class EntryStateHolder(
         if (!state.connectionSetupRequested || state.isVerifying || state.isConnected) return
 
         verificationJob?.cancel()
-        _uiState.value = state.copy(isVerifying = true, errorCategory = null)
+        val requestConnectionGeneration =
+            synchronized(sessionRequestLock) {
+                connectionGeneration.also {
+                    _uiState.value = state.copy(isVerifying = true, errorCategory = null)
+                }
+            }
         verificationJob =
             scope.launch {
                 try {
@@ -226,44 +269,87 @@ class EntryStateHolder(
                         bearerCredential = state.bearerCredential,
                     )
                     val gateway =
-                        sessionGatewayFactory?.invoke(
-                            state.endpoint,
-                            state.bearerCredential,
-                        )
-                    sessionGateway = gateway
-                    _uiState.value =
-                        _uiState.value.copy(
-                            title = "Gateway connected",
-                            supportingText = "The Gateway contract was verified successfully.",
-                            actionLabel = "Connected",
-                            isVerifying = false,
-                            isConnected = true,
-                            errorCategory = null,
-                            sessionList =
-                                gateway?.let {
-                                    SessionListUiState(
-                                        isLoading = true,
-                                        showFirstUseGuidance = true,
+                        synchronized(sessionRequestLock) {
+                            if (connectionGeneration != requestConnectionGeneration) {
+                                null
+                            } else {
+                                val gateway =
+                                    sessionGatewayFactory?.invoke(
+                                        state.endpoint,
+                                        state.bearerCredential,
                                     )
-                                },
-                        )
+                                sessionGateway = gateway
+                                runGateway =
+                                    runGatewayFactory?.invoke(
+                                        state.endpoint,
+                                        state.bearerCredential,
+                                    ) ?: (gateway as? RunGatewayPort)
+                                _uiState.value =
+                                    _uiState.value.copy(
+                                        title = "Gateway connected",
+                                        supportingText = "The Gateway contract was verified successfully.",
+                                        actionLabel = "Connected",
+                                        isVerifying = false,
+                                        isConnected = true,
+                                        errorCategory = null,
+                                        sessionList =
+                                            gateway?.let {
+                                                SessionListUiState(
+                                                    isLoading = true,
+                                                    showFirstUseGuidance = true,
+                                                )
+                                            },
+                                    )
+                                gateway
+                            }
+                        }
                     gateway?.let(::loadInitialSessions)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: GatewayException) {
-                    showFailure(error.category.toUserFacingCategory())
+                    showFailure(error.category.toUserFacingCategory(), requestConnectionGeneration)
                 } catch (_: Exception) {
-                    showFailure(EntryErrorCategory.GATEWAY_REQUEST_FAILED)
+                    showFailure(EntryErrorCategory.GATEWAY_REQUEST_FAILED, requestConnectionGeneration)
                 }
             }
     }
 
-    private fun showFailure(category: EntryErrorCategory) {
-        _uiState.value =
-            _uiState.value.copy(
-                isVerifying = false,
-                errorCategory = category,
-            )
+    private fun showFailure(
+        category: EntryErrorCategory,
+        requestConnectionGeneration: Long,
+    ) {
+        synchronized(sessionRequestLock) {
+            if (connectionGeneration == requestConnectionGeneration) {
+                _uiState.value =
+                    _uiState.value.copy(
+                        isVerifying = false,
+                        errorCategory = category,
+                    )
+            }
+        }
+    }
+
+    private fun removeGatewayConnection() {
+        removeGatewayConnectionUseCase?.execute()
+        verificationJob?.cancel()
+        sessionJob?.cancel()
+        val jobsToCancel =
+            synchronized(sessionRequestLock) {
+                sessionRequestGeneration += 1
+                connectionGeneration += 1
+                sessionGateway = null
+                runGateway = null
+                sessionDrafts.clear()
+                sessionSendErrors.clear()
+                pendingRunDrafts.clear()
+                sessionRuns.clear()
+                (mutationJobs.values + runJobs.values).toList().also {
+                    mutationJobs.clear()
+                    runJobs.clear()
+                }
+            }
+        jobsToCancel.forEach(Job::cancel)
+        _uiState.value = EntryState().toUiState()
     }
 
     private fun loadInitialSessions(gateway: SessionGatewayPort) {
@@ -390,6 +476,7 @@ class EntryStateHolder(
                     current
                 } else {
                     val authoritativeSession = openedSession.session.toSessionItemUiState()
+                    val knownRuns = rememberSessionRuns(sessionId, openedSession)
                     current.copy(
                         sessions =
                             current.sessions
@@ -397,7 +484,11 @@ class EntryStateHolder(
                                 .orderedSessions(),
                         openedSession =
                             openedSession.toOpenSessionUiState(
-                                composerText = previous.composerText,
+                                composerText = sessionDrafts[sessionId] ?: previous.composerText,
+                                sendErrorCategory = sessionSendErrors[sessionId],
+                                latestRun = knownRuns.latestRun(),
+                                activeRuns = knownRuns.activeRuns(),
+                                isSending = previous.isSending || runJobs.containsKey(sessionId),
                             ),
                         errorCategory = null,
                     )
@@ -712,6 +803,23 @@ class EntryStateHolder(
         }
     }
 
+    private fun rememberSessionRuns(
+        sessionId: SessionId,
+        openedSession: OpenedSession,
+    ): List<Run> {
+        val confirmedRuns = openedSession.history.runs()
+        if (confirmedRuns.isNotEmpty()) {
+            val localRuns = sessionRuns[sessionId].orEmpty()
+            val confirmedIds = confirmedRuns.mapTo(mutableSetOf()) { it.id }
+            val retainedLocalRuns =
+                localRuns.filter { localRun ->
+                    localRun.id !in confirmedIds && localRun.isActive()
+                }
+            sessionRuns[sessionId] = confirmedRuns + retainedLocalRuns
+        }
+        return sessionRuns[sessionId].orEmpty()
+    }
+
     private fun createMutationJob(
         sessionId: SessionId,
         block: suspend CoroutineScope.() -> Unit,
@@ -731,6 +839,29 @@ class EntryStateHolder(
             }
         synchronized(sessionRequestLock) {
             mutationJobs[sessionId] = job
+        }
+        return job
+    }
+
+    private fun createRunJob(
+        sessionId: SessionId,
+        block: suspend CoroutineScope.() -> Unit,
+    ): Job {
+        lateinit var job: Job
+        job =
+            scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    block()
+                } finally {
+                    synchronized(sessionRequestLock) {
+                        if (runJobs[sessionId] === job) {
+                            runJobs.remove(sessionId)
+                        }
+                    }
+                }
+            }
+        synchronized(sessionRequestLock) {
+            runJobs[sessionId] = job
         }
         return job
     }
@@ -1382,6 +1513,7 @@ class EntryStateHolder(
                         val openedSession = OpenSession(gateway).execute(sessionId)
                         updateCurrentSessionRequest(request.generation, request.query) { current ->
                             val authoritativeSession = openedSession.session.toSessionItemUiState()
+                            val knownRuns = rememberSessionRuns(sessionId, openedSession)
                             current.copy(
                                 sessions =
                                     current.sessions
@@ -1393,7 +1525,14 @@ class EntryStateHolder(
                                 openingSessionId = null,
                                 isStale = false,
                                 isUnavailable = false,
-                                openedSession = openedSession.toOpenSessionUiState(),
+                                openedSession =
+                                    openedSession.toOpenSessionUiState(
+                                        composerText = sessionDrafts[sessionId].orEmpty(),
+                                        sendErrorCategory = sessionSendErrors[sessionId],
+                                        latestRun = knownRuns.latestRun(),
+                                        activeRuns = knownRuns.activeRuns(),
+                                        isSending = runJobs.containsKey(sessionId),
+                                    ),
                                 errorCategory = null,
                             )
                         }
@@ -1458,20 +1597,187 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession ?: return
+            sessionDrafts[opened.session.id] = value
+            sessionSendErrors.remove(opened.session.id)
             _uiState.value =
                 _uiState.value.copy(
-                    sessionList = current.copy(openedSession = opened.copy(composerText = value)),
+                    sessionList =
+                        current.copy(
+                            openedSession =
+                                opened.copy(
+                                    composerText = value,
+                                    sendErrorCategory = null,
+                                ),
+                        ),
                 )
+        }
+    }
+
+    private fun sendMessage() {
+        val gateway = runGateway ?: return
+        val job =
+            synchronized(sessionRequestLock) {
+                val current = _uiState.value.sessionList ?: return@synchronized null
+                val opened = current.openedSession ?: return@synchronized null
+                val sessionId = opened.session.id
+                val requestConnectionGeneration = connectionGeneration
+                val knownRuns =
+                    sessionRuns[sessionId].orEmpty().ifEmpty {
+                        (opened.activeRuns + listOfNotNull(opened.latestRun)).distinctBy { it.id }
+                    }
+                val latestRun = knownRuns.latestRun() ?: opened.latestRun
+                val submissionState =
+                    RunSubmissionState(
+                        latestRun = latestRun,
+                        activeRuns = knownRuns.activeRuns(),
+                        isSubmissionPending = opened.isSending || runJobs.containsKey(sessionId),
+                    )
+                if (
+                    !submissionState.canSubmit ||
+                    opened.composerText.isBlank() ||
+                    opened.isRefreshing ||
+                    current.hasPendingMutation
+                ) {
+                    return@synchronized null
+                }
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                openedSession =
+                                    opened.copy(
+                                        isSending = true,
+                                        sendErrorCategory = null,
+                                    ),
+                            ),
+                    )
+                sessionSendErrors.remove(sessionId)
+                pendingRunDrafts[sessionId] = opened.composerText
+                sessionDrafts[sessionId] = opened.composerText
+                createRunJob(sessionId) {
+                    try {
+                        val run = SubmitMessage(gateway).execute(sessionId, opened.composerText)
+                        if (applySubmittedRun(sessionId, run, requestConnectionGeneration)) {
+                            onRunSubmissionCompleted?.invoke()
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: GatewayException) {
+                        if (showMessageSendFailure(sessionId, requestConnectionGeneration)) {
+                            onRunSubmissionCompleted?.invoke()
+                        }
+                    } catch (_: Exception) {
+                        if (showMessageSendFailure(sessionId, requestConnectionGeneration)) {
+                            onRunSubmissionCompleted?.invoke()
+                        }
+                    } finally {
+                        onRunSubmissionSettled?.invoke()
+                    }
+                }
+            }
+        job?.start()
+    }
+
+    private fun applySubmittedRun(
+        sessionId: SessionId,
+        run: Run,
+        requestConnectionGeneration: Long,
+    ): Boolean {
+        return synchronized(sessionRequestLock) {
+            if (connectionGeneration != requestConnectionGeneration) return false
+            sessionSendErrors.remove(sessionId)
+            val submittedDraft = pendingRunDrafts.remove(sessionId)
+            if (sessionDrafts[sessionId] == submittedDraft) {
+                sessionDrafts.remove(sessionId)
+            }
+            val knownRuns =
+                (sessionRuns[sessionId].orEmpty().filterNot { it.id == run.id } + run)
+                    .also { sessionRuns[sessionId] = it }
+            val current = _uiState.value.sessionList
+            val opened = current?.openedSession?.takeIf { it.session.id == sessionId }
+            if (current != null && opened != null) {
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                openedSession =
+                                    opened.copy(
+                                        composerText = sessionDrafts[sessionId].orEmpty(),
+                                        latestRun = knownRuns.latestRun() ?: run,
+                                        activeRuns = knownRuns.activeRuns(),
+                                        isSending = false,
+                                        sendErrorCategory = null,
+                                    ),
+                            ),
+                    )
+            }
+            true
+        }
+    }
+
+    private fun showMessageSendFailure(
+        sessionId: SessionId,
+        requestConnectionGeneration: Long,
+    ): Boolean {
+        return synchronized(sessionRequestLock) {
+            if (connectionGeneration != requestConnectionGeneration) return false
+            pendingRunDrafts.remove(sessionId)
+            sessionSendErrors[sessionId] = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            val current = _uiState.value.sessionList
+            val opened = current?.openedSession?.takeIf { it.session.id == sessionId }
+            if (current != null && opened != null) {
+                _uiState.value =
+                    _uiState.value.copy(
+                        sessionList =
+                            current.copy(
+                                openedSession =
+                                    opened.copy(
+                                        isSending = false,
+                                        sendErrorCategory = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED,
+                                    ),
+                            ),
+                    )
+            }
+            true
         }
     }
 }
 
-private fun OpenedSession.toOpenSessionUiState(composerText: String = ""): OpenSessionUiState =
+private fun OpenedSession.toOpenSessionUiState(
+    composerText: String = "",
+    sendErrorCategory: MessageSendErrorCategory? = null,
+    latestRun: Run? = null,
+    activeRuns: List<Run> = history.runs().activeRuns(),
+    isSending: Boolean = false,
+): OpenSessionUiState =
     OpenSessionUiState(
         session = session.toSessionItemUiState(),
         messages = history.messages.map { it.toSessionMessageUiState() }.chronological(),
         composerText = composerText,
+        sendErrorCategory = sendErrorCategory,
+        latestRun = latestRun ?: history.latestRun(),
+        activeRuns = activeRuns,
+        isSending = isSending,
     )
+
+private fun SessionHistory.runs(): List<Run> {
+    val runsById = linkedMapOf<RunId, Run>()
+    messages.forEach { message ->
+        val runId = message.runId
+        val status = message.runStatus
+        if (runId != null && status != null) {
+            runsById.remove(runId)
+            runsById[runId] = Run(runId, sessionId, status)
+        }
+    }
+    return runsById.values.toList()
+}
+
+private fun SessionHistory.latestRun(): Run? = runs().latestRun()
+
+private fun List<Run>.latestRun(): Run? = lastOrNull()
+
+private fun List<Run>.activeRuns(): List<Run> = filter(Run::isActive)
 
 private data class SessionRequestContext(
     val generation: Long,

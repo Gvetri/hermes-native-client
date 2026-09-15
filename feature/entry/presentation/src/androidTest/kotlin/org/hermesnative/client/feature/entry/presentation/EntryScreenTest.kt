@@ -7,9 +7,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -190,9 +193,39 @@ class EntryScreenTest {
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Pinned title").assertIsDisplayed()
         composeTestRule.onNodeWithText("Pinned preview").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Untitled Session").assertIsDisplayed().assertHasClickAction().performClick()
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        composeTestRule
+            .onNodeWithText("Untitled Session")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertHasClickAction()
+            .performClick()
         composeTestRule.onNodeWithText("Untitled Session").assertIsDisplayed()
         assertEquals(EntryUiEvent.SessionClicked(SessionId("untitled")), events.single())
+    }
+
+    @Test
+    fun connected_session_list_exposes_gateway_removal() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "The Gateway contract was verified successfully.",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList = SessionListUiState(),
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Remove Gateway Connection").assertHasClickAction().performClick()
+
+        assertEquals(listOf(EntryUiEvent.RemoveGatewayConnectionClicked), events)
     }
 
     @Test
@@ -409,7 +442,10 @@ class EntryScreenTest {
         composeTestRule.runOnIdle {
             state.value = state.value.copy(isLoadingMore = true)
         }
-        composeTestRule.onNodeWithText("Loading more Sessions…").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Loading more Sessions…")
+            .performScrollTo()
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText("Load more Sessions").assertDoesNotExist()
     }
 

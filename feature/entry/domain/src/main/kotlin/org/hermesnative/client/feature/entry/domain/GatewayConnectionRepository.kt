@@ -5,5 +5,7 @@ interface GatewayConnectionRepository {
 
     fun save(connection: GatewayConnection)
 
+    fun clear() = Unit
+
     fun hasConfiguredConnection(): Boolean = load() != null
 }
