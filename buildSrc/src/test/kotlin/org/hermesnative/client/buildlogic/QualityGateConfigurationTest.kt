@@ -100,7 +100,7 @@ class QualityGateConfigurationTest {
         val failureStep = emulatorJob.substringAfter("      - name: Fail when Android tests fail")
 
         assertTrue("The emulator job must survive workflow cancellation long enough to finalize evidence.", emulatorJob.contains("    if: \${{ always() }}"))
-        assertTrue("The emulator job must keep a bounded job timeout.", emulatorJob.contains("    timeout-minutes: 12"))
+        assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 15"))
         assertTrue("The Android test action must have a stable step id.", emulatorJob.contains("        id: android_tests"))
         assertTrue("The Android test action must have a bounded step timeout.", emulatorJob.contains("        timeout-minutes: 10"))
         assertTrue("The Android test action must run the evidence wrapper.", emulatorJob.contains("            .github/scripts/android-test-evidence.sh"))
