@@ -88,6 +88,7 @@ data class OpenSessionUiState(
     val activeRuns: List<Run> = emptyList(),
     val isSending: Boolean = false,
     val sendErrorCategory: MessageSendErrorCategory? = null,
+    val hasUnresolvedSubmission: Boolean = false,
     val latestRunState: RunPresentationState? = null,
     val activeResponse: SessionMessageUiState? = null,
     val isReconciliationInProgress: Boolean = false,

@@ -774,6 +774,8 @@ private fun SessionDetailContent(
             composerEnabled &&
                 !state.isReconciliationInProgress &&
                 state.latestRunState != RunPresentationState.UNCERTAIN &&
+                state.sendErrorCategory != MessageSendErrorCategory.UNCERTAIN &&
+                !state.hasUnresolvedSubmission &&
                 canSubmit &&
                 state.composerText.isNotBlank()
         OutlinedTextField(

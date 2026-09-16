@@ -39,6 +39,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
+private const val TEST_TIMEOUT_MILLIS = 15_000L
+
 class RunReconciliationStateHolderTest {
     @Test
     fun terminal_observation_replaces_temporary_response_with_authoritative_history() {
@@ -332,6 +334,200 @@ class RunReconciliationStateHolderTest {
             assertTrue(gateway.statusRequests.isEmpty())
         } finally {
             gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun terminal_create_result_off_screen_is_reconciled_on_reopen_and_clears_sending_after_completion() {
+        val session = session()
+        val terminalRun = Run(RunId("run-off-screen"), session.id, "succeeded")
+        val terminalHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", terminalRun.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(terminalHistory)
+                statuses.add(terminalRun)
+                runs.add(terminalRun)
+                blockSubmissionCompletion = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run off screen"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            assertTrue(gateway.submissionCompleted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isSending == true
+            }
+
+            gateway.releaseSubmissionCompletion.countDown()
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isSending == false &&
+                    it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.latestRun?.id == terminalRun.id &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED
+            }
+            assertEquals(listOf(terminalRun.id), gateway.statusRequests)
+        } finally {
+            gateway.releaseSubmissionCompletion.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun reopened_timed_out_send_observes_the_correlated_active_run_not_a_later_unrelated_run() {
+        val session = session()
+        val correlatedRun = Run(RunId("run-correlated"), session.id, "running")
+        val unrelatedRun = Run(RunId("run-unrelated"), session.id, "running")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(
+                    GatewayHistoryMessage("user", "user", "Keep this draft", correlatedRun.id, "running"),
+                    GatewayHistoryMessage("unrelated", "assistant", "Other work", unrelatedRun.id, "running"),
+                ),
+                null,
+            )
+        val correlatedObservation = BlockingObservation()
+        val unrelatedObservation = BlockingObservation()
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                histories.add(history)
+                statuses.add(correlatedRun)
+                statuses.add(unrelatedRun)
+                observations.add(correlatedObservation)
+                observations.add(unrelatedObservation)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default, sendTimeoutMillis = 50L)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.submissionCompleted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            assertTrue(correlatedObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertEquals(listOf(correlatedRun.id), gateway.observedRunIds)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isSending == false &&
+                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    it.sessionList?.openedSession?.latestRun?.id == unrelatedRun.id &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.RUNNING &&
+                    it.sessionList?.openedSession?.activeResponse == null
+            }
+        } finally {
+            gateway.releaseRun.countDown()
+            correlatedObservation.release.countDown()
+            unrelatedObservation.release.countDown()
+            gateway.releaseSubmissionCompletion.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun confirmed_timed_out_run_does_not_replace_the_latest_unrelated_run_state() {
+        val session = session()
+        val submittedRun = Run(RunId("run-submitted"), session.id, "succeeded")
+        val laterRun = Run(RunId("run-later"), session.id, "failed")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(
+                    GatewayHistoryMessage("user", "user", "Keep this draft", submittedRun.id, "succeeded"),
+                    GatewayHistoryMessage("submitted", "assistant", "Submitted", submittedRun.id, "succeeded"),
+                    GatewayHistoryMessage("later", "assistant", "Later failure", laterRun.id, "failed"),
+                ),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(submittedRun)
+                statuses.add(laterRun)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default, sendTimeoutMillis = 50L)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isSending == false &&
+                    it.sessionList?.openedSession?.latestRun?.id == laterRun.id &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.FAILED &&
+                    it.sessionList?.openedSession?.sendErrorCategory == null
+            }
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun active_status_with_stale_terminal_history_preserves_the_streamed_response() {
+        val session = session()
+        val run = Run(RunId("run-stale-history"), session.id, "running")
+        val staleTerminalHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("stale", "assistant", "Stale result", run.id, "succeeded")),
+                null,
+            )
+        val observation =
+            BlockingObservation(
+                listOf(
+                    RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
+                    RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Partial", "partial"),
+                ),
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(staleTerminalHistory)
+                histories.add(staleTerminalHistory)
+                statuses.add(run)
+                runs.add(run)
+                observations.add(observation)
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.activeResponse?.content == "Partial"
+            }
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    it.sessionList?.openedSession?.activeResponse?.content == "Partial"
+            }
+        } finally {
+            observation.release.countDown()
             holder.close()
         }
     }
@@ -1071,7 +1267,14 @@ class RunReconciliationStateHolderTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-            onRunSubmissionCompleted = gateway.submissionCompleted::countDown,
+            onRunSubmissionCompleted = {
+                gateway.submissionCompleted.countDown()
+                if (gateway.blockSubmissionCompletion) {
+                    check(gateway.releaseSubmissionCompletion.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                        "Submission completion was not released."
+                    }
+                }
+            },
             sendTimeoutMillis = sendTimeoutMillis,
         )
     }
@@ -1094,8 +1297,12 @@ class RunReconciliationStateHolderTest {
         predicate: (EntryUiState) -> Boolean,
     ) {
         runBlocking {
-            withTimeout(TEST_TIMEOUT_MILLIS) {
-                holder.uiState.first(predicate)
+            try {
+                withTimeout(TEST_TIMEOUT_MILLIS) {
+                    holder.uiState.first(predicate)
+                }
+            } catch (error: Throwable) {
+                throw AssertionError("state=${holder.uiState.value}", error)
             }
         }
     }
@@ -1125,10 +1332,12 @@ class RunReconciliationStateHolderTest {
         var failRunCreation = false
         var failHistoryRequest: Int? = null
         var blockNextStatus = false
+        var blockSubmissionCompletion = false
         val runStarted = CountDownLatch(1)
         val submissionCompleted = CountDownLatch(1)
         val runFinished = CountDownLatch(1)
         val releaseRun = CountDownLatch(1)
+        val releaseSubmissionCompletion = CountDownLatch(1)
         val statusStarted = CountDownLatch(1)
         val statusFinished = CountDownLatch(1)
         val releaseStatus = CountDownLatch(1)
