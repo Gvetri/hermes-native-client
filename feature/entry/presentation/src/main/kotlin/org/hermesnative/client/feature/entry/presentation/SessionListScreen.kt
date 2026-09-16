@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -690,7 +691,12 @@ private fun SessionDetailContent(
         if (state.isRefreshing) {
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Refreshing Session history…",
+                text =
+                    if (state.isReconciliationInProgress) {
+                        "Refreshing Run and Session state…"
+                    } else {
+                        "Refreshing Session history…"
+                    },
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
@@ -766,6 +772,10 @@ private fun SessionDetailContent(
             ).canSubmit
         val sendEnabled =
             composerEnabled &&
+                !state.isReconciliationInProgress &&
+                state.latestRunState != RunPresentationState.UNCERTAIN &&
+                state.sendErrorCategory != MessageSendErrorCategory.UNCERTAIN &&
+                !state.hasUnresolvedSubmission &&
                 canSubmit &&
                 state.composerText.isNotBlank()
         OutlinedTextField(
@@ -790,7 +800,15 @@ private fun SessionDetailContent(
             enabled = sendEnabled,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text(text = if (state.sendErrorCategory == null) "Send" else "Try again")
+            Text(
+                text =
+                    when {
+                        state.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN ||
+                            state.hasUnresolvedSubmission -> "Refresh history to resolve"
+                        state.sendErrorCategory != null -> "Try again"
+                        else -> "Send"
+                    },
+            )
         }
         if (state.isSending) {
             Spacer(modifier = Modifier.height(8.dp))

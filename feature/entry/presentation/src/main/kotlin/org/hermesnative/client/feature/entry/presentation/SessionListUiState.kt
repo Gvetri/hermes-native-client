@@ -67,12 +67,14 @@ enum class SessionHistoryErrorCategory(
     val safeMessage: String,
 ) {
     GATEWAY_REQUEST_FAILED("Session history could not be refreshed. The current content is preserved."),
+    RECONCILIATION_FAILED("Run result could not be confirmed. Current content is preserved. Refresh or reconnect."),
 }
 
 enum class MessageSendErrorCategory(
     val safeMessage: String,
 ) {
     GATEWAY_REQUEST_FAILED("Message was not sent. Your draft is preserved. Try again."),
+    UNCERTAIN("Message outcome is uncertain. The Gateway may have received it. No automatic retry was made."),
 }
 
 data class OpenSessionUiState(
@@ -86,8 +88,10 @@ data class OpenSessionUiState(
     val activeRuns: List<Run> = emptyList(),
     val isSending: Boolean = false,
     val sendErrorCategory: MessageSendErrorCategory? = null,
+    val hasUnresolvedSubmission: Boolean = false,
     val latestRunState: RunPresentationState? = null,
     val activeResponse: SessionMessageUiState? = null,
+    val isReconciliationInProgress: Boolean = false,
 )
 
 data class SessionCreationUiState(
@@ -144,7 +148,8 @@ internal val SessionListUiState.hasActiveRequest: Boolean
             openingSessionId != null ||
             createSession != null ||
             hasPendingMutation ||
-            openedSession?.isSending == true
+            openedSession?.isSending == true ||
+            openedSession?.isRefreshing == true
 
 internal fun SessionListUiState.allowsSessionMutation(): Boolean =
     !hasActiveRequest &&

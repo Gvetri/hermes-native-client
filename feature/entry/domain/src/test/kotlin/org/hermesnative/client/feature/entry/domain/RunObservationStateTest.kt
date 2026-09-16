@@ -54,6 +54,26 @@ class RunObservationStateTest {
     }
 
     @Test
+    fun a_completed_canceled_event_maps_to_cancelled() {
+        val state =
+            RunEventStateTransition.initial(run)
+                .transition(event(RunEventType.COMPLETED, status = "canceled", eventId = "canceled"))
+
+        assertEquals(RunPresentationState.CANCELLED, state.state)
+        assertFalse(state.isStreaming)
+    }
+
+    @Test
+    fun a_completed_cancelled_event_maps_to_cancelled() {
+        val state =
+            RunEventStateTransition.initial(run)
+                .transition(event(RunEventType.COMPLETED, status = "cancelled", eventId = "cancelled"))
+
+        assertEquals(RunPresentationState.CANCELLED, state.state)
+        assertFalse(state.isStreaming)
+    }
+
+    @Test
     fun duplicate_event_identity_is_ignored_without_repeating_text_or_a_transition() {
         val delta =
             event(
@@ -97,6 +117,17 @@ class RunObservationStateTest {
 
         assertEquals(RunPresentationState.UNCERTAIN, state.state)
         assertFalse(state.isStreaming)
+    }
+
+    @Test
+    fun canceled_statuses_are_confirmed_terminal_states() {
+        listOf("canceled", "cancelled").forEach { status ->
+            val state = RunEventStateTransition.initial(run.copy(status = status))
+
+            assertEquals(RunPresentationState.CANCELLED, state.state)
+            assertTrue(state.state.isTerminal())
+            assertFalse(state.isStreaming)
+        }
     }
 
     @Test
