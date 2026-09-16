@@ -11,7 +11,9 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Rule
 import org.junit.Test
@@ -118,6 +120,56 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Refreshing Session history…").assertIsDisplayed()
         composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsNotEnabled()
+    }
+
+    @Test
+    fun terminal_reconciliation_shows_stale_progress_and_disables_history_controls_while_retaining_stream() {
+        val sessionId = SessionId("session-1")
+        val runId = RunId("run-terminal")
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "Connected",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session = SessionItemUiState(sessionId, "Session", null, false),
+                                            messages = emptyList(),
+                                            composerText = "Next message",
+                                            isRefreshing = true,
+                                            isStale = true,
+                                            latestRun = Run(runId, sessionId, "succeeded"),
+                                            latestRunState = RunPresentationState.SUCCEEDED,
+                                            activeResponse =
+                                                SessionMessageUiState(
+                                                    id = "streamed-response",
+                                                    role = "assistant",
+                                                    content = "Partial response",
+                                                    runId = runId,
+                                                    runState = RunPresentationState.SUCCEEDED,
+                                                    isStreaming = true,
+                                                ),
+                                            isReconciliationInProgress = true,
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Partial response").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Refreshing Run and Session state…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("The displayed Session history may be stale.").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Refresh history").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Message").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
     }
 
     @Test

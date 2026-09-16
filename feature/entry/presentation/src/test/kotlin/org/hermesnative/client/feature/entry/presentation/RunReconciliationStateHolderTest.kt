@@ -243,6 +243,62 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun terminal_sse_event_marks_retained_stream_stale_and_refreshing_until_authoritative_history_arrives() {
+        val session = session()
+        val run = Run(RunId("run-terminal-visible"), session.id, "starting")
+        val terminalRun = run.copy(status = "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(terminalRun)
+                runs.add(run)
+                blockNextStatus = true
+                observation =
+                    ScriptedObservation(
+                        listOf(
+                            RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
+                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Partial", "partial"),
+                            RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "done"),
+                        ),
+                    )
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            val pending = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertTrue(pending.isReconciliationInProgress)
+            assertTrue(pending.isRefreshing)
+            assertTrue(pending.isStale)
+            assertEquals("Partial", pending.activeResponse?.content)
+            assertTrue(pending.messages.isEmpty())
+
+            gateway.releaseStatus.countDown()
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.isReconciliationInProgress == false &&
+                    !opened.isRefreshing &&
+                    !opened.isStale &&
+                    opened.activeResponse == null &&
+                    opened.messages.lastOrNull()?.content == "Confirmed"
+            }
+        } finally {
+            gateway.releaseStatus.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun refresh_preserves_streamed_response_until_authoritative_status_confirms_the_run() {
         val session = session()
         val run = Run(RunId("run-preserve-response"), session.id, "starting")

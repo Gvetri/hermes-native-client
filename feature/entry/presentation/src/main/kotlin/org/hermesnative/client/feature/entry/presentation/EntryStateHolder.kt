@@ -2838,6 +2838,7 @@ class EntryStateHolder(
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             val latestRun = knownRuns.latestRun() ?: next.run
             val latestObservation = latestObservationState(sessionId, knownRuns)
+            val terminal = next.state.isTerminal() || !next.run.isActive()
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2848,8 +2849,10 @@ class EntryStateHolder(
                                     activeRuns = knownRuns.activeRuns(),
                                     latestRunState = latestObservation?.state ?: next.state,
                                     activeResponse = latestObservation?.toSessionMessageUiState() ?: next.toSessionMessageUiState(),
+                                    isRefreshing = opened.isRefreshing || terminal,
+                                    isStale = opened.isStale || terminal,
                                     isReconciliationInProgress =
-                                        opened.isReconciliationInProgress || next.state.isTerminal() || !next.run.isActive(),
+                                        opened.isReconciliationInProgress || terminal,
                                 ),
                         ),
                 )
