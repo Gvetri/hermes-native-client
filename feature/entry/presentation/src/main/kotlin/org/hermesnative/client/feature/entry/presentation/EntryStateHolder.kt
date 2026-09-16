@@ -593,7 +593,10 @@ class EntryStateHolder(
                         requestConnectionGeneration = requestConnectionGeneration,
                         sessionGateway = gateway,
                         restartObservation = true,
-                        runIdToReconcile = runIdToReconcile,
+                        runIdToReconcile =
+                            runIdToReconcile
+                                ?: openedSession.history.latestRun()?.id
+                                    ?.takeUnless { hasUnresolvedSubmission(sessionId) },
                         clearRefreshWhenNoRun = true,
                     )
                 }
@@ -778,7 +781,7 @@ class EntryStateHolder(
                 )
             sessionRuns[sessionId] = knownRuns
             if (!reconciliation.run.isActive()) {
-                observationJobToCancel = runObservationJobs[sessionId]
+                observationJobToCancel = runObservationJobs.remove(sessionId)
                 observationToClose = runObservations.remove(sessionId)
             }
             val isBoundSubmission = uncertainSubmissionRunIds[sessionId] == run.id
@@ -2028,6 +2031,9 @@ class EntryStateHolder(
                                     requestConnectionGeneration = requestConnectionGeneration,
                                     sessionGateway = gateway,
                                     restartObservation = true,
+                                    runIdToReconcile =
+                                        openedSession.history.latestRun()?.id
+                                            ?.takeUnless { hasUnresolvedSubmission(sessionId) },
                                 )
                             }
                         }

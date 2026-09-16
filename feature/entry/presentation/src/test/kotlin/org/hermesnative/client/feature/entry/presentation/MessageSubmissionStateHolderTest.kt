@@ -263,6 +263,7 @@ class MessageSubmissionStateHolderTest {
                                 null,
                             ),
                     ),
+                runStatuses = mapOf(RunId("run-old") to Run(RunId("run-old"), session.id, "succeeded")),
             ).apply { enqueueRun(returnedRun) }
         val holder = holder(gateway)
 
@@ -314,6 +315,7 @@ class MessageSubmissionStateHolderTest {
                                 null,
                             ),
                     ),
+                runStatuses = mapOf(RunId("run-1") to Run(RunId("run-1"), session.id, "succeeded")),
             )
         val holder = holder(gateway)
 
@@ -554,6 +556,7 @@ class MessageSubmissionStateHolderTest {
     private class FakeGateway(
         val sessions: List<Session>,
         private val histories: Map<SessionId, SessionHistory> = emptyMap(),
+        private val runStatuses: Map<RunId, Run> = emptyMap(),
     ) : SessionGatewayPort, RunGatewayPort {
         val runRequests = mutableListOf<Pair<SessionId, String>>()
         private val runResults = ArrayDeque<Result<Run>>()
@@ -602,7 +605,7 @@ class MessageSubmissionStateHolderTest {
             return runResults.removeFirst().getOrThrow()
         }
 
-        override fun getRunStatus(runId: RunId): Run = error("not used")
+        override fun getRunStatus(runId: RunId): Run = runStatuses[runId] ?: error("not used")
 
         override fun observeRun(runId: RunId) = error("not used")
     }

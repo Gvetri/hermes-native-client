@@ -310,9 +310,10 @@ class RunReconciliationStateHolderTest {
         val gateway =
             FakeGateway(session).apply {
                 histories.add(baselineHistory)
+                histories.add(baselineHistory)
                 histories.add(SessionHistory(session.id, emptyList(), null))
                 histories.add(laterHistory)
-                statuses.add(unrelatedRun)
+                statuses.add(baselineRun)
                 blockRunCreation = true
             }
         val holder = holder(gateway, Dispatchers.Default, sendTimeoutMillis = 50L)
@@ -326,7 +327,9 @@ class RunReconciliationStateHolderTest {
                 opened?.latestRun?.id == baselineRun.id &&
                     opened.latestRunState == RunPresentationState.SUCCEEDED &&
                     opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
-                    opened.hasUnresolvedSubmission
+                    opened.hasUnresolvedSubmission &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress
             }
 
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
@@ -338,7 +341,7 @@ class RunReconciliationStateHolderTest {
                     it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
                     it.sessionList?.openedSession?.composerText == "Keep this draft"
             }
-            assertTrue(gateway.statusRequests.isEmpty())
+            assertEquals(listOf(baselineRun.id), gateway.statusRequests)
         } finally {
             gateway.releaseRun.countDown()
             holder.close()
@@ -1101,7 +1104,10 @@ class RunReconciliationStateHolderTest {
             assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             awaitState(holder) {
-                it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
+                val opened = it.sessionList?.openedSession
+                opened?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress
             }
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals("Keep this draft", opened.composerText)
@@ -1285,6 +1291,208 @@ class RunReconciliationStateHolderTest {
         } finally {
             observation.release.countDown()
             otherObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun refreshing_a_history_only_terminal_run_refetches_authoritative_status() {
+        val session = session()
+        val run = Run(RunId("run-history-only-refresh"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                repeat(4) { histories.add(history) }
+                statuses.add(run)
+                statuses.add(run)
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    gateway.statusRequests == listOf(run.id)
+            }
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    gateway.statusRequests == listOf(run.id, run.id) &&
+                    gateway.historyRequests == 4
+            }
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun reopening_a_history_only_terminal_run_refetches_authoritative_status() {
+        val session = session()
+        val run = Run(RunId("run-history-only-reopen"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                repeat(4) { histories.add(history) }
+                statuses.add(run)
+                statuses.add(run)
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    gateway.statusRequests == listOf(run.id)
+            }
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            awaitState(holder) { it.sessionList?.openedSession == null }
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    gateway.statusRequests == listOf(run.id, run.id) &&
+                    gateway.historyRequests == 4
+            }
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun invalid_authoritative_status_for_history_only_terminal_run_is_uncertain() {
+        val session = session()
+        val run = Run(RunId("run-history-only-invalid"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(history)
+                statuses.add(Run(RunId("wrong-run"), session.id, "succeeded"))
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.UNCERTAIN &&
+                    opened.errorCategory == SessionHistoryErrorCategory.RECONCILIATION_FAILED &&
+                    opened.isStale &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    gateway.statusRequests == listOf(run.id) &&
+                    gateway.historyRequests == 1
+            }
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun stale_authoritative_status_for_history_only_terminal_run_is_uncertain() {
+        val session = session()
+        val run = Run(RunId("run-history-only-stale"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val observation = BlockingObservation()
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(history)
+                histories.add(history)
+                statuses.add(run.copy(status = "running"))
+                this.observation = observation
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.UNCERTAIN &&
+                    opened.errorCategory == SessionHistoryErrorCategory.RECONCILIATION_FAILED &&
+                    opened.isStale &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    gateway.statusRequests == listOf(run.id) &&
+                    gateway.historyRequests == 2 &&
+                    gateway.observedRunIds == listOf(run.id)
+            }
+        } finally {
+            observation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun opening_a_history_only_terminal_run_refetches_authoritative_status() {
+        val session = session()
+        val run = Run(RunId("run-history-only"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(history)
+                histories.add(history)
+                statuses.add(run)
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    !opened.isReconciliationInProgress &&
+                    gateway.statusRequests == listOf(run.id) &&
+                    gateway.historyRequests == 2
+            }
+        } finally {
             holder.close()
         }
     }
