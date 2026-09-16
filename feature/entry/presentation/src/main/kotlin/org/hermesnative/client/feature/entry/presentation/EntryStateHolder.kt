@@ -202,7 +202,8 @@ class EntryStateHolder(
     private val sessionRuns = mutableMapOf<SessionId, List<Run>>()
     private val runObservationJobs = mutableMapOf<SessionId, Job>()
     private val runObservations = mutableMapOf<SessionId, RunEventObservation>()
-    private val runObservationStates = mutableMapOf<SessionId, RunObservationState>()
+    private val runObservationStates = mutableMapOf<SessionId, MutableMap<RunId, RunObservationState>>()
+    private val uncertainSendRunIds = mutableMapOf<SessionId, RunId>()
     private val reconcilingSessions = mutableMapOf<SessionId, Long>()
 
     fun onEvent(event: EntryUiEvent) {
@@ -257,6 +258,7 @@ class EntryStateHolder(
                 runObservationJobs.clear()
                 runObservations.clear()
                 runObservationStates.clear()
+                uncertainSendRunIds.clear()
                 reconcilingSessions.clear()
                 sessionDrafts.clear()
                 sessionSendErrors.clear()
@@ -388,6 +390,7 @@ class EntryStateHolder(
                     runObservationJobs.clear()
                     runObservations.clear()
                     runObservationStates.clear()
+                    uncertainSendRunIds.clear()
                     reconcilingSessions.clear()
                 }
             }
@@ -493,7 +496,7 @@ class EntryStateHolder(
                     .orEmpty()
                     .latestActiveRun()
                     ?.id
-                    ?: runObservationStates[openedSession.session.id]?.run?.id
+                    ?: latestObservationState(openedSession.session.id, sessionRuns[openedSession.session.id].orEmpty())?.run?.id
             val requestGeneration = beginSessionRequest()
             val requestConnectionGeneration = connectionGeneration
             val request = SessionRequestContext(requestGeneration, sessionList.searchQuery, cursor = null)
@@ -537,6 +540,7 @@ class EntryStateHolder(
                     } else {
                         val authoritativeSession = openedSession.session.toSessionItemUiState()
                         val knownRuns = rememberSessionRuns(sessionId, openedSession)
+                        val latestObservation = latestObservationState(sessionId, knownRuns)
                         current.copy(
                             sessions =
                                 current.sessions
@@ -549,14 +553,8 @@ class EntryStateHolder(
                                     latestRun = knownRuns.latestRun(),
                                     activeRuns = knownRuns.activeRuns(),
                                     isSending = previous.isSending || runJobs.containsKey(sessionId),
-                                    latestRunState =
-                                        runObservationStates[sessionId]
-                                            ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
-                                            ?.state,
-                                    activeResponse =
-                                        runObservationStates[sessionId]
-                                            ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
-                                            ?.toSessionMessageUiState(),
+                                    latestRunState = latestObservation?.state,
+                                    activeResponse = latestObservation?.toSessionMessageUiState(),
                                     isRefreshing = previous.isRefreshing,
                                 ),
                             errorCategory = null,
@@ -594,16 +592,16 @@ class EntryStateHolder(
     ) {
         val run =
             synchronized(sessionRequestLock) {
-                if (runIdToReconcile?.isUncertainSendRun() == true) {
+                if (runIdToReconcile?.let { uncertainSendRunIds[sessionId] == it } == true) {
                     null
                 } else {
                     val candidate =
                         sessionRuns[sessionId].orEmpty().lastOrNull { it.id == runIdToReconcile }
-                            ?: runIdToReconcile?.let { runId ->
-                                runObservationStates[sessionId]?.takeIf { it.run.id == runId }?.run
-                            }
+                            ?: runIdToReconcile?.let { runId -> observationStateFor(sessionId, runId)?.run }
                             ?: sessionRuns[sessionId].orEmpty().latestActiveRun()
-                            ?: runObservationStates[sessionId]?.takeIf { state -> !state.state.isTerminal() }?.run
+                            ?: latestObservationState(sessionId, sessionRuns[sessionId].orEmpty())
+                                ?.takeIf { state -> !state.state.isTerminal() }
+                                ?.run
                     candidate?.takeUnless { it.isUncertainSendRun() }
                 }
             }
@@ -757,7 +755,9 @@ class EntryStateHolder(
             }
             if (reconciliation.decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
                 sessionSendErrors.remove(sessionId)
-                runObservationStates.remove(sessionId)
+                forgetObservationState(sessionId, reconciliation.run.id)
+                val latestObservation = latestObservationState(sessionId, knownRuns)
+                val latestRun = knownRuns.latestRun()
                 _uiState.value =
                     _uiState.value.copy(
                         sessionList =
@@ -766,19 +766,23 @@ class EntryStateHolder(
                                     opened.copy(
                                         messages = reconciliation.history.messages.map { it.toSessionMessageUiState() }.chronological(),
                                         sendErrorCategory = null,
-                                        latestRun = knownRuns.latestRun(),
+                                        latestRun = latestRun,
                                         activeRuns = knownRuns.activeRuns(),
-                                        latestRunState = reconciliation.run.toRunPresentationState(),
-                                        activeResponse = null,
+                                        latestRunState =
+                                            latestObservation?.state
+                                                ?: reconciliation.run.takeIf { it.id == latestRun?.id }?.toRunPresentationState()
+                                                ?: opened.latestRunState,
+                                        activeResponse = latestObservation?.toSessionMessageUiState(),
                                         errorCategory = null,
                                         isStale = false,
                                     ),
                             ),
                     )
             } else {
-                val previous = runObservationStates[sessionId]?.takeIf { it.run.id == run.id }
+                val previous = observationStateFor(sessionId, run.id)
                 val uncertainState = uncertainObservationState(run, previous)
-                runObservationStates[sessionId] = uncertainState
+                rememberObservationState(uncertainState)
+                val latestObservation = latestObservationState(sessionId, knownRuns)
                 _uiState.value =
                     _uiState.value.copy(
                         sessionList =
@@ -787,8 +791,8 @@ class EntryStateHolder(
                                     opened.copy(
                                         latestRun = knownRuns.latestRun(),
                                         activeRuns = knownRuns.activeRuns(),
-                                        latestRunState = RunPresentationState.UNCERTAIN,
-                                        activeResponse = uncertainState.toSessionMessageUiState(),
+                                        latestRunState = latestObservation?.state ?: opened.latestRunState,
+                                        activeResponse = latestObservation?.toSessionMessageUiState(),
                                         errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                                         isStale = true,
                                     ),
@@ -822,10 +826,11 @@ class EntryStateHolder(
                     ?: Run(runId, sessionId, UNCERTAIN_RUN_STATUS)
             val uncertainRun = knownRun
             val knownRuns = mergeRuns(sessionRuns[sessionId].orEmpty(), listOf(uncertainRun))
-            val previous = runObservationStates[sessionId]?.takeIf { it.run.id == runId }
+            val previous = observationStateFor(sessionId, runId)
             val uncertainState = uncertainObservationState(uncertainRun, previous)
             sessionRuns[sessionId] = knownRuns
-            runObservationStates[sessionId] = uncertainState
+            rememberObservationState(uncertainState)
+            val latestObservation = latestObservationState(sessionId, knownRuns)
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -834,8 +839,8 @@ class EntryStateHolder(
                                 opened.copy(
                                     latestRun = knownRuns.latestRun(),
                                     activeRuns = knownRuns.activeRuns(),
-                                    latestRunState = RunPresentationState.UNCERTAIN,
-                                    activeResponse = uncertainState.toSessionMessageUiState(),
+                                    latestRunState = latestObservation?.state ?: opened.latestRunState,
+                                    activeResponse = latestObservation?.toSessionMessageUiState(),
                                     errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                                     isStale = true,
                                 ),
@@ -854,14 +859,17 @@ class EntryStateHolder(
             isStreaming = false,
         )
 
-    private fun uncertainSendRun(sessionId: SessionId): Run =
-        Run(RunId("$UNCERTAIN_SEND_RUN_PREFIX${sessionId.value}"), sessionId, UNCERTAIN_RUN_STATUS)
+    private fun uncertainSendRun(sessionId: SessionId): Run {
+        val run = Run(RunId("$UNCERTAIN_SEND_RUN_PREFIX${sessionId.value}"), sessionId, UNCERTAIN_RUN_STATUS)
+        uncertainSendRunIds[sessionId] = run.id
+        return run
+    }
 
-    private fun RunId.isUncertainSendRun(): Boolean = value.startsWith(UNCERTAIN_SEND_RUN_PREFIX)
-
-    private fun Run.isUncertainSendRun(): Boolean = id.isUncertainSendRun()
+    private fun Run.isUncertainSendRun(): Boolean = uncertainSendRunIds[sessionId] == id
 
     private fun List<Run>.withoutUncertainSendRun(): List<Run> = filterNot { run -> run.isUncertainSendRun() }
+
+    private fun List<Run>.latestActiveRun(): Run? = lastOrNull { it.isActive() && !it.isUncertainSendRun() }
 
     private fun markTimedOutSendUncertain(
         sessionId: SessionId,
@@ -871,14 +879,14 @@ class EntryStateHolder(
         val uncertainRun = uncertainSendRun(sessionId)
         val knownRuns =
             mergeRuns(
-                sessionRuns[sessionId].orEmpty().withoutUncertainSendRun(),
+                sessionRuns[sessionId].orEmpty(),
                 listOf(uncertainRun),
             )
-        val previous = runObservationStates[sessionId]?.takeIf { state -> state.run.id == uncertainRun.id }
+        val previous = observationStateFor(sessionId, uncertainRun.id)
         val uncertainState = uncertainObservationState(uncertainRun, previous)
         pendingRunDrafts.remove(sessionId)
         sessionRuns[sessionId] = knownRuns
-        runObservationStates[sessionId] = uncertainState
+        rememberObservationState(uncertainState)
         _uiState.value =
             _uiState.value.copy(
                 sessionList =
@@ -1206,22 +1214,16 @@ class EntryStateHolder(
         val confirmedRuns = openedSession.history.runs()
         if (confirmedRuns.isNotEmpty()) {
             val confirmedRunIds = confirmedRuns.mapTo(mutableSetOf()) { it.id }
-            val observationState = runObservationStates[sessionId]
-            if (observationState?.run?.id?.let { it in confirmedRunIds } == true) {
-                runObservationStates.remove(sessionId)
-            }
             val localRuns = sessionRuns[sessionId].orEmpty()
-            val unresolvedRun =
-                observationState
-                    ?.takeIf {
-                        it.state == RunPresentationState.UNCERTAIN &&
-                            it.run.id !in confirmedRunIds &&
-                            !it.run.isUncertainSendRun()
+            val unresolvedRuns =
+                allObservationStates(sessionId)
+                    .filter { state ->
+                        state.state == RunPresentationState.UNCERTAIN &&
+                            state.run.id !in confirmedRunIds &&
+                            !state.run.isActive()
                     }
-                    ?.run
-            val retainedLocalRuns =
-                (localRuns.filter(Run::isActive) + listOfNotNull(unresolvedRun))
-                    .withoutUncertainSendRun()
+                    .map(RunObservationState::run)
+            val retainedLocalRuns = localRuns.filter(Run::isActive) + unresolvedRuns
             sessionRuns[sessionId] = mergeRuns(confirmedRuns, retainedLocalRuns)
         }
         return sessionRuns[sessionId].orEmpty()
@@ -1932,6 +1934,7 @@ class EntryStateHolder(
                             updateCurrentSessionRequest(request.generation, request.query) { current ->
                                 val authoritativeSession = openedSession.session.toSessionItemUiState()
                                 val knownRuns = rememberSessionRuns(sessionId, openedSession)
+                                val latestObservation = latestObservationState(sessionId, knownRuns)
                                 current.copy(
                                     sessions =
                                         current.sessions
@@ -1950,14 +1953,8 @@ class EntryStateHolder(
                                             latestRun = knownRuns.latestRun(),
                                             activeRuns = knownRuns.activeRuns(),
                                             isSending = runJobs.containsKey(sessionId),
-                                            latestRunState =
-                                                runObservationStates[sessionId]
-                                                    ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
-                                                    ?.state,
-                                            activeResponse =
-                                                runObservationStates[sessionId]
-                                                    ?.takeIf { state -> state.run.id == knownRuns.latestRun()?.id }
-                                                    ?.toSessionMessageUiState(),
+                                            latestRunState = latestObservation?.state,
+                                            activeResponse = latestObservation?.toSessionMessageUiState(),
                                         ),
                                     errorCategory = null,
                                 )
@@ -2213,12 +2210,17 @@ class EntryStateHolder(
                         reconciliation.history.runs() + run,
                     )
                 sessionRuns[sessionId] = knownRuns
+                val uncertainSendRunId = uncertainSendRunIds.remove(sessionId)
+                if (uncertainSendRunId != null) {
+                    forgetObservationState(sessionId, uncertainSendRunId)
+                }
                 val submittedDraft = pendingRunDrafts.remove(sessionId)
                 if (sessionDrafts[sessionId] == submittedDraft) {
                     sessionDrafts.remove(sessionId)
                 }
                 if (decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
-                    runObservationStates.remove(sessionId)
+                    sessionSendErrors.remove(sessionId)
+                    forgetObservationState(sessionId, run.id)
                     _uiState.value =
                         _uiState.value.copy(
                             sessionList =
@@ -2239,9 +2241,10 @@ class EntryStateHolder(
                                 ),
                         )
                 } else {
-                    val previous = runObservationStates[sessionId]?.takeIf { it.run.id == run.id }
+                    val previous = observationStateFor(sessionId, run.id)
                     val uncertainState = uncertainObservationState(run, previous)
-                    runObservationStates[sessionId] = uncertainState
+                    rememberObservationState(uncertainState)
+                    val latestObservation = latestObservationState(sessionId, knownRuns)
                     _uiState.value =
                         _uiState.value.copy(
                             sessionList =
@@ -2253,8 +2256,8 @@ class EntryStateHolder(
                                             activeRuns = knownRuns.activeRuns(),
                                             isSending = false,
                                             sendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
-                                            latestRunState = RunPresentationState.UNCERTAIN,
-                                            activeResponse = uncertainState.toSessionMessageUiState(),
+                                            latestRunState = latestObservation?.state ?: opened.latestRunState,
+                                            activeResponse = latestObservation?.toSessionMessageUiState(),
                                             errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                                             isStale = true,
                                         ),
@@ -2308,10 +2311,9 @@ class EntryStateHolder(
                     observationJobToCancel = runObservationJobs.remove(sessionId)
                     observationToClose = runObservations.remove(sessionId)
                     val observationState =
-                        runObservationStates[sessionId]
-                            ?.takeIf { state -> state.run.id == run.id }
+                        observationStateFor(sessionId, run.id)
                             ?: RunEventStateTransition.initial(run)
-                    runObservationStates[sessionId] = observationState
+                    rememberObservationState(observationState)
                     _uiState.value =
                         _uiState.value.copy(
                             sessionList =
@@ -2357,18 +2359,19 @@ class EntryStateHolder(
                 return
             }
             val state =
-                runObservationStates[sessionId]
-                    ?.takeIf { observationState -> observationState.run.id == run.id }
+                observationStateFor(sessionId, run.id)
                     ?: RunEventStateTransition.initial(run)
-            runObservationStates[sessionId] = state
+            rememberObservationState(state)
+            val knownRuns = sessionRuns[sessionId].orEmpty()
+            val latestObservation = latestObservationState(sessionId, knownRuns)
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
                         current.copy(
                             openedSession =
                                 opened.copy(
-                                    latestRunState = state.state,
-                                    activeResponse = state.toSessionMessageUiState(),
+                                    latestRunState = latestObservation?.state ?: state.state,
+                                    activeResponse = latestObservation?.toSessionMessageUiState() ?: state.toSessionMessageUiState(),
                                 ),
                         ),
                 )
@@ -2426,10 +2429,8 @@ class EntryStateHolder(
                 applyRunEvent(sessionId, event, observationJob)
                 reachedTerminalState =
                     synchronized(sessionRequestLock) {
-                        runObservationStates[sessionId]
-                            ?.takeIf { state -> state.run.id == run.id }
-                            ?.state
-                            ?.isTerminal() == true
+                        observationStateFor(sessionId, run.id)
+                            ?.let { state -> state.state.isTerminal() || !state.run.isActive() } == true
                     }
                 if (reachedTerminalState) break
             }
@@ -2484,7 +2485,7 @@ class EntryStateHolder(
             if (
                 runObservationJobs[sessionId] !== observationJob ||
                 _uiState.value.sessionList?.openedSession?.session?.id != sessionId ||
-                runObservationStates[sessionId]?.run?.id != runId
+                observationStateFor(sessionId, runId) == null
             ) {
                 null
             } else {
@@ -2510,10 +2511,9 @@ class EntryStateHolder(
     ) {
         synchronized(sessionRequestLock) {
             if (runObservationJobs[sessionId] !== observationJob) return
-            val previous = runObservationStates[sessionId] ?: return
-            if (previous.run.id != event.runId) return
+            val previous = observationStateFor(sessionId, event.runId) ?: return
             val next = RunEventStateTransition.apply(previous, event)
-            runObservationStates[sessionId] = next
+            rememberObservationState(next)
             val knownRuns =
                 sessionRuns[sessionId].orEmpty()
                     .map { knownRun -> if (knownRun.id == event.runId) next.run else knownRun }
@@ -2522,6 +2522,7 @@ class EntryStateHolder(
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             val latestRun = knownRuns.latestRun() ?: next.run
+            val latestObservation = latestObservationState(sessionId, knownRuns)
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2530,8 +2531,8 @@ class EntryStateHolder(
                                 opened.copy(
                                     latestRun = latestRun,
                                     activeRuns = knownRuns.activeRuns(),
-                                    latestRunState = next.state,
-                                    activeResponse = next.toSessionMessageUiState(),
+                                    latestRunState = latestObservation?.state ?: next.state,
+                                    activeResponse = latestObservation?.toSessionMessageUiState() ?: next.toSessionMessageUiState(),
                                 ),
                         ),
                 )
@@ -2545,25 +2546,58 @@ class EntryStateHolder(
     ) {
         synchronized(sessionRequestLock) {
             if (runObservationJobs[sessionId] !== observationJob) return
-            val previous = runObservationStates[sessionId]?.takeIf { state -> state.run.id == runId } ?: return
-            if (previous.state.isTerminal()) return
+            val previous = observationStateFor(sessionId, runId) ?: return
+            if (previous.state.isTerminal() || !previous.run.isActive()) return
             val next = RunEventStateTransition.interrupted(previous)
-            runObservationStates[sessionId] = next
+            rememberObservationState(next)
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+            val knownRuns = sessionRuns[sessionId].orEmpty()
+            val latestObservation = latestObservationState(sessionId, knownRuns)
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
                         current.copy(
                             openedSession =
                                 opened.copy(
-                                    latestRunState = RunPresentationState.UNCERTAIN,
-                                    activeResponse = next.toSessionMessageUiState(),
+                                    latestRunState = latestObservation?.state ?: RunPresentationState.UNCERTAIN,
+                                    activeResponse = latestObservation?.toSessionMessageUiState() ?: next.toSessionMessageUiState(),
                                 ),
                         ),
                 )
         }
     }
+
+    private fun observationStateFor(
+        sessionId: SessionId,
+        runId: RunId,
+    ): RunObservationState? = runObservationStates[sessionId]?.get(runId)
+
+    private fun rememberObservationState(state: RunObservationState) {
+        runObservationStates.getOrPut(state.run.sessionId) { mutableMapOf() }[state.run.id] = state
+    }
+
+    private fun forgetObservationState(
+        sessionId: SessionId,
+        runId: RunId,
+    ) {
+        val states = runObservationStates[sessionId] ?: return
+        states.remove(runId)
+        if (states.isEmpty()) {
+            runObservationStates.remove(sessionId)
+        }
+    }
+
+    private fun latestObservationState(
+        sessionId: SessionId,
+        runs: List<Run>,
+    ): RunObservationState? {
+        val states = runObservationStates[sessionId] ?: return null
+        return runs.asReversed().firstOrNull { states.containsKey(it.id) }?.let { states[it.id] } ?: states.values.lastOrNull()
+    }
+
+    private fun allObservationStates(sessionId: SessionId): List<RunObservationState> =
+        runObservationStates[sessionId]?.values?.toList().orEmpty()
 
     private fun showMessageSendFailure(
         sessionId: SessionId,
@@ -2626,8 +2660,6 @@ private fun RunObservationState.toSessionMessageUiState(): SessionMessageUiState
         isStreaming = isStreaming,
         streamInterrupted = isStreamInterrupted,
     )
-
-private fun List<Run>.latestActiveRun(): Run? = lastOrNull(Run::isActive)
 
 private fun SessionHistory.latestRun(): Run? = runs().latestRun()
 

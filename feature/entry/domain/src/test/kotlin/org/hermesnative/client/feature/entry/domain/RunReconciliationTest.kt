@@ -27,6 +27,21 @@ class RunReconciliationTest {
     }
 
     @Test
+    fun canceled_and_cancelled_runs_with_matching_history_are_confirmed() {
+        listOf("canceled", "cancelled").forEach { status ->
+            val run = Run(RunId("run-$status"), SessionId("session-1"), status)
+            val history =
+                SessionHistory(
+                    sessionId = run.sessionId,
+                    messages = listOf(GatewayHistoryMessage("message-$status", "assistant", "Result", run.id, status)),
+                    nextCursor = null,
+                )
+
+            assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run, history))
+        }
+    }
+
+    @Test
     fun a_terminal_run_without_a_matching_history_boundary_remains_uncertain() {
         val run = Run(RunId("run-1"), SessionId("session-1"), "succeeded")
         val history = SessionHistory(run.sessionId, emptyList(), null)

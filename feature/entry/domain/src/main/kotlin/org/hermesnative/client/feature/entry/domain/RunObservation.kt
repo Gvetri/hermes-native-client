@@ -89,7 +89,7 @@ object RunEventStateTransition {
     }
 
     fun interrupted(current: RunObservationState): RunObservationState =
-        if (current.state == RunPresentationState.SUCCEEDED || current.state == RunPresentationState.FAILED) {
+        if (current.state == RunPresentationState.SUCCEEDED || current.state == RunPresentationState.FAILED || !current.run.isActive()) {
             current
         } else {
             current.copy(

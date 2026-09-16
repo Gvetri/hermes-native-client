@@ -15,7 +15,7 @@ fun decideRunReconciliation(
     run: Run,
     history: SessionHistory,
 ): RunReconciliationDecision =
-    if (run.toRunPresentationState().isTerminal() && history.containsRun(run.id)) {
+    if (!run.isActive() && history.containsRun(run.id)) {
         RunReconciliationDecision.CONFIRMED
     } else {
         RunReconciliationDecision.UNCERTAIN
