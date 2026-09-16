@@ -749,6 +749,10 @@ class QualityGateConfigurationTest {
         assertTrue("Issue creation must be isolated from the emulator job.", !api24Job.contains(".github/scripts/create-nightly-failure-issue.sh"))
         assertTrue("The issue job must grant issue creation permission.", issueJob.contains("      issues: write"))
         assertTrue("Issue creation must be limited to scheduled runs.", issueJob.contains("github.event_name == 'schedule'"))
+        assertTrue(
+            "Issue creation must require a non-successful API 24 result.",
+            issueJob.contains("needs.api24_instrumentation.result != 'success'"),
+        )
         assertTrue("Issue publication must wait for the emulator job.", issueJob.contains("needs: api24_instrumentation"))
         assertTrue("Issue publication must serialize reruns for one workflow run.", issueJob.contains("nightly-failure-issue-${'$'}{{ github.repository }}-${'$'}{{ github.run_id }}"))
         assertTrue("Issue publication must not cancel an earlier rerun.", issueJob.contains("cancel-in-progress: false"))
