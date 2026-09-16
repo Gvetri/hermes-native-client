@@ -630,17 +630,7 @@ class EntryStateHolderFixtureIntegrationTest {
 
         fixture(behavior).execute { context ->
             val client = client(context)
-            val holder =
-                EntryStateHolder(
-                    initialState = EntryState(isGatewayConnectionConfigured = false),
-                    verifyGatewayConnection =
-                        VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                            GatewayCapabilities(requiredCapabilities)
-                        },
-                    scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-                    sessionGatewayFactory = { _, _ -> client },
-                    runGatewayFactory = { _, _ -> runGateway },
-                )
+            val holder = stateHolder(client, runGateway = runGateway)
             try {
                 connect(holder)
                 holder.onEvent(EntryUiEvent.SessionClicked(SessionId(sessionId)))
@@ -685,8 +675,8 @@ class EntryStateHolderFixtureIntegrationTest {
             listOf(
                 SyntheticGatewayMessage(
                     id = "local-message-user",
-                    role = "user",
-                    content = "Local request",
+                    role = null,
+                    content = null,
                     runId = localRun.id.value,
                     runStatus = "succeeded",
                     runResult = null,
@@ -696,8 +686,8 @@ class EntryStateHolderFixtureIntegrationTest {
                 listOf(
                     SyntheticGatewayMessage(
                         id = "local-message-result",
-                        role = "assistant",
-                        content = "Local result",
+                        role = null,
+                        content = null,
                         runId = localRun.id.value,
                         runStatus = "succeeded",
                         runResult = "Local result",
@@ -734,17 +724,7 @@ class EntryStateHolderFixtureIntegrationTest {
 
         fixture(behavior).execute { context ->
             val client = client(context)
-            val holder =
-                EntryStateHolder(
-                    initialState = EntryState(isGatewayConnectionConfigured = false),
-                    verifyGatewayConnection =
-                        VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                            GatewayCapabilities(requiredCapabilities)
-                        },
-                    scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-                    sessionGatewayFactory = { _, _ -> client },
-                    runGatewayFactory = { _, _ -> runGateway },
-                )
+            val holder = stateHolder(client, runGateway = runGateway)
             try {
                 connect(holder)
                 holder.onEvent(EntryUiEvent.SessionClicked(session))
@@ -885,6 +865,7 @@ class EntryStateHolderFixtureIntegrationTest {
     private fun stateHolder(
         client: DefaultGatewayClient,
         asynchronous: Boolean = false,
+        runGateway: RunGatewayPort? = null,
     ): EntryStateHolder =
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
@@ -897,6 +878,7 @@ class EntryStateHolderFixtureIntegrationTest {
                     SupervisorJob() + if (asynchronous) Dispatchers.Default else Dispatchers.Unconfined,
                 ),
             sessionGatewayFactory = { _, _ -> client },
+            runGatewayFactory = runGateway?.let { gateway -> { _, _ -> gateway } },
         )
 
     private fun connect(holder: EntryStateHolder) {

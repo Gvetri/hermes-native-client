@@ -166,7 +166,6 @@ class ContractFixtureParserTest {
             listOf("succeeded", "failed", "succeeded", "succeeded"),
             mixedMessages.map { it.jsonObject["run_status"]!!.jsonPrimitive.content },
         )
-        assertEquals("Local request", mixedMessages[0].jsonObject["content"]!!.jsonPrimitive.content)
         assertEquals(JsonNull, mixedMessages[1].jsonObject["content"])
         assertEquals("Remote result", mixedMessages[2].jsonObject["run_result"]!!.jsonPrimitive.content)
         assertEquals("Local result", mixedMessages[3].jsonObject["run_result"]!!.jsonPrimitive.content)

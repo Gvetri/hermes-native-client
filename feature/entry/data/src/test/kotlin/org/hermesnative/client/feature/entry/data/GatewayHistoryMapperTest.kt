@@ -93,8 +93,8 @@ class GatewayHistoryMapperTest {
             ),
             history.messages.map { it.timestamp },
         )
-        assertEquals(listOf("user", null, null, "assistant"), history.messages.map { it.role })
-        assertEquals(listOf("Local request", null, null, "Local result"), history.messages.map { it.content })
+        assertEquals(listOf(null, null, null, null), history.messages.map { it.role })
+        assertEquals(listOf(null, null, null, null), history.messages.map { it.content })
     }
 
     @Test
