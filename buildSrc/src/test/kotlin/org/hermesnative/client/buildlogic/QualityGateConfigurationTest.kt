@@ -126,6 +126,17 @@ class QualityGateConfigurationTest {
             emulatorJob.contains("      - name: Finalize Android test evidence") &&
                 emulatorJob.contains("        if: \${{ always() }}"),
         )
+        assertTrue(
+            "The API 24 job must combine always() with its event filter for cancellation finalization.",
+            emulatorJob.contains(
+                "    if: \${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}",
+            ),
+        )
+        assertEquals(
+            "Finalization and reporting must each receive the workflow cancellation state.",
+            2,
+            emulatorJob.lines().count { it.trim() == "WORKFLOW_CANCELLED: \${{ cancelled() }}" },
+        )
         assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 20"))
         assertTrue("The workflow must preserve successful test classification.", emulatorJob.contains("category=success"))
         assertTrue("The Android test action must have a stable step id.", emulatorJob.contains("        id: android_tests"))
@@ -455,6 +466,187 @@ class QualityGateConfigurationTest {
             assertTrue("The redaction marker must be removed after safe timeout cleanup.", !Files.exists(pendingMarker))
         } finally {
             tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    private data class ShellExecution(
+        val exitCode: Int,
+        val output: String,
+    )
+
+    private data class Api24OutcomeScenario(
+        val name: String,
+        val workflowCancelled: Boolean,
+        val androidTestOutcome: String,
+        val jobStatus: String,
+        val existingCategory: String?,
+        val wrapperStarted: Boolean,
+        val startEpoch: String,
+        val expectedCategory: String,
+        val expectedResult: String,
+        val artifactUrl: String,
+    )
+
+    private fun extractWorkflowStepScript(workflow: String, stepName: String): String {
+        val step = workflow
+            .substringAfter("      - name: $stepName\n")
+            .substringBefore("\n      - name:")
+        return step
+            .substringAfter("        run: |\n")
+            .lineSequence()
+            .map { line -> line.removePrefix("          ") }
+            .joinToString("\n")
+    }
+
+    private fun runWorkflowShell(
+        script: String,
+        workingDirectory: File,
+        environment: Map<String, String>,
+    ): ShellExecution {
+        val process =
+            ProcessBuilder("bash", "-c", script)
+                .directory(workingDirectory)
+                .apply {
+                    environment().putAll(environment)
+                    redirectErrorStream(true)
+                }
+                .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        return ShellExecution(process.waitFor(), output)
+    }
+
+    @Test
+    fun api24_finalizer_and_report_classify_cancellation_and_outcomes_from_real_shells() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val finalizerScript = extractWorkflowStepScript(workflow, "Finalize Android test evidence")
+        val reportScript = extractWorkflowStepScript(workflow, "Report API 24 instrumentation result")
+        val scenarios =
+            listOf(
+                Api24OutcomeScenario(
+                    name = "cancellation before emulator",
+                    workflowCancelled = true,
+                    androidTestOutcome = "skipped",
+                    jobStatus = "success",
+                    existingCategory = null,
+                    wrapperStarted = false,
+                    startEpoch = "0",
+                    expectedCategory = "cancellation",
+                    expectedResult = "cancellation",
+                    artifactUrl = "https://github.com/Gvetri/hermes-native-client/actions/runs/47/artifacts/1",
+                ),
+                Api24OutcomeScenario(
+                    name = "cancellation during emulator",
+                    workflowCancelled = true,
+                    androidTestOutcome = "failure",
+                    jobStatus = "failure",
+                    existingCategory = "timeout",
+                    wrapperStarted = true,
+                    startEpoch = "0",
+                    expectedCategory = "cancellation",
+                    expectedResult = "cancellation",
+                    artifactUrl = "https://github.com/Gvetri/hermes-native-client/actions/runs/47/artifacts/2",
+                ),
+                Api24OutcomeScenario(
+                    name = "success",
+                    workflowCancelled = false,
+                    androidTestOutcome = "success",
+                    jobStatus = "success",
+                    existingCategory = "success",
+                    wrapperStarted = true,
+                    startEpoch = "0",
+                    expectedCategory = "success",
+                    expectedResult = "pass",
+                    artifactUrl = "https://github.com/Gvetri/hermes-native-client/actions/runs/47/artifacts/3",
+                ),
+                Api24OutcomeScenario(
+                    name = "failure",
+                    workflowCancelled = false,
+                    androidTestOutcome = "failure",
+                    jobStatus = "failure",
+                    existingCategory = "test_failure",
+                    wrapperStarted = true,
+                    startEpoch = "0",
+                    expectedCategory = "test_failure",
+                    expectedResult = "failure",
+                    artifactUrl = "https://github.com/Gvetri/hermes-native-client/actions/runs/47/artifacts/4",
+                ),
+                Api24OutcomeScenario(
+                    name = "timeout",
+                    workflowCancelled = false,
+                    androidTestOutcome = "failure",
+                    jobStatus = "failure",
+                    existingCategory = null,
+                    wrapperStarted = true,
+                    startEpoch = "1",
+                    expectedCategory = "timeout",
+                    expectedResult = "timeout",
+                    artifactUrl = "https://github.com/Gvetri/hermes-native-client/actions/runs/47/artifacts/5",
+                ),
+            )
+
+        scenarios.forEach { scenario ->
+            val tempDir = Files.createTempDirectory("api24-shell-${scenario.name.replace(' ', '-')}")
+            try {
+                val evidenceDir = tempDir.resolve("artifacts/android-test-evidence")
+                Files.createDirectories(evidenceDir.resolve("instrumentation-output"))
+                Files.writeString(evidenceDir.resolve("android-test-start-epoch.txt"), "${scenario.startEpoch}\n")
+                scenario.existingCategory?.let { category ->
+                    Files.writeString(evidenceDir.resolve("failure-category.txt"), "category=$category\n")
+                }
+                if (scenario.wrapperStarted) {
+                    Files.writeString(evidenceDir.resolve("wrapper-started.txt"), "wrapper-started\n")
+                } else {
+                    Files.writeString(
+                        tempDir.resolve("artifacts/android-test-evidence-redaction-pending"),
+                        "pending\n",
+                    )
+                }
+
+                val outputFile = tempDir.resolve("github-output.txt")
+                val summaryFile = tempDir.resolve("github-summary.md")
+                val environment =
+                    mapOf(
+                        "ANDROID_TEST_OUTCOME" to scenario.androidTestOutcome,
+                        "WORKFLOW_CANCELLED" to scenario.workflowCancelled.toString(),
+                        "JOB_STATUS" to scenario.jobStatus,
+                        "GITHUB_OUTPUT" to outputFile.toString(),
+                        "GITHUB_STEP_SUMMARY" to summaryFile.toString(),
+                        "GITHUB_SERVER_URL" to "https://github.com",
+                        "GITHUB_REPOSITORY" to "Gvetri/hermes-native-client",
+                        "GITHUB_RUN_ID" to "47",
+                        "GITHUB_RUN_ATTEMPT" to "1",
+                        "GITHUB_SHA" to "test-sha",
+                        "GITHUB_WORKFLOW" to "quality-gate",
+                        "GITHUB_JOB" to "api24_instrumentation",
+                        "GITHUB_REF_NAME" to "ci/47-nightly-api24",
+                        "RUNNER_OS" to "Linux",
+                    )
+                val finalize = runWorkflowShell(finalizerScript, tempDir.toFile(), environment)
+                assertEquals("${scenario.name} finalizer output: ${finalize.output}", 0, finalize.exitCode)
+                assertEquals(
+                    scenario.expectedCategory,
+                    Files.readString(evidenceDir.resolve("failure-category.txt")).trim().substringAfter('='),
+                )
+                assertTrue(
+                    "${scenario.name} must mark sanitized evidence ready.",
+                    Files.readString(outputFile).contains("redaction_ready=true"),
+                )
+
+                val reportEnvironment =
+                    environment +
+                        mapOf(
+                            "FINALIZE_OUTCOME" to "success",
+                            "ARTIFACT_URL" to scenario.artifactUrl,
+                        )
+                val report = runWorkflowShell(reportScript, tempDir.toFile(), reportEnvironment)
+                assertEquals("${scenario.name} report output: ${report.output}", 0, report.exitCode)
+                val summary = Files.readString(summaryFile)
+                assertTrue(summary.contains("## API 24 instrumentation: ${scenario.expectedResult}"))
+                assertTrue(summary.contains("- Failure category: `${scenario.expectedCategory}`"))
+                assertTrue(summary.contains("[Open run artifacts](${scenario.artifactUrl})"))
+            } finally {
+                tempDir.toFile().deleteRecursively()
+            }
         }
     }
 

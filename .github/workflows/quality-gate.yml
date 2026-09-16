@@ -147,7 +147,7 @@ jobs:
 
   api24_instrumentation:
     name: api24-instrumentation
-    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -196,6 +196,7 @@ jobs:
         env:
           ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
           JOB_STATUS: ${{ job.status }}
+          WORKFLOW_CANCELLED: ${{ cancelled() }}
         run: |
           set -euo pipefail
           evidence_dir=artifacts/android-test-evidence
@@ -213,7 +214,7 @@ jobs:
           if (( start_epoch > 0 )); then
             elapsed_seconds=$(( $(date +%s) - start_epoch ))
           fi
-          if [[ "$ANDROID_TEST_OUTCOME" == "cancelled" ]]; then
+          if [[ "$WORKFLOW_CANCELLED" == "true" || "$ANDROID_TEST_OUTCOME" == "cancelled" ]]; then
             printf '%s\n' 'category=cancellation' > "$category_file"
           elif [[ ! -s "$category_file" ]] || grep -qx 'category=success' "$category_file"; then
             if [[ "$ANDROID_TEST_OUTCOME" == "failure" ]]; then
@@ -243,6 +244,7 @@ jobs:
               printf 'category=%s\n' "$(cut -d= -f2- "$category_file")"
               printf 'android_test_step_outcome=%s\n' "$ANDROID_TEST_OUTCOME"
               printf 'job_status_at_finalize=%s\n' "$JOB_STATUS"
+              printf 'workflow_cancelled=%s\n' "$WORKFLOW_CANCELLED"
               printf 'github_run_id=%s\n' "${GITHUB_RUN_ID:-unknown}"
               printf 'github_run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT:-unknown}"
               printf 'github_sha=%s\n' "${GITHUB_SHA:-unknown}"
@@ -279,6 +281,7 @@ jobs:
           ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
           FINALIZE_OUTCOME: ${{ steps.finalize_android_evidence.outcome }}
           ARTIFACT_URL: ${{ steps.upload_android_evidence.outputs.artifact-url }}
+          WORKFLOW_CANCELLED: ${{ cancelled() }}
         run: |
           set -euo pipefail
           category=unknown
@@ -290,7 +293,7 @@ jobs:
             fi
           fi
 
-          if [[ "$ANDROID_TEST_OUTCOME" == "cancelled" || "$category" == "cancellation" ]]; then
+          if [[ "$WORKFLOW_CANCELLED" == "true" || "$ANDROID_TEST_OUTCOME" == "cancelled" || "$category" == "cancellation" ]]; then
             result=cancellation
           elif [[ "$category" == "timeout" ]]; then
             result=timeout
