@@ -15,13 +15,22 @@ fun decideRunReconciliation(
     run: Run,
     history: SessionHistory,
 ): RunReconciliationDecision =
-    if (!run.isActive() && history.containsRun(run.id)) {
+    if (!run.isActive() && history.containsTerminalRun(run)) {
         RunReconciliationDecision.CONFIRMED
     } else {
         RunReconciliationDecision.UNCERTAIN
     }
 
 fun SessionHistory.containsRun(runId: RunId): Boolean = messages.any { it.runId == runId }
+
+fun SessionHistory.containsTerminalRun(run: Run): Boolean {
+    val expectedState = run.toRunPresentationState()
+    return expectedState.isTerminal() &&
+        messages.any { message ->
+            message.runId == run.id &&
+                message.runStatus?.toRunPresentationState() == expectedState
+        }
+}
 
 fun SessionHistory.runs(): List<Run> {
     val runsById = linkedMapOf<RunId, Run>()

@@ -533,6 +533,53 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun terminal_status_with_only_a_stale_user_message_preserves_the_streamed_response() {
+        val session = session()
+        val run = Run(RunId("run-stale-terminal-history"), session.id, "starting")
+        val staleHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("stale-user", "user", "Run this", run.id)),
+                null,
+            )
+        val observation =
+            BlockingObservation(
+                listOf(
+                    RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
+                    RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Partial", "partial"),
+                ),
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(staleHistory)
+                histories.add(staleHistory)
+                statuses.add(run.copy(status = "succeeded"))
+                runs.add(run)
+                observations.add(observation)
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) { it.sessionList?.openedSession?.activeResponse?.content == "Partial" }
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.isRefreshing == false &&
+                    opened.latestRunState == RunPresentationState.UNCERTAIN &&
+                    opened.activeResponse?.content == "Partial"
+            }
+        } finally {
+            observation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun terminal_run_returned_by_create_is_reconciled_before_it_is_presented_as_confirmed() {
         val session = session()
         val terminalRun = Run(RunId("run-created-terminal"), session.id, "succeeded")
