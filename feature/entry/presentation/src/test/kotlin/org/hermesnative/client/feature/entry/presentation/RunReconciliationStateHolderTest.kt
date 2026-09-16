@@ -1148,7 +1148,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun confirmed_reconciliation_clears_send_failure_before_reopen() {
+    fun unrelated_confirmed_reconciliation_preserves_send_failure_and_draft_before_reopen() {
         val session = session()
         val activeRun = Run(RunId("run-2"), session.id, "running")
         val terminalRun = activeRun.copy(status = "succeeded")
@@ -1187,7 +1187,8 @@ class RunReconciliationStateHolderTest {
             awaitState(holder) {
                 it.sessionList?.openedSession?.isRefreshing == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
-                    it.sessionList?.openedSession?.sendErrorCategory == null &&
+                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    it.sessionList?.openedSession?.composerText == "Failed first attempt" &&
                     gateway.statusRequests.size == 1
             }
 
@@ -1196,7 +1197,8 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitState(holder) {
                 it.sessionList?.openedSession?.latestRun?.id == terminalRun.id &&
-                    it.sessionList?.openedSession?.sendErrorCategory == null
+                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    it.sessionList?.openedSession?.composerText == "Failed first attempt"
             }
             assertEquals(1, gateway.runRequests.size)
         } finally {

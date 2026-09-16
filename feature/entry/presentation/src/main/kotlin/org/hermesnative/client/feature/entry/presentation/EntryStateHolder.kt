@@ -782,9 +782,7 @@ class EntryStateHolder(
                 observationToClose = runObservations.remove(sessionId)
             }
             val isBoundSubmission = uncertainSubmissionRunIds[sessionId] == run.id
-            val canClearSendState =
-                isBoundSubmission ||
-                    (uncertainSubmissionRunIds[sessionId] == null && !unresolvedSubmissionSessions.contains(sessionId))
+            val canClearSendState = isBoundSubmission
             if (decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
                 if (isBoundSubmission) {
                     uncertainSubmissionRunIds.remove(sessionId)
