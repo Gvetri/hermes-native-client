@@ -89,6 +89,44 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun confirmed_cancellation_is_terminal_and_does_not_mark_the_run_uncertain() {
+        val session = session()
+        val run = Run(RunId("run-cancelled"), session.id, "starting")
+        val authoritativeHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("cancelled", "assistant", "Cancelled", run.id, "cancelled")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(authoritativeHistory)
+                statuses.add(run.copy(status = "cancelled"))
+                runs.add(run)
+                observation =
+                    ScriptedObservation(
+                        listOf(RunEvent(RunEventType.COMPLETED, run.id, "cancelled", eventId = "cancelled")),
+                    )
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.CANCELLED &&
+                    it.sessionList?.openedSession?.sendErrorCategory == null
+            }
+            assertEquals(1, gateway.runRequests.size)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun interrupted_observation_refetches_and_remains_uncertain_without_resubmitting() {
         val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")

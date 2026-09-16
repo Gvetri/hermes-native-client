@@ -100,6 +100,17 @@ class RunObservationStateTest {
     }
 
     @Test
+    fun canceled_statuses_are_confirmed_terminal_states() {
+        listOf("canceled", "cancelled").forEach { status ->
+            val state = RunEventStateTransition.initial(run.copy(status = status))
+
+            assertEquals(RunPresentationState.CANCELLED, state.state)
+            assertTrue(state.state.isTerminal())
+            assertFalse(state.isStreaming)
+        }
+    }
+
+    @Test
     fun an_interruption_does_not_confirm_that_the_remote_run_is_terminal() {
         val state =
             RunEventStateTransition.initial(run)

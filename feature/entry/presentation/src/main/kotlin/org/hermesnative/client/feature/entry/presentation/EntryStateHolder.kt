@@ -1213,7 +1213,12 @@ class EntryStateHolder(
     ): List<Run> {
         val confirmedRuns = openedSession.history.runs()
         if (confirmedRuns.isNotEmpty()) {
-            val confirmedRunIds = confirmedRuns.mapTo(mutableSetOf()) { it.id }
+            val confirmedRunIds = confirmedRuns.filterNot(Run::isActive).mapTo(mutableSetOf()) { it.id }
+            val states = runObservationStates[sessionId]
+            states?.keys?.removeAll(confirmedRunIds)
+            if (states?.isEmpty() == true) {
+                runObservationStates.remove(sessionId)
+            }
             val localRuns = sessionRuns[sessionId].orEmpty()
             val unresolvedRuns =
                 allObservationStates(sessionId)

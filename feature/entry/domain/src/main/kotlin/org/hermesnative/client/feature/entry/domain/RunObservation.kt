@@ -11,6 +11,7 @@ enum class RunPresentationState(
     COMPLETING("Completing"),
     SUCCEEDED("Succeeded"),
     FAILED("Failed"),
+    CANCELLED("Cancelled"),
     UNCERTAIN("Uncertain"),
 }
 
@@ -24,12 +25,16 @@ fun String.toRunPresentationState(): RunPresentationState =
         "completing", "finalizing", "stopping" -> RunPresentationState.COMPLETING
         "completed", "complete", "succeeded", "success" -> RunPresentationState.SUCCEEDED
         "failed", "failure", "error" -> RunPresentationState.FAILED
+        "cancelled", "canceled" -> RunPresentationState.CANCELLED
         else -> RunPresentationState.UNCERTAIN
     }
 
 fun Run.toRunPresentationState(): RunPresentationState = status.toRunPresentationState()
 
-fun RunPresentationState.isTerminal(): Boolean = this == RunPresentationState.SUCCEEDED || this == RunPresentationState.FAILED
+fun RunPresentationState.isTerminal(): Boolean =
+    this == RunPresentationState.SUCCEEDED ||
+        this == RunPresentationState.FAILED ||
+        this == RunPresentationState.CANCELLED
 
 data class RunObservationState(
     val run: Run,
@@ -77,7 +82,7 @@ object RunEventStateTransition {
             } else {
                 current.responseText
             }
-        val terminal = nextState == RunPresentationState.SUCCEEDED || nextState == RunPresentationState.FAILED
+        val terminal = nextState.isTerminal()
         return current.copy(
             run = nextRun,
             state = nextState,
@@ -89,7 +94,7 @@ object RunEventStateTransition {
     }
 
     fun interrupted(current: RunObservationState): RunObservationState =
-        if (current.state == RunPresentationState.SUCCEEDED || current.state == RunPresentationState.FAILED || !current.run.isActive()) {
+        if (current.state.isTerminal() || !current.run.isActive()) {
             current
         } else {
             current.copy(
