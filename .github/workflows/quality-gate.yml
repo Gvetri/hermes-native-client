@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -127,8 +130,24 @@ jobs:
       - run: ./gradlew architectureCheck architectureRuleTests verifyNoMocks --no-daemon
 
   compose_test:
-    name: api24-launch-themes
+    name: compose-jvm-tests
     if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - run: ./gradlew :feature:entry:presentation:testDebugUnitTest --no-daemon --console=plain
+
+  api24_instrumentation:
+    name: api24-instrumentation
+    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -171,12 +190,17 @@ jobs:
           script: |
             .github/scripts/android-test-evidence.sh
 
+      - name: Record workflow cancellation
+        id: workflow_cancellation
+        if: ${{ cancelled() }}
+        run: printf '%s\n' 'Workflow cancellation detected.'
       - name: Finalize Android test evidence
         id: finalize_android_evidence
         if: ${{ always() }}
         env:
           ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
           JOB_STATUS: ${{ job.status }}
+          WORKFLOW_CANCELLED: ${{ steps.workflow_cancellation.outcome == 'success' || job.status == 'cancelled' }}
         run: |
           set -euo pipefail
           evidence_dir=artifacts/android-test-evidence
@@ -194,7 +218,7 @@ jobs:
           if (( start_epoch > 0 )); then
             elapsed_seconds=$(( $(date +%s) - start_epoch ))
           fi
-          if [[ "$ANDROID_TEST_OUTCOME" == "cancelled" ]]; then
+          if [[ "$WORKFLOW_CANCELLED" == "true" || "$ANDROID_TEST_OUTCOME" == "cancelled" ]]; then
             printf '%s\n' 'category=cancellation' > "$category_file"
           elif [[ ! -s "$category_file" ]] || grep -qx 'category=success' "$category_file"; then
             if [[ "$ANDROID_TEST_OUTCOME" == "failure" ]]; then
@@ -224,6 +248,7 @@ jobs:
               printf 'category=%s\n' "$(cut -d= -f2- "$category_file")"
               printf 'android_test_step_outcome=%s\n' "$ANDROID_TEST_OUTCOME"
               printf 'job_status_at_finalize=%s\n' "$JOB_STATUS"
+              printf 'workflow_cancelled=%s\n' "$WORKFLOW_CANCELLED"
               printf 'github_run_id=%s\n' "${GITHUB_RUN_ID:-unknown}"
               printf 'github_run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT:-unknown}"
               printf 'github_sha=%s\n' "${GITHUB_SHA:-unknown}"
@@ -245,6 +270,7 @@ jobs:
           fi
           printf '%s\n' 'redaction_ready=true' >> "$GITHUB_OUTPUT"
       - name: Upload Android test failure evidence
+        id: upload_android_evidence
         if: ${{ always() && steps.android_tests.outcome != 'success' && steps.finalize_android_evidence.outputs.redaction_ready == 'true' }}
         uses: actions/upload-artifact@v4
         with:
@@ -253,6 +279,48 @@ jobs:
           if-no-files-found: error
           # Sanitized Android failure evidence is retained for 14 days.
           retention-days: 14
+      - name: Report API 24 instrumentation result
+        if: ${{ always() }}
+        env:
+          ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
+          FINALIZE_OUTCOME: ${{ steps.finalize_android_evidence.outcome }}
+          ARTIFACT_URL: ${{ steps.upload_android_evidence.outputs.artifact-url }}
+          WORKFLOW_CANCELLED: ${{ steps.workflow_cancellation.outcome == 'success' || job.status == 'cancelled' }}
+        run: |
+          set -euo pipefail
+          category=unknown
+          category_file=artifacts/android-test-evidence/failure-category.txt
+          if [[ -s "$category_file" ]]; then
+            IFS='=' read -r category_key category_value < "$category_file"
+            if [[ "$category_key" == category && -n "$category_value" ]]; then
+              category="$category_value"
+            fi
+          fi
+
+          if [[ "$WORKFLOW_CANCELLED" == "true" || "$ANDROID_TEST_OUTCOME" == "cancelled" || "$category" == "cancellation" ]]; then
+            result=cancellation
+          elif [[ "$category" == "timeout" ]]; then
+            result=timeout
+          elif [[ "$ANDROID_TEST_OUTCOME" == "success" && "$FINALIZE_OUTCOME" == "success" && "$category" == "success" ]]; then
+            result=pass
+          else
+            result=failure
+          fi
+
+          if [[ -n "$ARTIFACT_URL" ]]; then
+            artifact_summary="- Diagnostic artifacts: [Open run artifacts]($ARTIFACT_URL)"
+          else
+            artifact_summary='- Diagnostic artifacts: Not uploaded.'
+          fi
+          {
+            printf '## API 24 instrumentation: %s\n\n' "$result"
+            # The backticks are Markdown formatting, not shell substitutions.
+            # shellcheck disable=SC2016
+            printf -- '- Result: `%s`\n' "$result"
+            # shellcheck disable=SC2016
+            printf -- '- Failure category: `%s`\n' "$category"
+            printf '%s\n' "$artifact_summary"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail when Android tests fail
         if: ${{ always() && (steps.android_tests.outcome != 'success' || steps.finalize_android_evidence.outcome != 'success') }}
         run: |
