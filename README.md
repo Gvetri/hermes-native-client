@@ -44,7 +44,7 @@ The gate runs Kotlin formatting, Android lint, unit tests, architecture checks, 
 ./gradlew :app:verifyConnectedAndroidTests
 ```
 
-The repository workflow runs these checks on GitHub-hosted runners. Pull requests keep fast Compose behavior coverage through the JVM `compose-jvm-tests` job; the complete `api24-instrumentation` emulator job runs nightly or manually with an API 24-compatible x86_64 image and the full app instrumentation suite. It fails when instrumentation results are missing, empty, skipped, or unsuccessful. Failed, cancelled, and timed-out Android test runs upload sanitized runner output, logcat, instrumentation reports, and timeout context for 14 days when sanitization completes, with the diagnostic artifact linked from the workflow result.
+The repository workflow runs these checks on GitHub-hosted runners. Pull requests keep fast Compose behavior coverage through the JVM `compose-jvm-tests` job; the complete `api24-instrumentation` emulator job runs nightly or manually with an API 24-compatible x86_64 image and the full app instrumentation suite. It fails when instrumentation results are missing, empty, skipped, or unsuccessful. Failed, cancelled, and timed-out Android test runs upload sanitized runner output, logcat, instrumentation reports, and timeout context for 14 days when sanitization completes, with the diagnostic artifact linked from the workflow result. A scheduled run with a failed, cancelled, or timed-out Android test step creates at most one `ready-for-agent` issue containing the run, commit, failure type, and verified artifact link; reruns deduplicate by workflow run ID.
 
 ## Deterministic fixture provenance
 

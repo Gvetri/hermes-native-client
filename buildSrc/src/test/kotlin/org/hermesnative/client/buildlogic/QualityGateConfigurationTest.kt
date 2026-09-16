@@ -737,4 +737,28 @@ class QualityGateConfigurationTest {
             )
         }
     }
+
+    @Test
+    fun nightly_failures_create_one_labeled_issue_with_verified_sanitized_artifact() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val issueScript = repositoryRoot.resolve(".github/scripts/create-nightly-failure-issue.sh")
+        val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
+
+        assertTrue("The API 24 job must grant issue creation permission.", api24Job.contains("      issues: write"))
+        assertTrue("Issue creation must be limited to scheduled runs.", api24Job.contains("github.event_name == 'schedule'"))
+        assertTrue(
+            "Issue creation must require a successfully uploaded artifact.",
+            api24Job.contains("steps.upload_android_evidence.outcome == 'success'"),
+        )
+        assertTrue(
+            "The workflow must call the nightly issue creation script.",
+            api24Job.contains(".github/scripts/create-nightly-failure-issue.sh"),
+        )
+        assertTrue("The issue creation script must exist.", issueScript.isFile)
+        val script = issueScript.readText()
+        assertTrue("The issue must use the ready-for-agent label.", script.contains("ready-for-agent"))
+        assertTrue("The issue must carry a run marker for deduplication.", script.contains("nightly-run:"))
+        assertTrue("The script must read the created issue back.", script.contains("verify_issue \"${'$'}verified_issue_file\" true"))
+        assertTrue("The script must verify the artifact before publication.", script.contains("archive_download_url"))
+    }
 }

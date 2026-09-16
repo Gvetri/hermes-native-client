@@ -150,6 +150,10 @@ jobs:
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -167,6 +171,7 @@ jobs:
           printf '%s\n' 'Evidence sanitization is pending.' > artifacts/android-test-evidence-redaction-pending
           date +%s > artifacts/android-test-evidence/android-test-start-epoch.txt
           chmod +x .github/scripts/android-test-evidence.sh
+          chmod +x .github/scripts/create-nightly-failure-issue.sh
       - name: Enable KVM group perms
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -321,6 +326,13 @@ jobs:
             printf -- '- Failure category: `%s`\n' "$category"
             printf '%s\n' "$artifact_summary"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Create nightly failure issue
+        if: ${{ always() && github.event_name == 'schedule' && steps.android_tests.outcome != 'success' && steps.upload_android_evidence.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload_android_evidence.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload_android_evidence.outputs.artifact-url }}
+        run: .github/scripts/create-nightly-failure-issue.sh
       - name: Fail when Android tests fail
         if: ${{ always() && (steps.android_tests.outcome != 'success' || steps.finalize_android_evidence.outcome != 'success') }}
         run: |
