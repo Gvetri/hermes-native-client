@@ -3,6 +3,7 @@ package org.hermesnative.client.feature.entry.data
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.hermesnative.client.feature.entry.application.ReconcileRun
 import org.hermesnative.client.feature.entry.domain.GatewayContractPort
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
@@ -99,6 +100,33 @@ class DefaultGatewayClientTest {
         }
         assertFixtureRequest(transport.requests.last(), "runs/status-request.json", expectedPath = "/v1/runs/$RUN_ID/events")
         assertEquals("text/event-stream", transport.requests.last().headers["Accept"])
+    }
+
+    @Test
+    fun run_reconciliation_uses_the_authoritative_status_then_history_contract_sequence() {
+        val transport =
+            RecordingTransport(
+                responses =
+                    listOf(
+                        response("runs/status-response.json"),
+                        response("sessions/history-response-populated.json"),
+                    ),
+            )
+        val client = DefaultGatewayClient("https://gateway.example", "test-token", transport)
+
+        val result = ReconcileRun(client, client).execute(RunId(RUN_ID), SessionId(SESSION_ID))
+
+        assertEquals("succeeded", result.run.status)
+        assertEquals(RUN_ID, result.history.messages.single().runId?.value)
+        assertEquals(
+            listOf(
+                "/v1/runs/$RUN_ID",
+                "/v1/sessions/$SESSION_ID/history",
+            ),
+            transport.requests.map { URI(it.url).path },
+        )
+        assertFixtureRequest(transport.requests[0], "runs/status-request.json")
+        assertFixtureRequest(transport.requests[1], "sessions/history-request.json")
     }
 
     @Test

@@ -14,6 +14,7 @@ import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionReposi
 import org.hermesnative.client.feature.entry.data.InMemoryGatewayConnectionDataSource
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
+import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunEvent
@@ -46,6 +47,15 @@ class RunObservationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
+                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(
+                    SessionHistory(
+                        session.id,
+                        listOf(GatewayHistoryMessage("assistant-1", "assistant", "Hello world", run.id, "succeeded")),
+                        null,
+                    ),
+                )
+                enqueueStatus(run.copy(status = "succeeded"))
                 observation =
                     ScriptedObservation(
                         listOf(
@@ -69,10 +79,8 @@ class RunObservationStateHolderTest {
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals(listOf(run.id), gateway.observedRunIds)
             assertEquals(RunPresentationState.SUCCEEDED, opened.latestRunState)
-            assertEquals("Hello world", opened.activeResponse?.content)
-            assertFalse(requireNotNull(opened.activeResponse).isStreaming)
-            assertFalse(requireNotNull(opened.activeResponse).streamInterrupted)
-            assertEquals("active-response:${run.id.value}", opened.activeResponse?.id)
+            assertEquals(listOf("Hello world"), opened.messages.map { it.content })
+            assertTrue(opened.activeResponse == null)
         } finally {
             holder.close()
         }
@@ -197,6 +205,8 @@ class RunObservationStateHolderTest {
         val session: Session,
     ) : SessionGatewayPort, RunGatewayPort {
         private val runResults = ArrayDeque<Run>()
+        private val historyResults = ArrayDeque<SessionHistory>()
+        private val statusResults = ArrayDeque<Run>()
         var observation: RunEventObservation = ScriptedObservation(emptyList())
         val observedRunIds = mutableListOf<RunId>()
         val cancelledRunIds = mutableListOf<RunId>()
@@ -205,13 +215,26 @@ class RunObservationStateHolderTest {
             runResults += run
         }
 
+        fun enqueueHistory(history: SessionHistory) {
+            historyResults += history
+        }
+
+        fun enqueueStatus(run: Run) {
+            statusResults += run
+        }
+
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
 
         override fun createSession(title: String?): Session = error("not used")
 
         override fun openSession(sessionId: SessionId): Session = session
 
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory = SessionHistory(sessionId, emptyList(), null)
+        override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
+            if (historyResults.isEmpty()) {
+                SessionHistory(sessionId, emptyList(), null)
+            } else {
+                historyResults.removeFirst()
+            }
 
         override fun renameSession(
             sessionId: SessionId,
@@ -229,7 +252,12 @@ class RunObservationStateHolderTest {
             input: String,
         ): Run = runResults.removeFirst()
 
-        override fun getRunStatus(runId: RunId): Run = error("not used")
+        override fun getRunStatus(runId: RunId): Run =
+            if (statusResults.isEmpty()) {
+                error("not used")
+            } else {
+                statusResults.removeFirst()
+            }
 
         override fun observeRun(runId: RunId): RunEventObservation {
             observedRunIds += runId

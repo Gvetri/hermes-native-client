@@ -1,15 +1,19 @@
 package org.hermesnative.client.feature.entry.presentation
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Rule
 import org.junit.Test
@@ -73,6 +77,7 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Answer").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Role: assistant").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Message").assertIsDisplayed().assertIsEnabled()
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsDisplayed().assertIsEnabled()
     }
 
@@ -113,7 +118,109 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Preserved content").assertIsDisplayed()
         composeTestRule.onNodeWithText("Preserved draft").assertIsDisplayed()
         composeTestRule.onNodeWithText("Refreshing Session history…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsNotEnabled()
+    }
+
+    @Test
+    fun terminal_reconciliation_shows_stale_progress_and_disables_history_controls_while_retaining_stream() {
+        val sessionId = SessionId("session-1")
+        val runId = RunId("run-terminal")
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "Connected",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session = SessionItemUiState(sessionId, "Session", null, false),
+                                            messages = emptyList(),
+                                            composerText = "Next message",
+                                            isRefreshing = true,
+                                            isStale = true,
+                                            latestRun = Run(runId, sessionId, "succeeded"),
+                                            latestRunState = RunPresentationState.SUCCEEDED,
+                                            activeResponse =
+                                                SessionMessageUiState(
+                                                    id = "streamed-response",
+                                                    role = "assistant",
+                                                    content = "Partial response",
+                                                    runId = runId,
+                                                    runState = RunPresentationState.SUCCEEDED,
+                                                    isStreaming = true,
+                                                ),
+                                            isReconciliationInProgress = true,
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Partial response").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Refreshing Run and Session state…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("The displayed Session history may be stale.").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Refresh history").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Message").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
+    }
+
+    @Test
+    fun unresolved_submission_shows_uncertainty_without_a_synthetic_latest_run_and_disables_send() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "Connected",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            messages =
+                                                listOf(
+                                                    SessionMessageUiState(
+                                                        id = "message-1",
+                                                        role = "user",
+                                                        content = "Preserved content",
+                                                    ),
+                                                ),
+                                            composerText = "Preserved draft",
+                                            sendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
+                                            hasUnresolvedSubmission = true,
+                                            isStale = true,
+                                            errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Preserved content").assertExists()
+        composeTestRule.onNodeWithText("Preserved draft").assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("Latest Run:", substring = true).assertCountEquals(0)
+        composeTestRule
+            .onNodeWithText(MessageSendErrorCategory.UNCERTAIN.safeMessage)
+            .assertIsDisplayed()
+        composeTestRule.onNodeWithText("The displayed Session history may be stale.").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(SessionHistoryErrorCategory.RECONCILIATION_FAILED.safeMessage)
+            .assertExists()
+        composeTestRule.onNodeWithText("Refresh history to resolve").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Refresh history").assertIsEnabled()
     }
 
     @Test
@@ -189,6 +296,7 @@ class SessionHistoryScreenTest {
         composeTestRule
             .onNodeWithText(SessionHistoryErrorCategory.GATEWAY_REQUEST_FAILED.safeMessage)
             .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").assertIsEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsDisplayed().assertIsEnabled()
     }
 

@@ -62,6 +62,8 @@ data class Run(
     val status: String,
 )
 
+const val UNKNOWN_RUN_STATUS = "unknown"
+
 private val terminalRunStatuses =
     setOf(
         "completed",
