@@ -21,8 +21,6 @@ fun decideRunReconciliation(
         RunReconciliationDecision.UNCERTAIN
     }
 
-fun SessionHistory.containsRun(runId: RunId): Boolean = messages.any { it.runId == runId }
-
 fun SessionHistory.containsTerminalRun(run: Run): Boolean {
     val expectedState = run.toRunPresentationState()
     return expectedState.isTerminal() &&
