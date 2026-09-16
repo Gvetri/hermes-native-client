@@ -595,8 +595,7 @@ class EntryStateHolder(
                         restartObservation = true,
                         runIdToReconcile =
                             runIdToReconcile
-                                ?: openedSession.history.latestRun()?.id
-                                    ?.takeUnless { hasUnresolvedSubmission(sessionId) },
+                                ?: historyRunIdToReconcile(sessionId, openedSession),
                         clearRefreshWhenNoRun = true,
                     )
                 }
@@ -2031,9 +2030,7 @@ class EntryStateHolder(
                                     requestConnectionGeneration = requestConnectionGeneration,
                                     sessionGateway = gateway,
                                     restartObservation = true,
-                                    runIdToReconcile =
-                                        openedSession.history.latestRun()?.id
-                                            ?.takeUnless { hasUnresolvedSubmission(sessionId) },
+                                    runIdToReconcile = historyRunIdToReconcile(sessionId, openedSession),
                                 )
                             }
                         }
@@ -2882,6 +2879,11 @@ class EntryStateHolder(
             true
         }
     }
+
+    private fun historyRunIdToReconcile(
+        sessionId: SessionId,
+        openedSession: OpenedSession,
+    ): RunId? = openedSession.history.latestRun()?.id?.takeUnless { hasUnresolvedSubmission(sessionId) }
 }
 
 private fun OpenedSession.toOpenSessionUiState(
