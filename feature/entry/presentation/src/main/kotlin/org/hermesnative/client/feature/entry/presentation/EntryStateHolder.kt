@@ -743,10 +743,15 @@ class EntryStateHolder(
             val current = _uiState.value.sessionList ?: return
             val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
             val run = reconciliation.run
+            val authoritativeRuns = reconciliation.history.runs()
+            forgetConfirmedObservationStates(
+                sessionId,
+                authoritativeRuns.filterNot(Run::isActive).mapTo(mutableSetOf()) { it.id },
+            )
             val knownRuns =
                 mergeRuns(
                     sessionRuns[sessionId].orEmpty(),
-                    reconciliation.history.runs() + run,
+                    authoritativeRuns + run,
                 )
             sessionRuns[sessionId] = knownRuns
             if (!reconciliation.run.isActive()) {
@@ -1214,11 +1219,7 @@ class EntryStateHolder(
         val confirmedRuns = openedSession.history.runs()
         if (confirmedRuns.isNotEmpty()) {
             val confirmedRunIds = confirmedRuns.filterNot(Run::isActive).mapTo(mutableSetOf()) { it.id }
-            val states = runObservationStates[sessionId]
-            states?.keys?.removeAll(confirmedRunIds)
-            if (states?.isEmpty() == true) {
-                runObservationStates.remove(sessionId)
-            }
+            forgetConfirmedObservationStates(sessionId, confirmedRunIds)
             val localRuns = sessionRuns[sessionId].orEmpty()
             val unresolvedRuns =
                 allObservationStates(sessionId)
@@ -2020,6 +2021,7 @@ class EntryStateHolder(
                 return
             }
             current.openedSession?.session?.id?.let { sessionId ->
+                retainUnconfirmedTerminalRuns(sessionId)
                 observationJobToCancel = runObservationJobs.remove(sessionId)
                 observationToClose = runObservations.remove(sessionId)
             }
@@ -2598,7 +2600,27 @@ class EntryStateHolder(
         runs: List<Run>,
     ): RunObservationState? {
         val states = runObservationStates[sessionId] ?: return null
-        return runs.asReversed().firstOrNull { states.containsKey(it.id) }?.let { states[it.id] } ?: states.values.lastOrNull()
+        return runs.asReversed().firstOrNull { states.containsKey(it.id) }?.let { states[it.id] }
+    }
+
+    private fun forgetConfirmedObservationStates(
+        sessionId: SessionId,
+        confirmedRunIds: Set<RunId>,
+    ) {
+        if (confirmedRunIds.isEmpty()) return
+        val states = runObservationStates[sessionId] ?: return
+        states.keys.removeAll(confirmedRunIds)
+        if (states.isEmpty()) {
+            runObservationStates.remove(sessionId)
+        }
+    }
+
+    private fun retainUnconfirmedTerminalRuns(sessionId: SessionId) {
+        val states = runObservationStates[sessionId].orEmpty().values.toList()
+        val terminalStates = states.filter { state -> state.state.isTerminal() || !state.run.isActive() }
+        if (terminalStates.isEmpty()) return
+        terminalStates.forEach { state -> rememberObservationState(uncertainObservationState(state.run, state)) }
+        sessionRuns[sessionId] = mergeRuns(sessionRuns[sessionId].orEmpty(), terminalStates.map(RunObservationState::run))
     }
 
     private fun allObservationStates(sessionId: SessionId): List<RunObservationState> =

@@ -437,6 +437,64 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun returning_after_terminal_event_keeps_reopened_outcome_uncertain_until_history_confirms_it() {
+        val session = session()
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val otherRun = Run(RunId("other-run"), session.id, "succeeded")
+        val otherHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("other", "assistant", "Other result", otherRun.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(otherHistory)
+                histories.add(otherHistory)
+                histories.add(otherHistory)
+                statuses.add(run.copy(status = "succeeded"))
+                statuses.add(run.copy(status = "succeeded"))
+                runs.add(run)
+                observation =
+                    ScriptedObservation(
+                        listOf(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded")),
+                    )
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            gateway.blockNextStatus = true
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            awaitState(holder) { it.sessionList?.openedSession == null }
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.UNCERTAIN &&
+                    gateway.statusRequests.size >= 2
+            }
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertEquals(1, gateway.runRequests.size)
+
+            gateway.releaseStatus.countDown()
+            assertTrue(gateway.statusFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+            }
+        } finally {
+            gateway.releaseStatus.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun send_timeout_refetches_session_history_and_does_not_submit_again() {
         val session = session()
         val otherRun = Run(RunId("other-run"), session.id, "succeeded")
