@@ -40,8 +40,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-private const val TEST_TIMEOUT_MILLIS = 15_000L
-
 class RunReconciliationStateHolderTest {
     @Test
     fun terminal_observation_replaces_temporary_response_with_authoritative_history() {
