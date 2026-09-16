@@ -966,6 +966,117 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun a_blocked_observer_open_keeps_ownership_until_cancellation_finishes_before_next_run() {
+        val session = session()
+        val firstRun = Run(RunId("run-blocked-open-1"), session.id, "starting")
+        val secondRun = Run(RunId("run-blocked-open-2"), session.id, "starting")
+        val firstLateObservation = BlockingObservation()
+        val secondObservation = BlockingObservation()
+        val authoritativeHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed", firstRun.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(authoritativeHistory)
+                statuses.add(firstRun.copy(status = "succeeded"))
+                runs.add(firstRun)
+                runs.add(secondRun)
+                observations.add(firstLateObservation)
+                observations.add(secondObservation)
+                blockNextObservationOpen = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.observationOpenStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    !it.sessionList!!.openedSession!!.isRefreshing
+            }
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Second"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertFalse(gateway.secondObservationRequested.await(100, TimeUnit.MILLISECONDS))
+
+            gateway.releaseObservationOpen.countDown()
+            assertTrue(gateway.observationOpenFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(firstLateObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.secondObservationRequested.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(secondObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertEquals(listOf(firstRun.id, secondRun.id), gateway.observedRunIds)
+        } finally {
+            gateway.releaseObservationOpen.countDown()
+            secondObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun a_delayed_observer_unwind_queues_the_next_run_until_the_previous_job_finishes() {
+        val session = session()
+        val firstRun = Run(RunId("run-delayed-unwind-1"), session.id, "starting")
+        val secondRun = Run(RunId("run-delayed-unwind-2"), session.id, "starting")
+        val firstObservation = DelayedUnwindObservation()
+        val secondObservation = BlockingObservation()
+        val authoritativeHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed", firstRun.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(authoritativeHistory)
+                statuses.add(firstRun.copy(status = "succeeded"))
+                runs.add(firstRun)
+                runs.add(secondRun)
+                observations.add(firstObservation)
+                observations.add(secondObservation)
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    !it.sessionList!!.openedSession!!.isRefreshing
+            }
+            assertTrue(firstObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Second"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertFalse(gateway.secondObservationRequested.await(100, TimeUnit.MILLISECONDS))
+
+            firstObservation.release.countDown()
+            assertTrue(firstObservation.finished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.secondObservationRequested.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(secondObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertEquals(listOf(firstRun.id, secondRun.id), gateway.observedRunIds)
+        } finally {
+            firstObservation.release.countDown()
+            secondObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun reopening_an_observed_run_reconciles_before_resuming_observation() {
         val session = session()
         val run = Run(RunId("run-1"), session.id, "running")
@@ -1682,6 +1793,7 @@ class RunReconciliationStateHolderTest {
         var failHistoryRequest: Int? = null
         var blockNextStatus = false
         var blockSubmissionCompletion = false
+        var blockNextObservationOpen = false
         val runStarted = CountDownLatch(1)
         val submissionCompleted = CountDownLatch(1)
         val runFinished = CountDownLatch(1)
@@ -1691,6 +1803,11 @@ class RunReconciliationStateHolderTest {
         val statusFinished = CountDownLatch(1)
         val releaseStatus = CountDownLatch(1)
         val staleHistoryLoaded = CountDownLatch(1)
+        val observationOpenStarted = CountDownLatch(1)
+        val observationOpenFinished = CountDownLatch(1)
+        val releaseObservationOpen = CountDownLatch(1)
+        val secondObservationRequested = CountDownLatch(1)
+        private val observationRequests = mutableListOf<RunId>()
 
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
 
@@ -1771,6 +1888,28 @@ class RunReconciliationStateHolderTest {
         }
 
         override fun observeRun(runId: RunId): RunEventObservation {
+            val shouldBlockOpen =
+                synchronized(this) {
+                    observationRequests += runId
+                    if (observationRequests.size == 2) {
+                        secondObservationRequested.countDown()
+                    }
+                    blockNextObservationOpen.also { blockNextObservationOpen = false }
+                }
+            if (shouldBlockOpen) {
+                observationOpenStarted.countDown()
+                try {
+                    while (true) {
+                        try {
+                            if (releaseObservationOpen.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) break
+                        } catch (_: InterruptedException) {
+                            // The opening barrier deliberately unwinds only after the test releases it.
+                        }
+                    }
+                } finally {
+                    observationOpenFinished.countDown()
+                }
+            }
             return synchronized(this) {
                 observedRunIds += runId
                 if (observations.isEmpty()) observation else observations.removeFirst()
@@ -1914,6 +2053,41 @@ class RunReconciliationStateHolderTest {
             EntryStateHolder::class.java.declaredMethods.single { it.name.startsWith("historyRunIdToReconcile") }
                 .apply { isAccessible = true }
         return (method.invoke(holder, sessionId.value, openedSession) as String?)?.let(::RunId)
+    }
+
+    private class DelayedUnwindObservation : RunEventObservation {
+        val started = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        private val closeCount = AtomicInteger(0)
+
+        override fun iterator(): Iterator<RunEvent> {
+            started.countDown()
+            return object : Iterator<RunEvent> {
+                override fun hasNext(): Boolean {
+                    return try {
+                        while (!release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                            // The test releases the iterator to complete the cancelled observer's unwind.
+                        }
+                        false
+                    } catch (error: InterruptedException) {
+                        Thread.interrupted()
+                        hasNext()
+                    } finally {
+                        finished.countDown()
+                    }
+                }
+
+                override fun next(): RunEvent = error("not used")
+            }
+        }
+
+        override fun close() {
+            if (closeCount.incrementAndGet() == 1) {
+                closed.countDown()
+            }
+        }
     }
 
     private companion object {
