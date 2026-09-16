@@ -800,7 +800,15 @@ private fun SessionDetailContent(
             enabled = sendEnabled,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
-            Text(text = if (state.sendErrorCategory == null) "Send" else "Try again")
+            Text(
+                text =
+                    when {
+                        state.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN ||
+                            state.hasUnresolvedSubmission -> "Refresh history to resolve"
+                        state.sendErrorCategory != null -> "Try again"
+                        else -> "Send"
+                    },
+            )
         }
         if (state.isSending) {
             Spacer(modifier = Modifier.height(8.dp))

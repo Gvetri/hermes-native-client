@@ -75,6 +75,7 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Answer").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Role: assistant").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Message").assertIsDisplayed().assertIsEnabled()
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsDisplayed().assertIsEnabled()
     }
 
@@ -115,6 +116,7 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Preserved content").assertIsDisplayed()
         composeTestRule.onNodeWithText("Preserved draft").assertIsDisplayed()
         composeTestRule.onNodeWithText("Refreshing Session history…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsNotEnabled()
     }
 
@@ -165,7 +167,8 @@ class SessionHistoryScreenTest {
         composeTestRule
             .onNodeWithText(SessionHistoryErrorCategory.RECONCILIATION_FAILED.safeMessage)
             .assertExists()
-        composeTestRule.onNodeWithText("Try again").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Refresh history to resolve").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Refresh history").assertIsEnabled()
     }
 
     @Test
@@ -241,6 +244,7 @@ class SessionHistoryScreenTest {
         composeTestRule
             .onNodeWithText(SessionHistoryErrorCategory.GATEWAY_REQUEST_FAILED.safeMessage)
             .assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").assertIsEnabled()
         composeTestRule.onNodeWithText("Refresh history").assertIsDisplayed().assertIsEnabled()
     }
 
