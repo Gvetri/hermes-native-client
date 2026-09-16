@@ -2885,7 +2885,10 @@ class EntryStateHolder(
     private fun historyRunIdToReconcile(
         sessionId: SessionId,
         openedSession: OpenedSession,
-    ): RunId? = openedSession.history.latestRun()?.id?.takeUnless { hasUnresolvedSubmission(sessionId) }
+    ): RunId? =
+        synchronized(sessionRequestLock) {
+            openedSession.history.latestRun()?.id?.takeUnless { hasUnresolvedSubmission(sessionId) }
+        }
 }
 
 private fun OpenedSession.toOpenSessionUiState(

@@ -39,8 +39,76 @@ import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class RunReconciliationStateHolderTest {
+    @Test
+    fun history_run_selection_is_atomic_with_unresolved_submission_state() {
+        val session = session()
+        val latestRun = Run(RunId("latest-run"), session.id, "succeeded")
+        val openedSession =
+            org.hermesnative.client.feature.entry.application.OpenedSession(
+                session,
+                SessionHistory(
+                    session.id,
+                    listOf(GatewayHistoryMessage("result", "assistant", "Done", latestRun.id, "succeeded")),
+                    null,
+                ),
+            )
+        val containsEntered = CountDownLatch(1)
+        val releaseContains = CountDownLatch(1)
+        val mutationFinished = CountDownLatch(1)
+        val unresolvedRuns = mutableMapOf<SessionId, RunId>()
+        val blockingRuns =
+            BlockingContainsMap(
+                delegate = unresolvedRuns,
+                entered = containsEntered,
+                release = releaseContains,
+            )
+        val gateway = FakeGateway(session)
+        val holder = holder(gateway)
+        val lock = privateField(holder, "sessionRequestLock")
+        privateField(holder, "uncertainSubmissionRunIds", blockingRuns)
+        val selectedRun = AtomicReference<RunId?>()
+        val selectionFailure = AtomicReference<Throwable?>()
+        val selector =
+            Thread {
+                try {
+                    selectedRun.set(invokeHistoryRunIdToReconcile(holder, session.id, openedSession))
+                } catch (error: Throwable) {
+                    selectionFailure.set(error)
+                }
+            }
+        val mutation =
+            Thread {
+                synchronized(lock) {
+                    unresolvedRuns[session.id] = RunId("unresolved-run")
+                    mutationFinished.countDown()
+                }
+            }
+
+        try {
+            selector.start()
+            assertTrue(containsEntered.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            mutation.start()
+            assertFalse(mutationFinished.await(100, TimeUnit.MILLISECONDS))
+
+            releaseContains.countDown()
+            selector.join(TEST_TIMEOUT_MILLIS)
+            mutation.join(TEST_TIMEOUT_MILLIS)
+
+            assertFalse(selector.isAlive)
+            assertFalse(mutation.isAlive)
+            assertNull(selectionFailure.get())
+            assertEquals(latestRun.id, selectedRun.get())
+        } finally {
+            releaseContains.countDown()
+            if (selector.isAlive) selector.join(TEST_TIMEOUT_MILLIS)
+            if (mutation.isAlive) mutation.join(TEST_TIMEOUT_MILLIS)
+            holder.close()
+        }
+    }
+
     @Test
     fun terminal_observation_replaces_temporary_response_with_authoritative_history() {
         val session = session()
@@ -1802,6 +1870,49 @@ class RunReconciliationStateHolderTest {
             release.countDown()
             if (closeCount.incrementAndGet() == 1) closed.countDown()
         }
+    }
+
+    private class BlockingContainsMap<K, V>(
+        private val delegate: MutableMap<K, V>,
+        private val entered: CountDownLatch,
+        private val release: CountDownLatch,
+    ) : AbstractMutableMap<K, V>() {
+        override val entries: MutableSet<MutableMap.MutableEntry<K, V>>
+            get() = delegate.entries
+
+        override fun put(
+            key: K,
+            value: V,
+        ): V? = delegate.put(key, value)
+
+        override fun containsKey(key: K): Boolean {
+            entered.countDown()
+            check(release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                "Blocked map lookup was not released."
+            }
+            return delegate.containsKey(key)
+        }
+    }
+
+    private fun privateField(
+        holder: EntryStateHolder,
+        name: String,
+        replacement: Any? = null,
+    ): Any {
+        val field = EntryStateHolder::class.java.getDeclaredField(name).apply { isAccessible = true }
+        if (replacement != null) field.set(holder, replacement)
+        return field.get(holder)
+    }
+
+    private fun invokeHistoryRunIdToReconcile(
+        holder: EntryStateHolder,
+        sessionId: SessionId,
+        openedSession: org.hermesnative.client.feature.entry.application.OpenedSession,
+    ): RunId? {
+        val method =
+            EntryStateHolder::class.java.declaredMethods.single { it.name.startsWith("historyRunIdToReconcile") }
+                .apply { isAccessible = true }
+        return (method.invoke(holder, sessionId.value, openedSession) as String?)?.let(::RunId)
     }
 
     private companion object {
