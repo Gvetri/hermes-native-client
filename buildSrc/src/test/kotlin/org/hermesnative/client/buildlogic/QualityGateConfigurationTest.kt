@@ -674,6 +674,7 @@ class QualityGateConfigurationTest {
         val composeJob = workflow.substringAfter("  compose_test:").substringBefore("  api24_instrumentation:")
         val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
 
+        assertTrue("The workflow must run for pull requests.", workflow.contains("on:\n  pull_request:\n"))
         assertTrue("The workflow must schedule the API 24 suite nightly.", workflow.contains("  schedule:\n    - cron:"))
         assertTrue("The workflow must support manual API 24 execution.", workflow.contains("  workflow_dispatch:"))
         assertTrue(
