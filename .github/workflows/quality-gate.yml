@@ -150,6 +150,9 @@ jobs:
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -326,6 +329,68 @@ jobs:
         run: |
           printf '%s\n' 'Android instrumentation failed. See the sanitized failure evidence artifact.' >&2
           exit 1
+
+  create_nightly_failure_issue:
+    name: create-nightly-failure-issue
+    if: ${{ always() && github.event_name == 'schedule' && needs.api24_instrumentation.result != 'success' }}
+    needs: api24_instrumentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: nightly-failure-issue-${{ github.repository }}-${{ github.run_id }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Resolve and download sanitized failure evidence
+        id: evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: android-test-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          evidence_dir=artifacts/android-test-evidence
+          mkdir -p "$evidence_dir"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT_NAME" --dir "$evidence_dir"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+          python3 - "$RUNNER_TEMP/artifacts.json" "$ARTIFACT_NAME" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_OUTPUT" <<'PY'
+          from pathlib import Path
+          import json
+          import sys
+
+          artifacts_payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          expected_name = sys.argv[2]
+          server_url = sys.argv[3].rstrip("/")
+          repository = sys.argv[4]
+          run_id = sys.argv[5]
+          output_file = Path(sys.argv[6])
+          pages = artifacts_payload if artifacts_payload and isinstance(artifacts_payload[0], dict) else [artifacts_payload]
+          matches = []
+          for page in pages:
+              for artifact in page.get("artifacts", []):
+                  if artifact.get("name") == expected_name and artifact.get("expired") is False:
+                      matches.append(artifact)
+          if len(matches) != 1:
+              raise SystemExit(f"Expected one retained artifact named {expected_name}, found {len(matches)}.")
+          artifact_id = matches[0].get("id")
+          if not isinstance(artifact_id, int):
+              raise SystemExit("The retained artifact has no numeric ID.")
+          artifact_url = f"{server_url}/{repository}/actions/runs/{run_id}/artifacts/{artifact_id}"
+          with output_file.open("a", encoding="utf-8") as output:
+              output.write(f"artifact_id={artifact_id}\n")
+              output.write(f"artifact_url={artifact_url}\n")
+          PY
+      - name: Create nightly failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.evidence.outputs.artifact_id }}
+          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact_url }}
+        run: .github/scripts/create-nightly-failure-issue.sh
 
   quality-gate:
     name: quality-gate
