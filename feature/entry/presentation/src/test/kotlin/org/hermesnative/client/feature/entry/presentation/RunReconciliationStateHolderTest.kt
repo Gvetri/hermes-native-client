@@ -357,7 +357,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun a_later_history_run_correlated_to_the_timed_out_draft_resolves_the_unresolved_submission() {
+    fun a_same_text_external_run_does_not_resolve_a_timed_out_submission() {
         val session = session()
         val realRun = Run(RunId("run-later"), session.id, "succeeded")
         val realHistory =
@@ -391,15 +391,21 @@ class RunReconciliationStateHolderTest {
 
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             awaitState(holder) {
-                it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRun?.id == realRun.id &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
-                    it.sessionList?.openedSession?.sendErrorCategory == null
+                val opened = it.sessionList?.openedSession
+                opened?.isRefreshing == false &&
+                    opened.latestRun?.id == realRun.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.composerText == "Keep this draft"
             }
-            assertEquals(listOf(realRun.id), gateway.statusRequests)
+            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertEquals(listOf("user", "assistant"), opened.messages.map { it.id })
             assertEquals(1, gateway.runRequests.size)
             assertTrue(gateway.observedRunIds.isEmpty())
-            assertEquals("", requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).composerText)
+            @Suppress("UNCHECKED_CAST")
+            val localRuns = (privateField(holder, "sessionRuns") as Map<SessionId, List<Run>>)[session.id].orEmpty()
+            assertTrue(localRuns.none { it.id == realRun.id })
         } finally {
             gateway.releaseRun.countDown()
             holder.close()
@@ -443,6 +449,11 @@ class RunReconciliationStateHolderTest {
 
         try {
             open(holder, gateway)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRun?.id == baselineRun.id &&
+                    !it.sessionList?.openedSession!!.isRefreshing &&
+                    !it.sessionList?.openedSession!!.isReconciliationInProgress
+            }
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             awaitState(holder) {
@@ -523,7 +534,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun reopened_timed_out_send_observes_the_correlated_active_run_not_a_later_unrelated_run() {
+    fun reopened_timed_out_send_keeps_same_text_external_run_authoritative_only() {
         val session = session()
         val correlatedRun = Run(RunId("run-correlated"), session.id, "running")
         val unrelatedRun = Run(RunId("run-unrelated"), session.id, "running")
@@ -561,15 +572,20 @@ class RunReconciliationStateHolderTest {
             assertTrue(gateway.submissionCompleted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
-            assertTrue(correlatedObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertEquals(listOf(correlatedRun.id), gateway.observedRunIds)
             awaitState(holder) {
-                it.sessionList?.openedSession?.isSending == false &&
-                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
-                    it.sessionList?.openedSession?.latestRun?.id == unrelatedRun.id &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.RUNNING &&
-                    it.sessionList?.openedSession?.activeResponse == null
+                val opened = it.sessionList?.openedSession
+                opened?.isSending == false &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    opened.latestRun?.id == unrelatedRun.id &&
+                    opened.latestRunState == RunPresentationState.RUNNING &&
+                    opened.activeResponse == null &&
+                    opened.hasUnresolvedSubmission
             }
+            assertFalse(correlatedObservation.started.await(100, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.observedRunIds.none { it == correlatedRun.id })
+            @Suppress("UNCHECKED_CAST")
+            val localRuns = (privateField(holder, "sessionRuns") as Map<SessionId, List<Run>>)[session.id].orEmpty()
+            assertTrue(localRuns.none { it.id == correlatedRun.id || it.id == unrelatedRun.id })
         } finally {
             gateway.releaseRun.countDown()
             correlatedObservation.release.countDown()
@@ -580,7 +596,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun confirmed_timed_out_run_does_not_replace_the_latest_unrelated_run_state() {
+    fun timed_out_external_run_does_not_resolve_the_unresolved_submission() {
         val session = session()
         val submittedRun = Run(RunId("run-submitted"), session.id, "succeeded")
         val laterRun = Run(RunId("run-later"), session.id, "failed")
@@ -610,11 +626,17 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             awaitState(holder) {
-                it.sessionList?.openedSession?.isSending == false &&
-                    it.sessionList?.openedSession?.latestRun?.id == laterRun.id &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.FAILED &&
-                    it.sessionList?.openedSession?.sendErrorCategory == null
+                val opened = it.sessionList?.openedSession
+                opened?.isSending == false &&
+                    opened.latestRun?.id == laterRun.id &&
+                    opened.latestRunState == RunPresentationState.FAILED &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.composerText == "Keep this draft"
             }
+            @Suppress("UNCHECKED_CAST")
+            val localRuns = (privateField(holder, "sessionRuns") as Map<SessionId, List<Run>>)[session.id].orEmpty()
+            assertTrue(localRuns.none { it.id == submittedRun.id || it.id == laterRun.id })
         } finally {
             gateway.releaseRun.countDown()
             holder.close()
@@ -1316,21 +1338,32 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun send_timeout_refetches_session_history_and_does_not_submit_again() {
+    fun send_timeout_applies_authoritative_history_while_preserving_the_uncertain_draft() {
         val session = session()
         val otherRun = Run(RunId("other-run"), session.id, "succeeded")
         val otherHistory =
             SessionHistory(
                 session.id,
-                listOf(GatewayHistoryMessage("other", "assistant", "Existing result", otherRun.id, "succeeded")),
+                listOf(
+                    GatewayHistoryMessage(
+                        "other",
+                        "assistant",
+                        "Existing result",
+                        otherRun.id,
+                        "succeeded",
+                        "External result",
+                        "2026-09-08T21:00:00Z",
+                    ),
+                ),
                 null,
             )
         val gateway =
             FakeGateway(session).apply {
                 histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
                 histories.add(otherHistory)
                 histories.add(otherHistory)
+                histories.add(otherHistory)
+                statuses.add(otherRun)
                 blockRunCreation = true
             }
         val holder = holder(gateway, Dispatchers.Default, sendTimeoutMillis = 50L)
@@ -1345,13 +1378,19 @@ class RunReconciliationStateHolderTest {
                 val opened = it.sessionList?.openedSession
                 opened?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
                     !opened.isRefreshing &&
-                    !opened.isReconciliationInProgress
+                    !opened.isReconciliationInProgress &&
+                    opened.latestRun?.id == otherRun.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.messages.map { message -> message.id } == listOf("other") &&
+                    opened.messages.single().runResult == "External result" &&
+                    opened.messages.single().timestamp?.toString() == "2026-09-08T21:00:00Z" &&
+                    opened.composerText == "Keep this draft"
             }
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals("Keep this draft", opened.composerText)
             assertFalse(opened.isSending)
-            assertNull(opened.latestRun)
-            assertNull(opened.latestRunState)
+            assertEquals(otherRun.id, opened.latestRun?.id)
+            assertEquals(RunPresentationState.SUCCEEDED, opened.latestRunState)
             assertTrue(opened.activeRuns.isEmpty())
             assertTrue(opened.hasUnresolvedSubmission)
             assertTrue(gateway.observedRunIds.isEmpty())
@@ -1360,14 +1399,19 @@ class RunReconciliationStateHolderTest {
             assertFalse(gateway.observedRunIds.contains(syntheticId))
             assertEquals(1, gateway.runRequests.size)
             assertEquals(2, gateway.historyRequests)
+            assertEquals(listOf(otherRun.id), gateway.statusRequests)
 
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             awaitState(holder) {
-                it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRun?.id == otherRun.id &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
-                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
-                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true
+                val opened = it.sessionList?.openedSession
+                opened?.isRefreshing == false &&
+                    opened.latestRun?.id == otherRun.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.messages.map { message -> message.id } == listOf("other") &&
+                    opened.messages.single().runResult == "External result" &&
+                    opened.messages.single().timestamp?.toString() == "2026-09-08T21:00:00Z"
             }
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
             awaitState(holder) { it.sessionList?.openedSession == null }
@@ -1382,7 +1426,7 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertEquals(1, gateway.runRequests.size)
             assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
-            assertTrue(gateway.statusRequests.isEmpty())
+            assertEquals(listOf(otherRun.id), gateway.statusRequests)
             assertTrue(gateway.observedRunIds.isEmpty())
             assertEquals(4, gateway.historyRequests)
         } finally {

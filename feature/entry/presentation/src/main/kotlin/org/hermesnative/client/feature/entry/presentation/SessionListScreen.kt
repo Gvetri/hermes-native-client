@@ -837,6 +837,9 @@ private fun SessionMessageContent(message: SessionMessageUiState) {
         message.content?.takeIf(String::isNotBlank)?.let { content ->
             Text(text = content)
         }
+        message.runId?.let { runId ->
+            Text(text = "Run ID: ${runId.value}")
+        }
         message.runState?.let { runState ->
             Text(
                 text = "Run state: ${runState.label}",
