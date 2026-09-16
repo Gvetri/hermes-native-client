@@ -36,6 +36,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.ArrayDeque
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -1838,11 +1839,12 @@ class RunReconciliationStateHolderTest {
         val histories = ArrayDeque<SessionHistory>()
         val statuses = ArrayDeque<Run>()
         val runs = ArrayDeque<Run>()
-        val runRequests = mutableListOf<Pair<SessionId, String>>()
-        val statusRequests = mutableListOf<RunId>()
-        val observedRunIds = mutableListOf<RunId>()
+        val runRequests: MutableList<Pair<SessionId, String>> = CopyOnWriteArrayList()
+        val statusRequests: MutableList<RunId> = CopyOnWriteArrayList()
+        val observedRunIds: MutableList<RunId> = CopyOnWriteArrayList()
         val observations = ArrayDeque<RunEventObservation>()
-        var historyRequests = 0
+        private val historyRequestCount = AtomicInteger(0)
+        val historyRequests: Int get() = historyRequestCount.get()
         var observation: RunEventObservation = ScriptedObservation(emptyList())
         var blockRunCreation = false
         var failRunCreation = false
@@ -1874,7 +1876,7 @@ class RunReconciliationStateHolderTest {
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory {
             val (history, shouldFail) =
                 synchronized(this) {
-                    historyRequests += 1
+                    historyRequestCount.incrementAndGet()
                     val history =
                         if (histories.isEmpty()) {
                             SessionHistory(sessionId, emptyList(), null)
