@@ -363,6 +363,7 @@ class RunReconciliationStateHolderTest {
                 histories.add(terminalHistory)
                 statuses.add(terminalRun)
                 runs.add(terminalRun)
+                blockRunCreation = true
                 blockSubmissionCompletion = true
             }
         val holder = holder(gateway, Dispatchers.Default)
@@ -371,7 +372,9 @@ class RunReconciliationStateHolderTest {
             open(holder, gateway)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run off screen"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            gateway.releaseRun.countDown()
             assertTrue(gateway.submissionCompleted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
