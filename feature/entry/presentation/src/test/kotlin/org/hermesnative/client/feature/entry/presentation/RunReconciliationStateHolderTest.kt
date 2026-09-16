@@ -459,6 +459,7 @@ class RunReconciliationStateHolderTest {
             }
             assertEquals(listOf(terminalRun.id), gateway.statusRequests)
         } finally {
+            gateway.releaseRun.countDown()
             gateway.releaseSubmissionCompletion.countDown()
             holder.close()
         }
