@@ -1,10 +1,12 @@
 package org.hermesnative.client.feature.entry.data
 
+import kotlinx.serialization.json.jsonObject
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.io.File
 
 class GatewayHistoryMapperTest {
     @Test
@@ -38,6 +40,61 @@ class GatewayHistoryMapperTest {
         assertEquals("completed", message.runStatus)
         assertEquals("Done", message.runResult)
         assertEquals("2026-09-08T20:00:00Z", message.timestamp)
+    }
+
+    @Test
+    fun external_runs_contract_fixture_maps_mixed_run_metadata_without_local_content() {
+        val repositoryRoot = File(requireNotNull(System.getProperty("fixture.repositoryRoot")))
+        val envelope =
+            GatewayJsonParser.parseObject(
+                "external Session history fixture",
+                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-external-runs.json").readText(),
+            )
+        val body = envelope["response"]!!.jsonObject["body"]!!.jsonObject
+        val history = GatewayJsonParser.parseHistory("external Session history fixture", body)
+
+        assertEquals(
+            listOf("external-run-failed", "external-run-succeeded"),
+            history.messages.map { it.runId?.value },
+        )
+        assertEquals(listOf("failed", "succeeded"), history.messages.map { it.runStatus })
+        assertEquals(listOf("Remote failure", "Remote result"), history.messages.map { it.runResult })
+        assertEquals(
+            listOf("2026-09-08T20:00:00Z", "2026-09-08T21:00:00Z"),
+            history.messages.map { it.timestamp },
+        )
+        assertEquals(null, history.messages.first().role)
+        assertEquals(null, history.messages.first().content)
+    }
+
+    @Test
+    fun mixed_runs_contract_fixture_maps_local_and_external_run_metadata_in_gateway_order() {
+        val repositoryRoot = File(requireNotNull(System.getProperty("fixture.repositoryRoot")))
+        val envelope =
+            GatewayJsonParser.parseObject(
+                "mixed Session history fixture",
+                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-mixed-runs.json").readText(),
+            )
+        val body = envelope["response"]!!.jsonObject["body"]!!.jsonObject
+        val history = GatewayJsonParser.parseHistory("mixed Session history fixture", body)
+
+        assertEquals(
+            listOf("local-run-created", "external-run-failed", "external-run-succeeded", "local-run-created"),
+            history.messages.map { it.runId?.value },
+        )
+        assertEquals(listOf("succeeded", "failed", "succeeded", "succeeded"), history.messages.map { it.runStatus })
+        assertEquals(listOf(null, "Remote failure", "Remote result", "Local result"), history.messages.map { it.runResult })
+        assertEquals(
+            listOf(
+                "2026-09-08T19:00:00Z",
+                "2026-09-08T20:00:00Z",
+                "2026-09-08T21:00:00Z",
+                "2026-09-08T22:00:00Z",
+            ),
+            history.messages.map { it.timestamp },
+        )
+        assertEquals(listOf(null, null, null, null), history.messages.map { it.role })
+        assertEquals(listOf(null, null, null, null), history.messages.map { it.content })
     }
 
     @Test
