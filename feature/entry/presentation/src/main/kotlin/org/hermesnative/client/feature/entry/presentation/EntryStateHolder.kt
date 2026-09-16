@@ -2360,8 +2360,8 @@ class EntryStateHolder(
                     isBoundSubmission ||
                         hadUnresolvedSubmission ||
                         uncertainSubmissionRunIds[sessionId] == null
-                val submittedDraft = pendingRunDrafts.remove(sessionId) ?: recoveryDraft
-                if (sessionDrafts[sessionId] == submittedDraft) {
+                val consumedDraft = pendingRunDrafts.remove(sessionId) ?: recoveryDraft
+                if (sessionDrafts[sessionId] == consumedDraft) {
                     sessionDrafts.remove(sessionId)
                 }
                 if (decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
