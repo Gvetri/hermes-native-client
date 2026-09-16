@@ -155,7 +155,6 @@ enum class EntryErrorCategory(
 private const val SESSION_SEARCH_DEBOUNCE_MILLIS = 300L
 private const val DEFAULT_SEND_TIMEOUT_MILLIS = 30_000L
 private const val UNCERTAIN_RUN_STATUS = "uncertain"
-private const val UNCERTAIN_SEND_RUN_PREFIX = "uncertain-send:"
 
 data class EntryUiState(
     val title: String,
@@ -203,7 +202,7 @@ class EntryStateHolder(
     private val runObservationJobs = mutableMapOf<SessionId, Job>()
     private val runObservations = mutableMapOf<SessionId, RunEventObservation>()
     private val runObservationStates = mutableMapOf<SessionId, MutableMap<RunId, RunObservationState>>()
-    private val uncertainSendRunIds = mutableMapOf<SessionId, RunId>()
+    private val unresolvedSubmissionSessions = mutableSetOf<SessionId>()
     private val uncertainSendKnownRunIds = mutableMapOf<SessionId, Set<RunId>>()
     private val uncertainSendDrafts = mutableMapOf<SessionId, String>()
     private val uncertainSubmissionRunIds = mutableMapOf<SessionId, RunId>()
@@ -262,7 +261,7 @@ class EntryStateHolder(
                 runObservationJobs.clear()
                 runObservations.clear()
                 runObservationStates.clear()
-                uncertainSendRunIds.clear()
+                unresolvedSubmissionSessions.clear()
                 uncertainSendKnownRunIds.clear()
                 uncertainSendDrafts.clear()
                 uncertainSubmissionRunIds.clear()
@@ -398,7 +397,7 @@ class EntryStateHolder(
                     runObservationJobs.clear()
                     runObservations.clear()
                     runObservationStates.clear()
-                    uncertainSendRunIds.clear()
+                    unresolvedSubmissionSessions.clear()
                     uncertainSendKnownRunIds.clear()
                     uncertainSendDrafts.clear()
                     uncertainSubmissionRunIds.clear()
@@ -562,7 +561,7 @@ class EntryStateHolder(
                             openedSession =
                                 openedSession.toOpenSessionUiState(
                                     composerText = sessionDrafts[sessionId] ?: previous.composerText,
-                                    sendErrorCategory = sessionSendErrors[sessionId],
+                                    sendErrorCategory = sendErrorCategoryFor(sessionId),
                                     hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
                                     latestRun = latestRun,
                                     activeRuns = knownRuns.activeRuns(),
@@ -619,18 +618,12 @@ class EntryStateHolder(
     ) {
         val run =
             synchronized(sessionRequestLock) {
-                if (runIdToReconcile?.let { uncertainSendRunIds[sessionId] == it } == true) {
-                    null
-                } else {
-                    val candidate =
-                        sessionRuns[sessionId].orEmpty().lastOrNull { it.id == runIdToReconcile }
-                            ?: runIdToReconcile?.let { runId -> observationStateFor(sessionId, runId)?.run }
-                            ?: sessionRuns[sessionId].orEmpty().latestActiveRun()
-                            ?: latestObservedObservationState(sessionId, sessionRuns[sessionId].orEmpty())
-                                ?.takeIf { state -> !state.state.isTerminal() }
-                                ?.run
-                    candidate?.takeUnless { it.isUncertainSendRun() }
-                }
+                sessionRuns[sessionId].orEmpty().lastOrNull { it.id == runIdToReconcile }
+                    ?: runIdToReconcile?.let { runId -> observationStateFor(sessionId, runId)?.run }
+                    ?: sessionRuns[sessionId].orEmpty().latestActiveRun()
+                    ?: latestObservedObservationState(sessionId, sessionRuns[sessionId].orEmpty())
+                        ?.takeIf { state -> !state.state.isTerminal() }
+                        ?.run
             }
         if (run == null) {
             if (clearRefreshWhenNoRun) {
@@ -650,7 +643,6 @@ class EntryStateHolder(
         if (
             restartObservation &&
             reconciledRun.isActive() &&
-            !reconciledRun.isUncertainSendRun() &&
             shouldReconcileCurrentSession(requestConnectionGeneration, requestSessionGeneration, sessionId)
         ) {
             startRunObservation(sessionId, reconciledRun)
@@ -792,7 +784,7 @@ class EntryStateHolder(
             val isBoundSubmission = uncertainSubmissionRunIds[sessionId] == run.id
             val canClearSendState =
                 isBoundSubmission ||
-                    (uncertainSubmissionRunIds[sessionId] == null && uncertainSendRunIds[sessionId] == null)
+                    (uncertainSubmissionRunIds[sessionId] == null && !unresolvedSubmissionSessions.contains(sessionId))
             if (decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
                 if (isBoundSubmission) {
                     uncertainSubmissionRunIds.remove(sessionId)
@@ -910,20 +902,12 @@ class EntryStateHolder(
             isStreaming = false,
         )
 
-    private fun uncertainSendRun(sessionId: SessionId): Run {
-        val run = Run(RunId("$UNCERTAIN_SEND_RUN_PREFIX${sessionId.value}"), sessionId, UNCERTAIN_RUN_STATUS)
-        uncertainSendRunIds[sessionId] = run.id
-        return run
-    }
-
-    private fun Run.isUncertainSendRun(): Boolean = uncertainSendRunIds[sessionId] == id
-
     private fun hasUnresolvedSubmission(sessionId: SessionId): Boolean =
-        uncertainSubmissionRunIds.containsKey(sessionId) || uncertainSendRunIds.containsKey(sessionId)
+        unresolvedSubmissionSessions.contains(sessionId) || uncertainSubmissionRunIds.containsKey(sessionId)
 
-    private fun List<Run>.withoutUncertainSendRun(): List<Run> = filterNot { run -> run.isUncertainSendRun() }
-
-    private fun List<Run>.latestActiveRun(): Run? = lastOrNull { it.isActive() && !it.isUncertainSendRun() }
+    private fun sendErrorCategoryFor(sessionId: SessionId): MessageSendErrorCategory? =
+        sessionSendErrors[sessionId]
+            ?: MessageSendErrorCategory.UNCERTAIN.takeIf { hasUnresolvedSubmission(sessionId) }
 
     private fun markTimedOutSendUncertain(
         sessionId: SessionId,
@@ -931,18 +915,11 @@ class EntryStateHolder(
         opened: OpenSessionUiState,
         recoveryDraft: String? = null,
     ): Boolean {
-        val uncertainRun = uncertainSendRun(sessionId)
-        val knownRuns =
-            mergeRuns(
-                sessionRuns[sessionId].orEmpty(),
-                listOf(uncertainRun),
-            )
-        val previous = observationStateFor(sessionId, uncertainRun.id)
-        val uncertainState = uncertainObservationState(uncertainRun, previous)
+        unresolvedSubmissionSessions += sessionId
         pendingRunDrafts.remove(sessionId)?.let { uncertainSendDrafts[sessionId] = it }
             ?: recoveryDraft?.let { uncertainSendDrafts[sessionId] = it }
-        sessionRuns[sessionId] = knownRuns
-        rememberObservationState(uncertainState)
+        val knownRuns = sessionRuns[sessionId].orEmpty()
+        val latestObservation = latestObservationState(sessionId, knownRuns)
         _uiState.value =
             _uiState.value.copy(
                 sessionList =
@@ -952,8 +929,8 @@ class EntryStateHolder(
                                 isSending = false,
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
-                                latestRunState = RunPresentationState.UNCERTAIN,
-                                activeResponse = uncertainState.toSessionMessageUiState(),
+                                latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                activeResponse = latestObservation?.toSessionMessageUiState(),
                                 sendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
                                 hasUnresolvedSubmission = true,
                                 errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
@@ -1270,14 +1247,13 @@ class EntryStateHolder(
     ): List<Run> {
         val confirmedRuns = openedSession.history.runs()
         if (confirmedRuns.isNotEmpty()) {
-            val placeholderId = uncertainSendRunIds[sessionId]
-            val knownRunIds = placeholderId?.let { uncertainSendKnownRunIds[sessionId] }
+            val unresolved = hasUnresolvedSubmission(sessionId)
+            val knownRunIds = uncertainSendKnownRunIds[sessionId].takeIf { unresolved }
             val candidates = knownRunIds?.let { baseline -> confirmedRuns.filterNot { it.id in baseline } }.orEmpty()
             val submittedDraft = uncertainSendDrafts[sessionId]
             val replacementRun = openedSession.history.correlatedRun(candidates, submittedDraft)
             if (replacementRun != null) {
-                forgetObservationState(sessionId, requireNotNull(placeholderId))
-                uncertainSendRunIds.remove(sessionId)
+                unresolvedSubmissionSessions.remove(sessionId)
                 uncertainSendKnownRunIds.remove(sessionId)
                 uncertainSubmissionRunIds[sessionId] = replacementRun.id
                 rememberObservationState(
@@ -1287,7 +1263,7 @@ class EntryStateHolder(
                     ),
                 )
             }
-            val localRuns = sessionRuns[sessionId].orEmpty().filterNot { it.id == placeholderId && replacementRun != null }
+            val localRuns = sessionRuns[sessionId].orEmpty()
             val retainedLocalRuns =
                 localRuns.filter(Run::isActive) + allObservationStates(sessionId).map(RunObservationState::run)
             sessionRuns[sessionId] = mergeRuns(confirmedRuns, retainedLocalRuns)
@@ -2024,7 +2000,7 @@ class EntryStateHolder(
                                     openedSession =
                                         openedSession.toOpenSessionUiState(
                                             composerText = sessionDrafts[sessionId].orEmpty(),
-                                            sendErrorCategory = sessionSendErrors[sessionId],
+                                            sendErrorCategory = sendErrorCategoryFor(sessionId),
                                             hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
                                             latestRun = latestRun,
                                             activeRuns = knownRuns.activeRuns(),
@@ -2136,7 +2112,7 @@ class EntryStateHolder(
                             openedSession =
                                 opened.copy(
                                     composerText = value,
-                                    sendErrorCategory = null,
+                                    sendErrorCategory = sendErrorCategoryFor(opened.session.id),
                                 ),
                         ),
                 )
@@ -2371,20 +2347,17 @@ class EntryStateHolder(
                 val run = discoveredRun
                 val knownRuns =
                     mergeRuns(
-                        sessionRuns[sessionId].orEmpty().withoutUncertainSendRun(),
+                        sessionRuns[sessionId].orEmpty(),
                         reconciliation.history.runs() + run,
                     )
                 sessionRuns[sessionId] = knownRuns
                 pendingTimedOutSends.remove(sessionId)
-                val uncertainSendRunId = uncertainSendRunIds.remove(sessionId)
+                val hadUnresolvedSubmission = unresolvedSubmissionSessions.remove(sessionId)
                 uncertainSendKnownRunIds.remove(sessionId)
-                if (uncertainSendRunId != null) {
-                    forgetObservationState(sessionId, uncertainSendRunId)
-                }
                 val isBoundSubmission = uncertainSubmissionRunIds[sessionId] == run.id
                 val isSubmissionCandidate =
                     isBoundSubmission ||
-                        uncertainSendRunId != null ||
+                        hadUnresolvedSubmission ||
                         uncertainSubmissionRunIds[sessionId] == null
                 val submittedDraft = pendingRunDrafts.remove(sessionId) ?: recoveryDraft
                 if (sessionDrafts[sessionId] == submittedDraft) {
@@ -2946,6 +2919,8 @@ private fun RunObservationState.toSessionMessageUiState(): SessionMessageUiState
 private fun SessionHistory.latestRun(): Run? = runs().latestRun()
 
 private fun List<Run>.latestRun(): Run? = lastOrNull()
+
+private fun List<Run>.latestActiveRun(): Run? = lastOrNull(Run::isActive)
 
 private fun List<Run>.activeRuns(): List<Run> = filter(Run::isActive)
 

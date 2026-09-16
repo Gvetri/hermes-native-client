@@ -32,6 +32,7 @@ import org.hermesnative.client.feature.entry.domain.SessionPage
 import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.ArrayDeque
@@ -233,7 +234,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun a_later_history_run_correlated_to_the_timed_out_draft_replaces_the_synthetic_uncertainty() {
+    fun a_later_history_run_correlated_to_the_timed_out_draft_resolves_the_unresolved_submission() {
         val session = session()
         val realRun = Run(RunId("run-later"), session.id, "succeeded")
         val realHistory =
@@ -283,7 +284,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun an_old_same_text_message_does_not_replace_uncertainty_with_an_unrelated_new_run() {
+    fun an_old_same_text_message_does_not_resolve_an_unrelated_new_run() {
         val session = session()
         val baselineRun = Run(RunId("baseline-run"), session.id, "succeeded")
         val unrelatedRun = Run(RunId("unrelated-run"), session.id, "succeeded")
@@ -321,14 +322,20 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             awaitState(holder) {
-                it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == baselineRun.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    opened.hasUnresolvedSubmission
             }
 
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             awaitState(holder) {
                 it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRun?.id != unrelatedRun.id &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    it.sessionList?.openedSession?.latestRun?.id == unrelatedRun.id &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
                     it.sessionList?.openedSession?.composerText == "Keep this draft"
             }
             assertTrue(gateway.statusRequests.isEmpty())
@@ -616,7 +623,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun timed_out_send_does_not_adopt_an_unrelated_run_from_initial_history_reconciliation() {
+    fun timed_out_send_retains_unrelated_run_visibility_without_resolving_submission() {
         val session = session()
         val otherRun = Run(RunId("other-run"), session.id, "succeeded")
         val otherHistory =
@@ -644,8 +651,11 @@ class RunReconciliationStateHolderTest {
             }
 
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-            assertEquals(RunPresentationState.UNCERTAIN, opened.latestRunState)
-            assertTrue(opened.latestRun?.id != otherRun.id)
+            assertEquals(otherRun, opened.latestRun)
+            assertTrue(opened.activeRuns.isEmpty())
+            assertEquals(RunPresentationState.SUCCEEDED, opened.latestRunState)
+            assertEquals(MessageSendErrorCategory.UNCERTAIN, opened.sendErrorCategory)
+            assertTrue(opened.hasUnresolvedSubmission)
             assertEquals("Keep this draft", opened.composerText)
             assertEquals(listOf(otherRun.id), gateway.statusRequests)
 
@@ -681,7 +691,9 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitState(holder) {
                 it.sessionList?.openedSession?.isSending == false &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
+                    it.sessionList?.openedSession?.latestRun == null &&
+                    it.sessionList?.openedSession?.latestRunState == null &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
                     it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
             }
 
@@ -1094,25 +1106,34 @@ class RunReconciliationStateHolderTest {
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals("Keep this draft", opened.composerText)
             assertFalse(opened.isSending)
-            assertEquals(RunPresentationState.UNCERTAIN, opened.latestRunState)
-            val uncertainRun = requireNotNull(opened.latestRun)
-            assertEquals(listOf(uncertainRun), opened.activeRuns)
+            assertNull(opened.latestRun)
+            assertNull(opened.latestRunState)
+            assertTrue(opened.activeRuns.isEmpty())
+            assertTrue(opened.hasUnresolvedSubmission)
             assertTrue(gateway.observedRunIds.isEmpty())
+            val syntheticId = RunId("uncertain-send:${session.id.value}")
+            assertFalse(gateway.statusRequests.contains(syntheticId))
+            assertFalse(gateway.observedRunIds.contains(syntheticId))
             assertEquals(1, gateway.runRequests.size)
             assertEquals(2, gateway.historyRequests)
 
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             awaitState(holder) {
                 it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+                    it.sessionList?.openedSession?.latestRun?.id == otherRun.id &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true
             }
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
             awaitState(holder) { it.sessionList?.openedSession == null }
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitState(holder) {
                 it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
-                    it.sessionList?.openedSession?.latestRun?.id != otherRun.id
+                    it.sessionList?.openedSession?.latestRun?.id == otherRun.id &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true
             }
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertEquals(1, gateway.runRequests.size)
@@ -1267,7 +1288,7 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun failed_timeout_reconciliation_exposes_an_uncertain_run_state() {
+    fun failed_timeout_reconciliation_exposes_uncertainty_without_a_synthetic_run() {
         val session = session()
         val gateway =
             FakeGateway(session).apply {
@@ -1287,9 +1308,10 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
             }
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-            assertEquals(RunPresentationState.UNCERTAIN, opened.latestRunState)
-            val uncertainRun = requireNotNull(opened.latestRun)
-            assertEquals(listOf(uncertainRun), opened.activeRuns)
+            assertNull(opened.latestRun)
+            assertNull(opened.latestRunState)
+            assertTrue(opened.activeRuns.isEmpty())
+            assertTrue(opened.hasUnresolvedSubmission)
             assertFalse(opened.isSending)
         } finally {
             gateway.releaseRun.countDown()

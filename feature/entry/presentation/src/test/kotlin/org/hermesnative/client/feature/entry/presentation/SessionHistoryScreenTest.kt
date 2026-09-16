@@ -11,9 +11,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
-import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunId
-import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Rule
 import org.junit.Test
@@ -121,8 +119,7 @@ class SessionHistoryScreenTest {
     }
 
     @Test
-    fun uncertain_run_preserves_temporary_content_and_disables_send() {
-        val runId = RunId("run-1")
+    fun unresolved_submission_shows_uncertainty_without_a_synthetic_latest_run_and_disables_send() {
         composeTestRule.setContent {
             HermesTheme {
                 EntryScreen(
@@ -146,17 +143,8 @@ class SessionHistoryScreenTest {
                                                     ),
                                                 ),
                                             composerText = "Preserved draft",
-                                            latestRun = Run(runId, SessionId("session-1"), "failed"),
-                                            latestRunState = RunPresentationState.UNCERTAIN,
-                                            activeResponse =
-                                                SessionMessageUiState(
-                                                    id = "active-response:run-1",
-                                                    role = "assistant",
-                                                    content = "Partial response",
-                                                    runId = runId,
-                                                    runState = RunPresentationState.UNCERTAIN,
-                                                    streamInterrupted = true,
-                                                ),
+                                            sendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
+                                            hasUnresolvedSubmission = true,
                                             isStale = true,
                                             errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                                         ),
@@ -168,18 +156,16 @@ class SessionHistoryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Preserved content").assertExists()
-        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
-        composeTestRule.onNodeWithText("Partial response").assertExists()
         composeTestRule.onNodeWithText("Preserved draft").assertIsDisplayed()
-        val uncertainRunStateNodes = composeTestRule.onAllNodesWithText("Run state: Uncertain")
-        uncertainRunStateNodes.assertCountEquals(2)
-        uncertainRunStateNodes[0].assertIsDisplayed()
-        uncertainRunStateNodes[1].assertExists()
+        composeTestRule.onAllNodesWithText("Latest Run:", substring = true).assertCountEquals(0)
+        composeTestRule
+            .onNodeWithText(MessageSendErrorCategory.UNCERTAIN.safeMessage)
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText("The displayed Session history may be stale.").assertIsDisplayed()
         composeTestRule
             .onNodeWithText(SessionHistoryErrorCategory.RECONCILIATION_FAILED.safeMessage)
             .assertExists()
-        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Try again").assertIsNotEnabled()
     }
 
     @Test
