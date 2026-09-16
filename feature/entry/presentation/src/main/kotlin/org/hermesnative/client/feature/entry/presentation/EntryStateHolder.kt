@@ -51,7 +51,6 @@ import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionReconciliation
-import org.hermesnative.client.feature.entry.domain.decideRunReconciliation
 import org.hermesnative.client.feature.entry.domain.isActive
 import org.hermesnative.client.feature.entry.domain.isTerminal
 import org.hermesnative.client.feature.entry.domain.runs
@@ -201,7 +200,7 @@ class EntryStateHolder(
     private val sessionSendErrors = mutableMapOf<SessionId, MessageSendErrorCategory>()
     private val pendingRunDrafts = mutableMapOf<SessionId, String>()
 
-    /** Runs created or adopted for an in-flight local submission; history-only Runs never enter this map. */
+    /** Runs returned by a local createRun response; history-only Runs never enter this map. */
     private val sessionRuns = mutableMapOf<SessionId, List<Run>>()
     private val authoritativeSessionRuns = mutableMapOf<SessionId, List<Run>>()
     private val runObservationJobs = mutableMapOf<SessionId, Job>()
@@ -209,7 +208,6 @@ class EntryStateHolder(
     private val pendingRunObservationRequests = mutableMapOf<SessionId, ObserverStartRequest>()
     private val runObservationStates = mutableMapOf<SessionId, MutableMap<RunId, RunObservationState>>()
     private val unresolvedSubmissionSessions = mutableSetOf<SessionId>()
-    private val uncertainSendKnownRunIds = mutableMapOf<SessionId, Set<RunId>>()
     private val uncertainSendDrafts = mutableMapOf<SessionId, String>()
     private val uncertainSubmissionRunIds = mutableMapOf<SessionId, RunId>()
     private val pendingTimedOutSends = mutableMapOf<SessionId, TimedOutSendRecovery>()
@@ -269,7 +267,6 @@ class EntryStateHolder(
                 pendingRunObservationRequests.clear()
                 runObservationStates.clear()
                 unresolvedSubmissionSessions.clear()
-                uncertainSendKnownRunIds.clear()
                 uncertainSendDrafts.clear()
                 uncertainSubmissionRunIds.clear()
                 pendingTimedOutSends.clear()
@@ -408,7 +405,6 @@ class EntryStateHolder(
                     pendingRunObservationRequests.clear()
                     runObservationStates.clear()
                     unresolvedSubmissionSessions.clear()
-                    uncertainSendKnownRunIds.clear()
                     uncertainSendDrafts.clear()
                     uncertainSubmissionRunIds.clear()
                     pendingTimedOutSends.clear()
@@ -932,6 +928,7 @@ class EntryStateHolder(
         current: SessionListUiState,
         opened: OpenSessionUiState,
         recoveryDraft: String? = null,
+        authoritativeMessages: List<SessionMessageUiState>? = null,
     ): Boolean {
         unresolvedSubmissionSessions += sessionId
         pendingRunDrafts.remove(sessionId)?.let { uncertainSendDrafts[sessionId] = it }
@@ -944,6 +941,7 @@ class EntryStateHolder(
                     current.copy(
                         openedSession =
                             opened.copy(
+                                messages = authoritativeMessages ?: opened.messages,
                                 isSending = false,
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
@@ -1263,27 +1261,7 @@ class EntryStateHolder(
         sessionId: SessionId,
         openedSession: OpenedSession,
     ): List<Run> {
-        val authoritativeRuns = openedSession.history.runs()
-        authoritativeSessionRuns[sessionId] = authoritativeRuns
-        if (authoritativeRuns.isNotEmpty()) {
-            val unresolved = hasUnresolvedSubmission(sessionId)
-            val knownRunIds = uncertainSendKnownRunIds[sessionId].takeIf { unresolved }
-            val candidates = knownRunIds?.let { baseline -> authoritativeRuns.filterNot { it.id in baseline } }.orEmpty()
-            val submittedDraft = uncertainSendDrafts[sessionId]
-            val replacementRun = openedSession.history.correlatedRun(candidates, submittedDraft)
-            if (replacementRun != null) {
-                unresolvedSubmissionSessions.remove(sessionId)
-                uncertainSendKnownRunIds.remove(sessionId)
-                uncertainSubmissionRunIds[sessionId] = replacementRun.id
-                sessionRuns[sessionId] = mergeRuns(sessionRuns[sessionId].orEmpty(), listOf(replacementRun))
-                rememberObservationState(
-                    uncertainObservationState(
-                        replacementRun,
-                        observationStateFor(sessionId, replacementRun.id),
-                    ),
-                )
-            }
-        }
+        authoritativeSessionRuns[sessionId] = openedSession.history.runs()
         val localRunIds = sessionRuns[sessionId].orEmpty().mapTo(mutableSetOf()) { it.id }
         val retainedLocalRuns =
             sessionRuns[sessionId].orEmpty().filter(Run::isActive) +
@@ -2286,15 +2264,6 @@ class EntryStateHolder(
         knownRunIds: Set<RunId>,
     ): Boolean {
         if (!beginReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)) return false
-        synchronized(sessionRequestLock) {
-            if (
-                connectionGeneration == requestConnectionGeneration &&
-                sessionRequestGeneration == requestSessionGeneration &&
-                _uiState.value.sessionList?.openedSession?.session?.id == sessionId
-            ) {
-                uncertainSendKnownRunIds[sessionId] = knownRunIds
-            }
-        }
         return try {
             val gateways =
                 synchronized(sessionRequestLock) {
@@ -2366,112 +2335,22 @@ class EntryStateHolder(
                 current.openedSession?.takeIf { it.session.id == sessionId }
                     ?: return@synchronized TimedOutSendReconciliationOutcome(applied = false)
             val recoveryDraft = pendingTimedOutSends[sessionId]?.draft
-            val submittedDraft = pendingRunDrafts[sessionId] ?: recoveryDraft ?: uncertainSendDrafts[sessionId]
-            val discoveredRun = reconciliation.history.correlatedRun(reconciliation.discoveredRuns, submittedDraft)
-            if (discoveredRun == null) {
-                authoritativeSessionRuns[sessionId] =
-                    mergeRuns(
-                        authoritativeSessionRuns[sessionId].orEmpty(),
-                        reconciliation.history.runs(),
-                    )
-                markTimedOutSendUncertain(sessionId, current, opened, recoveryDraft)
-                pendingTimedOutSends.remove(sessionId)
-                TimedOutSendReconciliationOutcome(applied = true)
-            } else {
-                val decision = decideRunReconciliation(discoveredRun, reconciliation.history)
-                val run = discoveredRun
-                val hadUnresolvedSubmission = unresolvedSubmissionSessions.contains(sessionId)
-                val isBoundSubmission = uncertainSubmissionRunIds[sessionId] == run.id
-                val isSubmissionCandidate =
-                    isBoundSubmission ||
-                        hadUnresolvedSubmission ||
-                        uncertainSubmissionRunIds[sessionId] == null
-                authoritativeSessionRuns[sessionId] = mergeRuns(reconciliation.history.runs(), listOf(run))
-                if (isSubmissionCandidate) {
-                    sessionRuns[sessionId] = mergeRuns(sessionRuns[sessionId].orEmpty(), listOf(run))
-                }
-                val knownRuns = visibleSessionRuns(sessionId)
-                pendingTimedOutSends.remove(sessionId)
-                unresolvedSubmissionSessions.remove(sessionId)
-                uncertainSendKnownRunIds.remove(sessionId)
-                val consumedDraft = pendingRunDrafts.remove(sessionId) ?: recoveryDraft
-                if (sessionDrafts[sessionId] == consumedDraft) {
-                    sessionDrafts.remove(sessionId)
-                }
-                if (decision == RunReconciliationDecision.CONFIRMED) {
-                    if (isSubmissionCandidate) {
-                        uncertainSubmissionRunIds.remove(sessionId)
-                    }
-                } else if (isSubmissionCandidate) {
-                    uncertainSubmissionRunIds[sessionId] = run.id
-                }
-                val latestRun = knownRuns.latestRun()
-                if (decision == RunReconciliationDecision.CONFIRMED) {
-                    val canClearSendState = isSubmissionCandidate
-                    val uncertainDraft = if (canClearSendState) uncertainSendDrafts.remove(sessionId) else null
-                    if (canClearSendState) {
-                        sessionSendErrors.remove(sessionId)
-                        if (uncertainDraft != null && sessionDrafts[sessionId] == uncertainDraft) {
-                            sessionDrafts.remove(sessionId)
-                        }
-                    }
-                    forgetObservationState(sessionId, run.id)
-                    val latestObservation = latestObservationState(sessionId, knownRuns)
-                    _uiState.value =
-                        _uiState.value.copy(
-                            sessionList =
-                                current.copy(
-                                    openedSession =
-                                        opened.copy(
-                                            messages = reconciliation.history.messages.map { it.toSessionMessageUiState() }.chronological(),
-                                            composerText = sessionDrafts[sessionId].orEmpty(),
-                                            latestRun = latestRun,
-                                            activeRuns = knownRuns.activeRuns(),
-                                            isSending = false,
-                                            sendErrorCategory = if (canClearSendState) null else opened.sendErrorCategory,
-                                            hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                                            latestRunState = latestRun?.toRunPresentationState(),
-                                            activeResponse = latestObservation?.toSessionMessageUiState(),
-                                            errorCategory = null,
-                                            isStale = false,
-                                        ),
-                                ),
-                        )
-                } else {
-                    val previous = observationStateFor(sessionId, run.id)
-                    val uncertainState = uncertainObservationState(run, previous)
-                    rememberObservationState(uncertainState)
-                    val latestObservation = latestObservationState(sessionId, knownRuns)
-                    _uiState.value =
-                        _uiState.value.copy(
-                            sessionList =
-                                current.copy(
-                                    openedSession =
-                                        opened.copy(
-                                            composerText = sessionDrafts[sessionId].orEmpty(),
-                                            latestRun = latestRun,
-                                            activeRuns = knownRuns.activeRuns(),
-                                            isSending = false,
-                                            sendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
-                                            hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                                            latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                                            activeResponse = latestObservation?.toSessionMessageUiState(),
-                                            errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
-                                            isStale = true,
-                                        ),
-                                ),
-                        )
-                }
-                TimedOutSendReconciliationOutcome(
-                    applied = true,
-                    runToObserve =
-                        run.takeIf {
-                            isSubmissionCandidate &&
-                                decision != RunReconciliationDecision.CONFIRMED &&
-                                it.isActive()
-                        },
-                )
-            }
+            val authoritativeRuns =
+                mergeRuns(reconciliation.history.runs(), reconciliation.discoveredRuns)
+            authoritativeSessionRuns[sessionId] =
+                mergeRuns(authoritativeSessionRuns[sessionId].orEmpty(), authoritativeRuns)
+            markTimedOutSendUncertain(
+                sessionId = sessionId,
+                current = current,
+                opened = opened,
+                recoveryDraft = recoveryDraft,
+                authoritativeMessages =
+                    reconciliation.history.messages
+                        .map { it.toSessionMessageUiState() }
+                        .chronological(),
+            )
+            pendingTimedOutSends.remove(sessionId)
+            TimedOutSendReconciliationOutcome(applied = true)
         }
 
     private fun showTimedOutSendFailure(
@@ -3087,21 +2966,6 @@ private fun mergeRuns(
         .associateBy { it.id }
         .values
         .toList()
-
-private fun SessionHistory.correlatedRun(
-    candidates: List<Run>,
-    submittedDraft: String?,
-): Run? {
-    val draft = submittedDraft ?: return null
-    return candidates
-        .filter { candidate ->
-            messages.any { message ->
-                message.runId == candidate.id &&
-                    message.role?.trim()?.equals("user", ignoreCase = true) == true &&
-                    message.content == draft
-            }
-        }.singleOrNull()
-}
 
 private data class ObserverStartRequest(
     val run: Run,

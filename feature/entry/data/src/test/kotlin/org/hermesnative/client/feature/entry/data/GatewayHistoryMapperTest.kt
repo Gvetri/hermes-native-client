@@ -68,6 +68,36 @@ class GatewayHistoryMapperTest {
     }
 
     @Test
+    fun mixed_runs_contract_fixture_maps_local_and_external_run_metadata_in_gateway_order() {
+        val repositoryRoot = File(requireNotNull(System.getProperty("fixture.repositoryRoot")))
+        val envelope =
+            GatewayJsonParser.parseObject(
+                "mixed Session history fixture",
+                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-mixed-runs.json").readText(),
+            )
+        val body = envelope["response"]!!.jsonObject["body"]!!.jsonObject
+        val history = GatewayJsonParser.parseHistory("mixed Session history fixture", body)
+
+        assertEquals(
+            listOf("local-run-created", "external-run-failed", "external-run-succeeded", "local-run-created"),
+            history.messages.map { it.runId?.value },
+        )
+        assertEquals(listOf("succeeded", "failed", "succeeded", "succeeded"), history.messages.map { it.runStatus })
+        assertEquals(listOf(null, "Remote failure", "Remote result", "Local result"), history.messages.map { it.runResult })
+        assertEquals(
+            listOf(
+                "2026-09-08T19:00:00Z",
+                "2026-09-08T20:00:00Z",
+                "2026-09-08T21:00:00Z",
+                "2026-09-08T22:00:00Z",
+            ),
+            history.messages.map { it.timestamp },
+        )
+        assertEquals(listOf("user", null, null, "assistant"), history.messages.map { it.role })
+        assertEquals(listOf("Local request", null, null, "Local result"), history.messages.map { it.content })
+    }
+
+    @Test
     fun absent_optional_run_fields_remain_unavailable() {
         val root =
             GatewayJsonParser.parseObject(

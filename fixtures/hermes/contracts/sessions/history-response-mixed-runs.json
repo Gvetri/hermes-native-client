@@ -1,0 +1,48 @@
+{
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "response": {
+    "status": 200,
+    "body": {
+      "session_id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
+      "messages": [
+        {
+          "id": "local-message-user",
+          "role": "user",
+          "content": "Local request",
+          "run_id": "local-run-created",
+          "run_status": "succeeded",
+          "run_result": null,
+          "timestamp": "2026-09-08T19:00:00Z"
+        },
+        {
+          "id": "external-message-failed",
+          "role": null,
+          "content": null,
+          "run_id": "external-run-failed",
+          "run_status": "failed",
+          "run_result": "Remote failure",
+          "timestamp": "2026-09-08T20:00:00Z"
+        },
+        {
+          "id": "external-message-succeeded",
+          "role": null,
+          "content": null,
+          "run_id": "external-run-succeeded",
+          "run_status": "succeeded",
+          "run_result": "Remote result",
+          "timestamp": "2026-09-08T21:00:00Z"
+        },
+        {
+          "id": "local-message-result",
+          "role": "assistant",
+          "content": "Local result",
+          "run_id": "local-run-created",
+          "run_status": "succeeded",
+          "run_result": "Local result",
+          "timestamp": "2026-09-08T22:00:00Z"
+        }
+      ],
+      "next_cursor": null
+    }
+  }
+}

@@ -154,6 +154,32 @@ class ContractFixtureParserTest {
         assertEquals("Remote result", externalMessages[1].jsonObject["run_result"]!!.jsonPrimitive.content)
         assertEquals("2026-09-08T21:00:00Z", externalMessages[1].jsonObject["timestamp"]!!.jsonPrimitive.content)
 
+        val mixedRuns = parseJson("sessions/history-response-mixed-runs.json")
+        val mixedMessages =
+            mixedRuns.root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!.jsonArray
+        assertEquals(4, mixedMessages.size)
+        assertEquals(
+            listOf("local-run-created", "external-run-failed", "external-run-succeeded", "local-run-created"),
+            mixedMessages.map { it.jsonObject["run_id"]!!.jsonPrimitive.content },
+        )
+        assertEquals(
+            listOf("succeeded", "failed", "succeeded", "succeeded"),
+            mixedMessages.map { it.jsonObject["run_status"]!!.jsonPrimitive.content },
+        )
+        assertEquals("Local request", mixedMessages[0].jsonObject["content"]!!.jsonPrimitive.content)
+        assertEquals(JsonNull, mixedMessages[1].jsonObject["content"])
+        assertEquals("Remote result", mixedMessages[2].jsonObject["run_result"]!!.jsonPrimitive.content)
+        assertEquals("Local result", mixedMessages[3].jsonObject["run_result"]!!.jsonPrimitive.content)
+        assertEquals(
+            listOf(
+                "2026-09-08T19:00:00Z",
+                "2026-09-08T20:00:00Z",
+                "2026-09-08T21:00:00Z",
+                "2026-09-08T22:00:00Z",
+            ),
+            mixedMessages.map { it.jsonObject["timestamp"]!!.jsonPrimitive.content },
+        )
+
         assertRequest(renameRequest, "PATCH", "/v1/sessions/$SESSION_ID")
         assertEquals("Renamed session", renameRequest.requiredString("request.body.title"))
         assertEquals(200, renameResponse.requiredInt("response.status"))

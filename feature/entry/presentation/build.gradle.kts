@@ -57,6 +57,7 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.okhttp)
     testImplementation(project(":feature:entry:data"))
     testImplementation(project(":fixtures:hermes:runner"))

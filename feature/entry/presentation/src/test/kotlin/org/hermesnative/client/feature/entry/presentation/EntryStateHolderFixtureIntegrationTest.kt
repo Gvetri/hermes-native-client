@@ -6,6 +6,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayClient
@@ -670,6 +675,153 @@ class EntryStateHolderFixtureIntegrationTest {
         }
     }
 
+    @Test
+    fun mixed_local_and_external_runs_keep_only_created_run_in_local_recovery_registry() {
+        val sessionId = "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70"
+        val session = SessionId(sessionId)
+        val localRun = Run(RunId("local-run-created"), session, "succeeded")
+        val externalHistory = historyFromContractFixture()
+        val mixedHistory =
+            listOf(
+                SyntheticGatewayMessage(
+                    id = "local-message-user",
+                    role = "user",
+                    content = "Local request",
+                    runId = localRun.id.value,
+                    runStatus = "succeeded",
+                    runResult = null,
+                    timestamp = "2026-09-08T19:00:00Z",
+                ),
+            ) + externalHistory +
+                listOf(
+                    SyntheticGatewayMessage(
+                        id = "local-message-result",
+                        role = "assistant",
+                        content = "Local result",
+                        runId = localRun.id.value,
+                        runStatus = "succeeded",
+                        runResult = "Local result",
+                        timestamp = "2026-09-08T22:00:00Z",
+                    ),
+                )
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions =
+                    listOf(
+                        SyntheticGatewaySession(
+                            id = sessionId,
+                            title = "Mixed runs",
+                            preview = null,
+                            pinned = false,
+                            updatedAt = "2026-09-08T22:00:00Z",
+                            history = externalHistory,
+                        ),
+                    ),
+            )
+        val externalFailed = RunId("external-run-failed")
+        val externalSucceeded = RunId("external-run-succeeded")
+        val runGateway =
+            FixtureRunGateway(
+                statuses =
+                    mapOf(
+                        localRun.id to localRun,
+                        externalFailed to Run(externalFailed, session, "failed"),
+                        externalSucceeded to Run(externalSucceeded, session, "succeeded"),
+                    ),
+                createdRun = localRun,
+            )
+
+        fixture(behavior).execute { context ->
+            val client = client(context)
+            val holder =
+                EntryStateHolder(
+                    initialState = EntryState(isGatewayConnectionConfigured = false),
+                    verifyGatewayConnection =
+                        VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
+                            GatewayCapabilities(requiredCapabilities)
+                        },
+                    scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                    sessionGatewayFactory = { _, _ -> client },
+                    runGatewayFactory = { _, _ -> runGateway },
+                )
+            try {
+                connect(holder)
+                holder.onEvent(EntryUiEvent.SessionClicked(session))
+                awaitState(holder) { state ->
+                    val opened = state.sessionList?.openedSession
+                    opened?.messages?.map { it.runId?.value } ==
+                        listOf(externalFailed.value, externalSucceeded.value) &&
+                        opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                        !opened.isRefreshing
+                }
+
+                behavior.sessions[0] = behavior.sessions.single().copy(history = mixedHistory)
+                holder.onEvent(EntryUiEvent.ComposerTextChanged("Local request"))
+                holder.onEvent(EntryUiEvent.SendMessageClicked)
+                awaitState(holder) { state ->
+                    val opened = state.sessionList?.openedSession
+                    opened?.messages?.map { it.id } ==
+                        listOf(
+                            "local-message-user",
+                            "external-message-failed",
+                            "external-message-succeeded",
+                            "local-message-result",
+                        ) &&
+                        opened.latestRun?.id == localRun.id &&
+                        opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                        opened.sendErrorCategory == null &&
+                        !opened.hasUnresolvedSubmission &&
+                        !opened.isSending
+                }
+
+                assertEquals(listOf(session to "Local request"), runGateway.createdRunRequests)
+                val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+                assertEquals(
+                    listOf(localRun.id, externalFailed, externalSucceeded, localRun.id),
+                    opened.messages.map { it.runId },
+                )
+                assertEquals(
+                    listOf("succeeded", "failed", "succeeded", "succeeded"),
+                    opened.messages.map { it.runStatus },
+                )
+                assertEquals(
+                    listOf(null, "Remote failure", "Remote result", "Local result"),
+                    opened.messages.map { it.runResult },
+                )
+                assertEquals(
+                    listOf(
+                        "2026-09-08T19:00:00Z",
+                        "2026-09-08T20:00:00Z",
+                        "2026-09-08T21:00:00Z",
+                        "2026-09-08T22:00:00Z",
+                    ),
+                    opened.messages.map { it.timestamp?.toString() },
+                )
+                @Suppress("UNCHECKED_CAST")
+                val localRuns =
+                    (
+                        EntryStateHolder::class.java.getDeclaredField("sessionRuns").apply { isAccessible = true }
+                            .get(holder) as Map<SessionId, List<Run>>
+                    )[session].orEmpty()
+                assertTrue(localRuns.any { it.id == localRun.id })
+                assertTrue(localRuns.none { it.id == externalFailed || it.id == externalSucceeded })
+
+                holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+                awaitState(holder) { state ->
+                    val refreshed = state.sessionList?.openedSession
+                    refreshed?.messages?.map { it.runId } ==
+                        listOf(localRun.id, externalFailed, externalSucceeded, localRun.id) &&
+                        refreshed.latestRun?.id == localRun.id &&
+                        !refreshed.isRefreshing
+                }
+                assertNoExternalRunInLocalRecoveryRegistry(holder, session, setOf(externalFailed, externalSucceeded))
+            } finally {
+                holder.close()
+            }
+        }
+    }
+
     private fun assertExternalHistoryVisible(
         holder: EntryStateHolder,
         failedRunId: RunId,
@@ -697,6 +849,27 @@ class EntryStateHolderFixtureIntegrationTest {
         @Suppress("UNCHECKED_CAST")
         val localRuns = (field.get(holder) as Map<SessionId, List<Run>>)[sessionId].orEmpty()
         assertTrue(localRuns.none { it.id in externalRunIds })
+    }
+
+    private fun historyFromContractFixture(): List<SyntheticGatewayMessage> {
+        val root =
+            Json.parseToJsonElement(
+                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-external-runs.json").readText(),
+            ).jsonObject
+        val messages =
+            root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!.jsonArray
+        return messages.map { element ->
+            val message = element.jsonObject
+            SyntheticGatewayMessage(
+                id = message["id"]!!.jsonPrimitive.content,
+                role = message["role"]?.jsonPrimitive?.contentOrNull,
+                content = message["content"]?.jsonPrimitive?.contentOrNull,
+                runId = message["run_id"]?.jsonPrimitive?.contentOrNull,
+                runStatus = message["run_status"]?.jsonPrimitive?.contentOrNull,
+                runResult = message["run_result"]?.jsonPrimitive?.contentOrNull,
+                timestamp = message["timestamp"]?.jsonPrimitive?.contentOrNull,
+            )
+        }
     }
 
     private fun client(
@@ -774,13 +947,18 @@ class EntryStateHolderFixtureIntegrationTest {
 
     private class FixtureRunGateway(
         private val statuses: Map<RunId, Run>,
+        private val createdRun: Run? = null,
     ) : RunGatewayPort {
         val statusRequests = CopyOnWriteArrayList<RunId>()
+        val createdRunRequests = CopyOnWriteArrayList<Pair<SessionId, String>>()
 
         override fun createRun(
             sessionId: SessionId,
             input: String,
-        ): Run = error("not used")
+        ): Run {
+            createdRunRequests += sessionId to input
+            return requireNotNull(createdRun) { "Run creation is not configured for this fixture." }
+        }
 
         override fun getRunStatus(runId: RunId): Run {
             statusRequests += runId
