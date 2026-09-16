@@ -43,12 +43,14 @@ import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunObservationState
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
+import org.hermesnative.client.feature.entry.domain.RunReconciliationDecision
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
+import org.hermesnative.client.feature.entry.domain.SessionReconciliation
 import org.hermesnative.client.feature.entry.domain.decideRunReconciliation
 import org.hermesnative.client.feature.entry.domain.isActive
 import org.hermesnative.client.feature.entry.domain.isTerminal
@@ -769,7 +771,7 @@ class EntryStateHolder(
             val authoritativeRuns = reconciliation.history.runs()
             val terminalRunIds =
                 authoritativeRuns.filterNot(Run::isActive).mapTo(mutableSetOf()) { it.id }
-            if (decision != org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
+            if (decision != RunReconciliationDecision.CONFIRMED) {
                 terminalRunIds.remove(run.id)
             }
             forgetConfirmedObservationStates(sessionId, terminalRunIds)
@@ -785,7 +787,7 @@ class EntryStateHolder(
             }
             val isBoundSubmission = uncertainSubmissionRunIds[sessionId] == run.id
             val canClearSendState = isBoundSubmission
-            if (decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
+            if (decision == RunReconciliationDecision.CONFIRMED) {
                 if (isBoundSubmission) {
                     uncertainSubmissionRunIds.remove(sessionId)
                 }
@@ -2322,7 +2324,7 @@ class EntryStateHolder(
         sessionId: SessionId,
         requestConnectionGeneration: Long,
         requestSessionGeneration: Long,
-        reconciliation: org.hermesnative.client.feature.entry.domain.SessionReconciliation,
+        reconciliation: SessionReconciliation,
     ): TimedOutSendReconciliationOutcome =
         synchronized(sessionRequestLock) {
             if (
@@ -2364,7 +2366,7 @@ class EntryStateHolder(
                 if (sessionDrafts[sessionId] == consumedDraft) {
                     sessionDrafts.remove(sessionId)
                 }
-                if (decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
+                if (decision == RunReconciliationDecision.CONFIRMED) {
                     if (isSubmissionCandidate) {
                         uncertainSubmissionRunIds.remove(sessionId)
                     }
@@ -2372,7 +2374,7 @@ class EntryStateHolder(
                     uncertainSubmissionRunIds[sessionId] = run.id
                 }
                 val latestRun = knownRuns.latestRun()
-                if (decision == org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED) {
+                if (decision == RunReconciliationDecision.CONFIRMED) {
                     val canClearSendState = isSubmissionCandidate
                     val uncertainDraft = if (canClearSendState) uncertainSendDrafts.remove(sessionId) else null
                     if (canClearSendState) {
@@ -2433,7 +2435,7 @@ class EntryStateHolder(
                     runToObserve =
                         run.takeIf {
                             isSubmissionCandidate &&
-                                decision != org.hermesnative.client.feature.entry.domain.RunReconciliationDecision.CONFIRMED &&
+                                decision != RunReconciliationDecision.CONFIRMED &&
                                 it.isActive()
                         },
                 )
