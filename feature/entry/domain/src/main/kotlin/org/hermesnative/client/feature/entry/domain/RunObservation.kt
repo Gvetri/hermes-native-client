@@ -119,6 +119,7 @@ object RunEventStateTransition {
                 when (status.trim().lowercase(Locale.ROOT)) {
                     "", "completed", "complete", "succeeded", "success" -> RunPresentationState.SUCCEEDED
                     "failed", "failure", "error" -> RunPresentationState.FAILED
+                    "cancelled", "canceled" -> RunPresentationState.CANCELLED
                     else -> RunPresentationState.UNCERTAIN
                 }
         }
