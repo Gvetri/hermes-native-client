@@ -651,6 +651,17 @@ class QualityGateConfigurationTest {
                 assertTrue(summary.contains("## API 24 instrumentation: ${scenario.expectedResult}"))
                 assertTrue(summary.contains("- Failure category: `${scenario.expectedCategory}`"))
                 assertTrue(summary.contains("[Open run artifacts](${scenario.artifactUrl})"))
+
+                Files.delete(summaryFile)
+                val unavailableReport = runWorkflowShell(
+                    reportScript,
+                    tempDir.toFile(),
+                    reportEnvironment + mapOf("ARTIFACT_URL" to "", "FINALIZE_OUTCOME" to "failure"),
+                )
+                assertEquals(unavailableReport.output, 0, unavailableReport.exitCode)
+                val unavailableSummary = Files.readString(summaryFile)
+                assertTrue(unavailableSummary.contains("- Diagnostic artifacts: Not uploaded."))
+                assertTrue(!unavailableSummary.contains("[Open run artifacts]"))
             } finally {
                 tempDir.toFile().deleteRecursively()
             }
