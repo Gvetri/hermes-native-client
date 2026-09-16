@@ -132,10 +132,17 @@ class QualityGateConfigurationTest {
                 "    if: \${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}",
             ),
         )
+        assertTrue(
+            "Cancellation must be evaluated in a permitted step condition before finalization.",
+            emulatorJob.contains("        id: workflow_cancellation\n        if: \${{ cancelled() }}") &&
+                emulatorJob.indexOf("        id: workflow_cancellation") < emulatorJob.indexOf("        id: finalize_android_evidence"),
+        )
         assertEquals(
             "Finalization and reporting must each receive the workflow cancellation state.",
             2,
-            emulatorJob.lines().count { it.trim() == "WORKFLOW_CANCELLED: \${{ cancelled() }}" },
+            emulatorJob.lines().count {
+                it.trim() == "WORKFLOW_CANCELLED: \${{ steps.workflow_cancellation.outcome == 'success' || job.status == 'cancelled' }}"
+            },
         )
         assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 20"))
         assertTrue("The workflow must preserve successful test classification.", emulatorJob.contains("category=success"))

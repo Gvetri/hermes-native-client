@@ -190,13 +190,17 @@ jobs:
           script: |
             .github/scripts/android-test-evidence.sh
 
+      - name: Record workflow cancellation
+        id: workflow_cancellation
+        if: ${{ cancelled() }}
+        run: printf '%s\n' 'Workflow cancellation detected.'
       - name: Finalize Android test evidence
         id: finalize_android_evidence
         if: ${{ always() }}
         env:
           ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
           JOB_STATUS: ${{ job.status }}
-          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          WORKFLOW_CANCELLED: ${{ steps.workflow_cancellation.outcome == 'success' || job.status == 'cancelled' }}
         run: |
           set -euo pipefail
           evidence_dir=artifacts/android-test-evidence
@@ -281,7 +285,7 @@ jobs:
           ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
           FINALIZE_OUTCOME: ${{ steps.finalize_android_evidence.outcome }}
           ARTIFACT_URL: ${{ steps.upload_android_evidence.outputs.artifact-url }}
-          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          WORKFLOW_CANCELLED: ${{ steps.workflow_cancellation.outcome == 'success' || job.status == 'cancelled' }}
         run: |
           set -euo pipefail
           category=unknown
@@ -309,7 +313,10 @@ jobs:
           fi
           {
             printf '## API 24 instrumentation: %s\n\n' "$result"
+            # The backticks are Markdown formatting, not shell substitutions.
+            # shellcheck disable=SC2016
             printf -- '- Result: `%s`\n' "$result"
+            # shellcheck disable=SC2016
             printf -- '- Failure category: `%s`\n' "$category"
             printf -- '- Diagnostic artifacts: [Open run artifacts](%s)\n' "$artifact_url"
           } >> "$GITHUB_STEP_SUMMARY"
