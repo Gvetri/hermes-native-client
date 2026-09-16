@@ -141,6 +141,19 @@ class ContractFixtureParserTest {
         assertEquals(JsonNull, populatedMessage["run_result"])
         assertEquals("2026-09-08T20:00:00Z", populatedMessage["timestamp"]!!.jsonPrimitive.content)
 
+        val externalRuns = parseJson("sessions/history-response-external-runs.json")
+        val externalMessages =
+            externalRuns.root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!.jsonArray
+        assertEquals(2, externalMessages.size)
+        assertEquals("external-run-failed", externalMessages[0].jsonObject["run_id"]!!.jsonPrimitive.content)
+        assertEquals("failed", externalMessages[0].jsonObject["run_status"]!!.jsonPrimitive.content)
+        assertEquals("Remote failure", externalMessages[0].jsonObject["run_result"]!!.jsonPrimitive.content)
+        assertEquals("2026-09-08T20:00:00Z", externalMessages[0].jsonObject["timestamp"]!!.jsonPrimitive.content)
+        assertEquals("external-run-succeeded", externalMessages[1].jsonObject["run_id"]!!.jsonPrimitive.content)
+        assertEquals("succeeded", externalMessages[1].jsonObject["run_status"]!!.jsonPrimitive.content)
+        assertEquals("Remote result", externalMessages[1].jsonObject["run_result"]!!.jsonPrimitive.content)
+        assertEquals("2026-09-08T21:00:00Z", externalMessages[1].jsonObject["timestamp"]!!.jsonPrimitive.content)
+
         assertRequest(renameRequest, "PATCH", "/v1/sessions/$SESSION_ID")
         assertEquals("Renamed session", renameRequest.requiredString("request.body.title"))
         assertEquals(200, renameResponse.requiredInt("response.status"))

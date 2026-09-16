@@ -301,6 +301,61 @@ class SessionHistoryScreenTest {
     }
 
     @Test
+    fun mixed_local_and_external_runs_show_gateway_identity_status_result_and_timestamp() {
+        val externalRunId = RunId("external-run")
+        val localRunId = RunId("local-run")
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        EntryUiState(
+                            title = "Gateway connected",
+                            supportingText = "Connected",
+                            actionLabel = "Connected",
+                            isConnected = true,
+                            sessionList =
+                                SessionListUiState(
+                                    openedSession =
+                                        OpenSessionUiState(
+                                            session = SessionItemUiState(SessionId("session-1"), "Shared Session", null, false),
+                                            messages =
+                                                listOf(
+                                                    SessionMessageUiState(
+                                                        id = "external-message",
+                                                        role = null,
+                                                        content = null,
+                                                        runId = externalRunId,
+                                                        runStatus = "failed",
+                                                        runResult = "Gateway failure",
+                                                        timestamp = java.time.Instant.parse("2026-09-08T20:00:00Z"),
+                                                    ),
+                                                    SessionMessageUiState(
+                                                        id = "local-message",
+                                                        role = "assistant",
+                                                        content = "Local result",
+                                                        runId = localRunId,
+                                                        runStatus = "succeeded",
+                                                        runResult = "Done",
+                                                        timestamp = java.time.Instant.parse("2026-09-08T21:00:00Z"),
+                                                    ),
+                                                ),
+                                        ),
+                                ),
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Run ID: external-run").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run status: Failed").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Run result: Gateway failure").performScrollTo().assertIsDisplayed()
+        composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(2)
+        composeTestRule.onNodeWithText("Run ID: local-run").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Local result").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun empty_history_shows_guidance_and_composer() {
         composeTestRule.setContent {
             HermesTheme {

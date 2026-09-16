@@ -31,6 +31,7 @@ object ContractFixtureCatalog {
             ContractFixtureDefinition("sessions/history-request.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/history-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/history-response-populated.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("sessions/history-response-external-runs.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/rename-request.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/rename-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/delete-request.json", ContractFixtureFormat.JSON),
