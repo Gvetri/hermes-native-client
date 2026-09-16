@@ -41,10 +41,10 @@ Run the deterministic local gate:
 The gate runs Kotlin formatting, Android lint, unit tests, architecture checks, mock detection, and debug/release Android builds. Android instrumentation requires a running compatible emulator:
 
 ```text
-./gradlew :feature:entry:presentation:verifyConnectedAndroidTests :app:verifyConnectedAndroidTests
+./gradlew :app:verifyConnectedAndroidTests
 ```
 
-The repository workflow runs these checks on GitHub-hosted runners. Its `api24-launch-themes` emulator job uses an API 24-compatible x86_64 image and explicitly runs the light- and dark-system-theme `MainActivity` launch tests. It fails when instrumentation results are missing, empty, skipped, or unsuccessful. Failed, cancelled, and timed-out Android test runs upload sanitized runner output, logcat, instrumentation reports, and timeout context for 14 days when sanitization completes.
+The repository workflow runs these checks on GitHub-hosted runners. Pull requests keep fast Compose behavior coverage through the JVM `compose-jvm-tests` job; the complete `api24-instrumentation` emulator job runs nightly or manually with an API 24-compatible x86_64 image and the full app instrumentation suite. It fails when instrumentation results are missing, empty, skipped, or unsuccessful. Failed, cancelled, and timed-out Android test runs upload sanitized runner output, logcat, instrumentation reports, and timeout context for 14 days when sanitization completes, with the diagnostic artifact linked from the workflow result.
 
 ## Deterministic fixture provenance
 

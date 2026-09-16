@@ -32,10 +32,10 @@ Run the local deterministic gate before submitting a change:
 ./gradlew qualityGate
 ```
 
-If an emulator is available, also run both instrumentation scopes:
+If an emulator is available, also run the app instrumentation scope:
 
 ```text
-./gradlew :feature:entry:presentation:verifyConnectedAndroidTests :app:verifyConnectedAndroidTests
+./gradlew :app:verifyConnectedAndroidTests
 ```
 
 ## Module changes

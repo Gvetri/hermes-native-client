@@ -113,7 +113,7 @@ class QualityGateConfigurationTest {
     fun android_test_failures_preserve_sanitized_failure_evidence() {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val evidenceScript = repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").readText()
-        val emulatorJob = workflow.substringAfter("  compose_test:").substringBefore("  quality-gate:")
+        val emulatorJob = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
         val failureStepMarker = "      - name: Fail when Android tests fail"
         assertTrue("The workflow must keep the Android failure step.", emulatorJob.contains(failureStepMarker))
         val failureStep =
@@ -123,7 +123,8 @@ class QualityGateConfigurationTest {
 
         assertTrue(
             "The emulator job must survive workflow cancellation long enough to finalize evidence.",
-            emulatorJob.contains("\n    if: \${{ always() }}\n"),
+            emulatorJob.contains("      - name: Finalize Android test evidence") &&
+                emulatorJob.contains("        if: \${{ always() }}"),
         )
         assertTrue("The emulator job must keep a bounded job timeout with finalization headroom.", emulatorJob.contains("    timeout-minutes: 20"))
         assertTrue("The workflow must preserve successful test classification.", emulatorJob.contains("category=success"))
@@ -458,6 +459,48 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun api24_instrumentation_is_nightly_and_manual_while_pull_requests_keep_jvm_compose_coverage() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val composeJob = workflow.substringAfter("  compose_test:").substringBefore("  api24_instrumentation:")
+        val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
+
+        assertTrue("The workflow must schedule the API 24 suite nightly.", workflow.contains("  schedule:\n    - cron:"))
+        assertTrue("The workflow must support manual API 24 execution.", workflow.contains("  workflow_dispatch:"))
+        assertTrue(
+            "The API 24 suite must run outside pull requests and preserve main pushes.",
+            api24Job.contains("github.event_name == 'push'") &&
+                api24Job.contains("github.event_name == 'schedule'") &&
+                api24Job.contains("github.event_name == 'workflow_dispatch'") &&
+                !api24Job.contains("github.event_name == 'pull_request'"),
+        )
+        assertTrue(
+            "The pull-request Compose job must use the JVM replacement.",
+            composeJob.contains("./gradlew :feature:entry:presentation:testDebugUnitTest --no-daemon"),
+        )
+        assertTrue(
+            "The pull-request Compose job must not start an emulator.",
+            !composeJob.contains("reactivecircus/android-emulator-runner"),
+        )
+    }
+
+    @Test
+    fun nightly_api24_job_preserves_device_suite_timeout_reporting_and_diagnostic_link() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val evidenceScript = repositoryRoot.resolve(".github/scripts/android-test-evidence.sh").readText()
+        val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
+
+        assertTrue("The nightly wrapper must run the complete app instrumentation verification task.", evidenceScript.contains("./gradlew :app:verifyConnectedAndroidTests"))
+        assertTrue("The nightly job must retain a bounded job timeout.", api24Job.contains("    timeout-minutes: 20"))
+        assertTrue("The emulator step must retain a bounded timeout.", api24Job.contains("        timeout-minutes: 14"))
+        assertTrue("The instrumentation wrapper must retain its bounded deadline.", api24Job.contains("          ANDROID_TEST_TIMEOUT_SECONDS: '480'"))
+        assertTrue("The workflow must report results in the step summary.", api24Job.contains("GITHUB_STEP_SUMMARY"))
+        assertTrue("The workflow must link uploaded diagnostics from the result.", api24Job.contains("steps.upload_android_evidence.outputs.artifact-url"))
+        listOf("category=success", "cancellation", "timeout", "test_failure").forEach { state ->
+            assertTrue("The workflow must report the $state state.", api24Job.contains(state) || evidenceScript.contains(state))
+        }
+    }
+
+    @Test
     fun checkout_steps_are_immutable_and_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->
@@ -465,7 +508,7 @@ class QualityGateConfigurationTest {
         }
         val immutableReference = Regex("[0-9a-fA-F]{40}")
 
-        assertEquals("The workflow must keep all ten checkout steps explicit.", 10, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all eleven checkout steps explicit.", 11, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
             val reference = lines[index].trim().substringAfter("actions/checkout@")
             assertTrue(

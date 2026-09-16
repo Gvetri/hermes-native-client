@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -127,8 +130,24 @@ jobs:
       - run: ./gradlew architectureCheck architectureRuleTests verifyNoMocks --no-daemon
 
   compose_test:
-    name: api24-launch-themes
+    name: compose-jvm-tests
     if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew :feature:entry:presentation:testDebugUnitTest --no-daemon --console=plain
+
+  api24_instrumentation:
+    name: api24-instrumentation
+    if: ${{ github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -245,6 +264,7 @@ jobs:
           fi
           printf '%s\n' 'redaction_ready=true' >> "$GITHUB_OUTPUT"
       - name: Upload Android test failure evidence
+        id: upload_android_evidence
         if: ${{ always() && steps.android_tests.outcome != 'success' && steps.finalize_android_evidence.outputs.redaction_ready == 'true' }}
         uses: actions/upload-artifact@v4
         with:
@@ -253,6 +273,43 @@ jobs:
           if-no-files-found: error
           # Sanitized Android failure evidence is retained for 14 days.
           retention-days: 14
+      - name: Report API 24 instrumentation result
+        if: ${{ always() }}
+        env:
+          ANDROID_TEST_OUTCOME: ${{ steps.android_tests.outcome }}
+          FINALIZE_OUTCOME: ${{ steps.finalize_android_evidence.outcome }}
+          ARTIFACT_URL: ${{ steps.upload_android_evidence.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          category=unknown
+          category_file=artifacts/android-test-evidence/failure-category.txt
+          if [[ -s "$category_file" ]]; then
+            IFS='=' read -r category_key category_value < "$category_file"
+            if [[ "$category_key" == category && -n "$category_value" ]]; then
+              category="$category_value"
+            fi
+          fi
+
+          if [[ "$ANDROID_TEST_OUTCOME" == "cancelled" || "$category" == "cancellation" ]]; then
+            result=cancellation
+          elif [[ "$category" == "timeout" ]]; then
+            result=timeout
+          elif [[ "$ANDROID_TEST_OUTCOME" == "success" && "$FINALIZE_OUTCOME" == "success" && "$category" == "success" ]]; then
+            result=pass
+          else
+            result=failure
+          fi
+
+          artifact_url="$ARTIFACT_URL"
+          if [[ -z "$artifact_url" ]]; then
+            artifact_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
+          fi
+          {
+            printf '## API 24 instrumentation: %s\n\n' "$result"
+            printf -- '- Result: `%s`\n' "$result"
+            printf -- '- Failure category: `%s`\n' "$category"
+            printf -- '- Diagnostic artifacts: [Open run artifacts](%s)\n' "$artifact_url"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Fail when Android tests fail
         if: ${{ always() && (steps.android_tests.outcome != 'success' || steps.finalize_android_evidence.outcome != 'success') }}
         run: |
