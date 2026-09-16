@@ -127,6 +127,196 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun terminal_sse_event_blocks_send_until_authoritative_reconciliation_finishes() {
+        val session = session()
+        val run = Run(RunId("run-terminal-race"), session.id, "starting")
+        val terminalRun = run.copy(status = "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(terminalRun)
+                runs.add(run)
+                blockNextStatus = true
+                observation = ScriptedObservation(listOf(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "done")))
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    it.sessionList?.openedSession?.isReconciliationInProgress == true
+            }
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Second"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertEquals(listOf(session.id to "First"), gateway.runRequests)
+
+            gateway.releaseStatus.countDown()
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED
+            }
+        } finally {
+            gateway.releaseStatus.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun refresh_preserves_streamed_response_until_authoritative_status_confirms_the_run() {
+        val session = session()
+        val run = Run(RunId("run-preserve-response"), session.id, "starting")
+        val terminalRun = run.copy(status = "succeeded")
+        val terminalHistory =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                null,
+            )
+        val observation =
+            BlockingObservation(
+                listOf(
+                    RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
+                    RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Partial", "partial"),
+                ),
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                runs.add(run)
+                observations.add(observation)
+                histories.add(terminalHistory)
+                histories.add(terminalHistory)
+                statuses.add(terminalRun)
+                blockNextStatus = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) { it.sessionList?.openedSession?.activeResponse?.content == "Partial" }
+            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == true &&
+                    it.sessionList?.openedSession?.activeResponse?.content == "Partial"
+            }
+
+            gateway.releaseStatus.countDown()
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.activeResponse == null &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED
+            }
+        } finally {
+            gateway.releaseStatus.countDown()
+            observation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun a_later_history_run_correlated_to_the_timed_out_draft_replaces_the_synthetic_uncertainty() {
+        val session = session()
+        val realRun = Run(RunId("run-later"), session.id, "succeeded")
+        val realHistory =
+            SessionHistory(
+                session.id,
+                listOf(
+                    GatewayHistoryMessage("user", "user", "Keep this draft", realRun.id, "succeeded"),
+                    GatewayHistoryMessage("assistant", "assistant", "Delivered", realRun.id, "succeeded"),
+                ),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(realHistory)
+                histories.add(realHistory)
+                statuses.add(realRun)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default, sendTimeoutMillis = 50L)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) { state ->
+                state.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
+            }
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.latestRun?.id == realRun.id &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    it.sessionList?.openedSession?.sendErrorCategory == null
+            }
+            assertEquals(listOf(realRun.id), gateway.statusRequests)
+            assertEquals(1, gateway.runRequests.size)
+            assertTrue(gateway.observedRunIds.isEmpty())
+            assertEquals("", requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).composerText)
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun terminal_run_returned_by_create_is_reconciled_before_it_is_presented_as_confirmed() {
+        val session = session()
+        val terminalRun = Run(RunId("run-created-terminal"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("result", "assistant", "Created result", terminalRun.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(terminalRun)
+                runs.add(terminalRun)
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Create terminal"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    it.sessionList?.openedSession?.activeResponse == null
+            }
+            assertEquals(listOf(terminalRun.id), gateway.statusRequests)
+            assertEquals(2, gateway.historyRequests)
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun interrupted_observation_refetches_and_remains_uncertain_without_resubmitting() {
         val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")

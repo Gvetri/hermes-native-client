@@ -772,6 +772,7 @@ private fun SessionDetailContent(
             ).canSubmit
         val sendEnabled =
             composerEnabled &&
+                !state.isReconciliationInProgress &&
                 state.latestRunState != RunPresentationState.UNCERTAIN &&
                 canSubmit &&
                 state.composerText.isNotBlank()

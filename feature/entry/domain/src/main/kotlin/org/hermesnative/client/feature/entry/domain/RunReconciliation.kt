@@ -28,9 +28,9 @@ fun SessionHistory.runs(): List<Run> {
     messages.forEach { message ->
         val runId = message.runId
         val status = message.runStatus
-        if (runId != null && status != null) {
+        if (runId != null) {
             runsById.remove(runId)
-            runsById[runId] = Run(runId, sessionId, status)
+            runsById[runId] = Run(runId, sessionId, status?.takeIf(String::isNotBlank) ?: UNKNOWN_RUN_STATUS)
         }
     }
     return runsById.values.toList()

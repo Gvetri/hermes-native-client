@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.domain
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RunReconciliationTest {
@@ -47,6 +48,21 @@ class RunReconciliationTest {
         val history = SessionHistory(run.sessionId, emptyList(), null)
 
         assertEquals(RunReconciliationDecision.UNCERTAIN, decideRunReconciliation(run, history))
+    }
+
+    @Test
+    fun history_run_id_without_status_is_retained_as_a_conservative_active_run() {
+        val sessionId = SessionId("session-1")
+        val runId = RunId("run-without-status")
+        val history =
+            SessionHistory(
+                sessionId = sessionId,
+                messages = listOf(GatewayHistoryMessage("message-1", "user", "Input", runId, null)),
+                nextCursor = null,
+            )
+
+        assertEquals(listOf(Run(runId, sessionId, UNKNOWN_RUN_STATUS)), history.runs())
+        assertTrue(history.runs().single().isActive())
     }
 
     @Test
