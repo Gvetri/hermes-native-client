@@ -720,7 +720,7 @@ class QualityGateConfigurationTest {
         }
         val immutableReference = Regex("[0-9a-fA-F]{40}")
 
-        assertEquals("The workflow must keep all eleven checkout steps explicit.", 11, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all twelve checkout steps explicit.", 12, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
             val reference = lines[index].trim().substringAfter("actions/checkout@")
             assertTrue(
@@ -742,23 +742,32 @@ class QualityGateConfigurationTest {
     fun nightly_failures_create_one_labeled_issue_with_verified_sanitized_artifact() {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val issueScript = repositoryRoot.resolve(".github/scripts/create-nightly-failure-issue.sh")
-        val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
+        val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  create_nightly_failure_issue:")
+        val issueJob = workflow.substringAfter("  create_nightly_failure_issue:").substringBefore("  quality-gate:")
 
-        assertTrue("The API 24 job must grant issue creation permission.", api24Job.contains("      issues: write"))
-        assertTrue("Issue creation must be limited to scheduled runs.", api24Job.contains("github.event_name == 'schedule'"))
+        assertTrue("The API 24 job must not grant issue creation permission.", !api24Job.contains("      issues: write"))
+        assertTrue("Issue creation must be isolated from the emulator job.", !api24Job.contains(".github/scripts/create-nightly-failure-issue.sh"))
+        assertTrue("The issue job must grant issue creation permission.", issueJob.contains("      issues: write"))
+        assertTrue("Issue creation must be limited to scheduled runs.", issueJob.contains("github.event_name == 'schedule'"))
+        assertTrue("Issue publication must wait for the emulator job.", issueJob.contains("needs: api24_instrumentation"))
+        assertTrue("Issue publication must serialize reruns for one workflow run.", issueJob.contains("nightly-failure-issue-${'$'}{{ github.repository }}-${'$'}{{ github.run_id }}"))
+        assertTrue("Issue publication must not cancel an earlier rerun.", issueJob.contains("cancel-in-progress: false"))
         assertTrue(
             "Issue creation must require a successfully uploaded artifact.",
-            api24Job.contains("steps.upload_android_evidence.outcome == 'success'"),
+            issueJob.contains("gh run download") &&
+                issueJob.contains("ARTIFACT_NAME: android-test-failure-evidence-${'$'}{{ github.run_id }}-${'$'}{{ github.run_attempt }}"),
         )
         assertTrue(
             "The workflow must call the nightly issue creation script.",
-            api24Job.contains(".github/scripts/create-nightly-failure-issue.sh"),
+            issueJob.contains(".github/scripts/create-nightly-failure-issue.sh"),
         )
         assertTrue("The issue creation script must exist.", issueScript.isFile)
         val script = issueScript.readText()
         assertTrue("The issue must use the ready-for-agent label.", script.contains("ready-for-agent"))
         assertTrue("The issue must carry a run marker for deduplication.", script.contains("nightly-run:"))
-        assertTrue("The script must read the created issue back.", script.contains("verify_issue \"${'$'}verified_issue_file\" true"))
+        assertTrue("The script must update an existing issue before verification.", script.contains("gh api --method PATCH"))
+        assertTrue("The existing issue must be reopened before verification.", script.contains("\"state\": \"open\""))
+        assertTrue("The script must read the published issue back strictly.", script.contains("verify_issue \"${'$'}verified_issue_file\" true true"))
         assertTrue("The script must verify the artifact before publication.", script.contains("archive_download_url"))
     }
 }

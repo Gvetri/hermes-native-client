@@ -34,6 +34,7 @@ artifact_metadata_file="${temporary_directory}/artifact.json"
 issues_file="${temporary_directory}/issues.json"
 body_file="${temporary_directory}/body.md"
 payload_file="${temporary_directory}/payload.json"
+update_payload_file="${temporary_directory}/update-payload.json"
 created_issue_file="${temporary_directory}/created-issue.json"
 verified_issue_file="${temporary_directory}/verified-issue.json"
 
@@ -127,14 +128,6 @@ if require_artifact_url and artifact_url not in body:
 PY
 }
 
-if [[ -n "$existing_issue" ]]; then
-    IFS=$'\t' read -r existing_number existing_url <<< "$existing_issue"
-    gh api "${issues_endpoint}/${existing_number}" > "$verified_issue_file"
-    verify_issue "$verified_issue_file" false false
-    printf 'An issue already exists for run %s: #%s (%s)\n' "$GITHUB_RUN_ID" "$existing_number" "$existing_url"
-    exit 0
-fi
-
 failure_type="unknown"
 if [[ -s "$category_file" ]]; then
     category_key=""
@@ -190,19 +183,30 @@ commit_url="${server_url}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
     printf '\n%s\n' 'This issue was created automatically for a failed or timed-out nightly Android test run.'
 } > "$body_file"
 
-python3 - "$body_file" "$payload_file" "$title" "$issue_label" <<'PY'
+python3 - "$body_file" "$payload_file" "$update_payload_file" "$title" "$issue_label" <<'PY'
 from pathlib import Path
 import json
 import sys
 
 body = Path(sys.argv[1]).read_text(encoding="utf-8")
 payload = {
-    "title": sys.argv[3],
+    "title": sys.argv[4],
     "body": body,
-    "labels": [sys.argv[4]],
+    "labels": [sys.argv[5]],
 }
 Path(sys.argv[2]).write_text(json.dumps(payload), encoding="utf-8")
+update_payload = {**payload, "state": "open"}
+Path(sys.argv[3]).write_text(json.dumps(update_payload), encoding="utf-8")
 PY
+
+if [[ -n "$existing_issue" ]]; then
+    IFS=$'\t' read -r existing_number existing_url <<< "$existing_issue"
+    printf 'Updating the existing nightly failure issue for run %s.\n' "$GITHUB_RUN_ID"
+    gh api --method PATCH "${issues_endpoint}/${existing_number}" --input "$update_payload_file" > "$verified_issue_file"
+    verify_issue "$verified_issue_file" true true
+    printf 'Updated and verified nightly failure issue #%s: %s\n' "$existing_number" "$existing_url"
+    exit 0
+fi
 
 printf '%s\n' 'Creating the nightly failure issue.'
 gh api --method POST "$issues_endpoint" --input "$payload_file" > "$created_issue_file"
