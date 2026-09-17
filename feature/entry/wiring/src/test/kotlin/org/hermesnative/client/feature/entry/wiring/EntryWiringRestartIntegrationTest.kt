@@ -21,6 +21,8 @@ import org.hermesnative.client.feature.entry.domain.SessionPage
 import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
 import org.hermesnative.client.feature.entry.presentation.EntryUiEvent
+import org.hermesnative.client.feature.entry.presentation.PendingRunSubmissionKey
+import org.hermesnative.client.feature.entry.presentation.ProcessRunSubmissionUncertaintyStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -83,6 +85,52 @@ class EntryWiringRestartIntegrationTest {
         }
     }
 
+    @Test
+    fun production_wiring_keeps_a_response_loss_uncertain_after_holder_recreation() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        val uncertaintyKey = PendingRunSubmissionKey(endpoint, RestartGateway.SESSION_ID)
+        storage.clearForTest()
+        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        try {
+            val firstHolder = createHolder(context, gateway)
+            try {
+                connect(firstHolder, endpoint, hasSavedEndpoint = false)
+                openSession(firstHolder, gateway.session.id)
+                gateway.failCreateAfterAcceptance = true
+                firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Response may be lost"))
+                firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                awaitState(firstHolder) {
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
+                        it.sessionList?.openedSession?.isSending == false
+                }
+                assertEquals(1, gateway.runRequests.size)
+                assertTrue(storage.load().isEmpty())
+            } finally {
+                firstHolder.close()
+            }
+
+            val restartedHolder = createHolder(context, gateway)
+            try {
+                connect(restartedHolder, endpoint, hasSavedEndpoint = true)
+                openSession(restartedHolder, gateway.session.id)
+                awaitState(restartedHolder) {
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
+                        it.sessionList?.openedSession?.isSending == false
+                }
+                restartedHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                assertEquals(1, gateway.runRequests.size)
+            } finally {
+                restartedHolder.close()
+            }
+        } finally {
+            storage.clearForTest()
+            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        }
+    }
+
     private fun createHolder(
         context: Context,
         gateway: RestartGateway,
@@ -142,8 +190,11 @@ class EntryWiringRestartIntegrationTest {
         val activeRun = Run(RunId("wiring-run"), SESSION_ID, "running")
         val externalRun = Run(RunId("external-run"), SESSION_ID, "succeeded")
         val statusRequests = CopyOnWriteArrayList<RunId>()
+        val runRequests = CopyOnWriteArrayList<Pair<SessionId, String>>()
         val observation = BlockingObservation()
         var terminal = false
+        var failCreateAfterAcceptance = false
+        var acceptedRunVisible = false
 
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
 
@@ -152,7 +203,22 @@ class EntryWiringRestartIntegrationTest {
         override fun openSession(sessionId: SessionId): Session = session
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            if (terminal) {
+            if (acceptedRunVisible) {
+                SessionHistory(
+                    sessionId,
+                    listOf(
+                        GatewayHistoryMessage(
+                            id = "accepted-result",
+                            role = "assistant",
+                            content = "Accepted result",
+                            runId = activeRun.id,
+                            runStatus = if (terminal) "succeeded" else activeRun.status,
+                            runResult = null,
+                        ),
+                    ),
+                    null,
+                )
+            } else if (terminal) {
                 SessionHistory(
                     sessionId,
                     listOf(
@@ -193,7 +259,14 @@ class EntryWiringRestartIntegrationTest {
         override fun createRun(
             sessionId: SessionId,
             input: String,
-        ): Run = activeRun
+        ): Run {
+            runRequests += sessionId to input
+            if (failCreateAfterAcceptance) {
+                acceptedRunVisible = true
+                throw IllegalStateException("response lost after acceptance")
+            }
+            return activeRun
+        }
 
         override fun getRunStatus(runId: RunId): Run {
             statusRequests += runId

@@ -1855,7 +1855,10 @@ class RunReconciliationStateHolderTest {
         holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
         awaitState(holder) { it.sessionList?.sessions == listOf(gateway.session.toSessionItemUiState()) }
         holder.onEvent(EntryUiEvent.SessionClicked(gateway.session.id))
-        awaitState(holder) { it.sessionList?.openedSession?.session?.id == gateway.session.id }
+        awaitState(holder) {
+            it.sessionList?.openedSession?.session?.id == gateway.session.id &&
+                !it.sessionList!!.openedSession!!.isReconciliationInProgress
+        }
     }
 
     private fun awaitState(

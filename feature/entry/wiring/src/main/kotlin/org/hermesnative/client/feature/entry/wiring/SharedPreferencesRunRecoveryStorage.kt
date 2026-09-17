@@ -2,6 +2,7 @@ package org.hermesnative.client.feature.entry.wiring
 
 import android.content.Context
 import android.util.Base64
+import org.hermesnative.client.feature.entry.application.normalizeGatewayEndpoint
 import org.hermesnative.client.feature.entry.data.RunRecoveryStorage
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
@@ -59,9 +60,10 @@ class SharedPreferencesRunRecoveryStorage(
 
     private fun endpointNamespace(endpoint: String?): String {
         val value = endpoint?.takeIf(String::isNotBlank) ?: UNBOUND_ENDPOINT
+        val canonicalValue = runCatching { normalizeGatewayEndpoint(value) }.getOrDefault(value.trim())
         return MessageDigest
             .getInstance("SHA-256")
-            .digest(value.toByteArray(StandardCharsets.UTF_8))
+            .digest(canonicalValue.toByteArray(StandardCharsets.UTF_8))
             .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 

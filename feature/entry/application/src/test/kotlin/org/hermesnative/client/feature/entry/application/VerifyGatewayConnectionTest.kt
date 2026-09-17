@@ -32,6 +32,20 @@ class VerifyGatewayConnectionTest {
     }
 
     @Test
+    fun canonicalizes_scheme_host_and_default_https_port_for_recovery_scoping() {
+        val repository = FakeGatewayConnectionRepository()
+        val verifier =
+            VerifyGatewayConnection(repository) { endpoint, _ ->
+                assertEquals("https://gateway.example/profile", endpoint)
+                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+            }
+
+        verifier.execute(" HTTPS://GATEWAY.EXAMPLE:0443/profile/ ", "token")
+
+        assertEquals(GatewayConnection("https://gateway.example/profile"), repository.saved)
+    }
+
+    @Test
     fun rejects_missing_required_capabilities_without_persisting_the_endpoint() {
         val repository = FakeGatewayConnectionRepository()
         val verifier =

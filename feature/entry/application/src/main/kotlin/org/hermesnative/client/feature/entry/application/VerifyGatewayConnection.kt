@@ -7,6 +7,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
+import java.util.Locale
 
 class VerifyGatewayConnection(
     private val gatewayConnectionRepository: GatewayConnectionRepository,
@@ -53,14 +54,15 @@ fun normalizeGatewayEndpoint(endpoint: String): String = GatewayEndpointValidato
 private object GatewayEndpointValidator {
     private val endpointPattern =
         Regex(
-            """(?i)^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]{1,5}))?(?:/[a-z0-9._~!&'()*+,;=:@%/-]*)?\z""",
+            """(?i)^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]{1,5}))?((?:/[a-z0-9._~!&'()*+,;=:@%/-]*)?)\z""",
         )
 
     fun normalize(endpoint: String): String {
         val normalizedEndpoint = endpoint.trim()
         val match = endpointPattern.matchEntire(normalizedEndpoint) ?: throw invalidAddress()
-        val host = match.groupValues[1]
+        val host = match.groupValues[1].lowercase(Locale.ROOT)
         val port = match.groupValues[2].takeIf(String::isNotEmpty)?.toIntOrNull()
+        val path = match.groupValues[3].trimEnd('/')
 
         if (
             host.split('.').any(::invalidHostLabel) ||
@@ -69,7 +71,12 @@ private object GatewayEndpointValidator {
         ) {
             throw invalidAddress()
         }
-        return normalizedEndpoint.trimEnd('/')
+        return buildString {
+            append("https://")
+            append(host)
+            port?.takeUnless { it == 443 }?.let { append(':').append(it) }
+            append(path)
+        }
     }
 
     private fun invalidHostLabel(label: String): Boolean =
