@@ -699,13 +699,23 @@ class QualityGateConfigurationTest {
     fun pull_request_compose_job_verifies_roborazzi_baselines() {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val requiredChecks = repositoryRoot.resolve(".github/quality-gate/required-checks.txt").readLines()
+        val presentationBuild = repositoryRoot.resolve("feature/entry/presentation/build.gradle.kts").readText()
+        val baselineManifest = repositoryRoot.resolve("feature/entry/presentation/src/test/roborazzi-baselines.txt")
         val composeJob = workflow.substringAfter("  compose_test:").substringBefore("  api24_instrumentation:")
 
         assertTrue(
-            "The pull-request Compose job must verify Roborazzi baselines.",
+            "The pull-request Compose job must verify the Roborazzi baseline manifest.",
+            composeJob.contains("./gradlew :feature:entry:presentation:verifyRoborazziBaselineManifest --no-daemon --console=plain"),
+        )
+        assertTrue(
+            "The pull-request Compose job must verify Roborazzi pixels.",
             composeJob.contains("./gradlew :feature:entry:presentation:verifyRoborazziDebug --no-daemon --console=plain"),
         )
         assertTrue("The Roborazzi verification must remain an aggregate required check.", requiredChecks.contains("compose_test"))
+        assertTrue("The presentation module must register the baseline manifest task.", presentationBuild.contains("tasks.register(\"verifyRoborazziBaselineManifest\")"))
+        assertTrue("Manifest failures must report missing baselines.", presentationBuild.contains("Missing baselines:"))
+        assertTrue("Manifest failures must report unexpected baselines.", presentationBuild.contains("Unexpected baselines:"))
+        assertTrue("The selected baseline manifest must be committed.", baselineManifest.isFile)
     }
 
     @Test

@@ -1,0 +1,13 @@
+# Relative paths for the approved SelectedVisualRegressionTest states.
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.connection_form.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.connection_error.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.empty_session_list.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.populated_session_list.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.session_list_unavailable.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.create_session.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.rename_session_confirmation.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.delete_session_confirmation.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.empty_session_detail.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.session_detail_with_messages.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.session_detail_active_run.png
+org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.session_detail_error.png
