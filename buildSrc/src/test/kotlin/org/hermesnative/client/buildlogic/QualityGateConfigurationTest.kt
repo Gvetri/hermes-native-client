@@ -33,6 +33,17 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun test_job_failures_preserve_gating_reporting_and_redaction() {
+        assumePosixWrapperSupport()
+        val process = ProcessBuilder("python3", repositoryRoot.resolve(".github/scripts/tests/test_test_jobs.py").absolutePath)
+            .directory(repositoryRoot)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        assertEquals(output, 0, process.waitFor())
+    }
+
+    @Test
     fun gradle_wrapper_declares_official_distribution_checksum() {
         val checksum =
             repositoryRoot.resolve("gradle/wrapper/gradle-wrapper.properties").readLines()
@@ -160,34 +171,33 @@ class QualityGateConfigurationTest {
         assertTrue("The wrapper must record incomplete diagnostic capture.", evidenceScript.contains("capture_incomplete"))
         assertTrue("The wrapper must preserve instrumentation output.", evidenceScript.contains("androidTest-results"))
         assertTrue("The wrapper must preserve test runner output.", evidenceScript.contains("runner-output.log"))
-        val presentationUnitTests = evidenceScript.indexOf("./gradlew :feature:entry:presentation:testDebugUnitTest")
-        val requiredUnitTestEvidence = evidenceScript.indexOf("./gradlew verifyRequiredUnitTests")
-        val appInstrumentation = evidenceScript.indexOf("./gradlew :app:verifyConnectedAndroidTests")
         assertTrue(
-            "The wrapper must verify unit-test evidence between JVM and instrumentation tests.",
-            presentationUnitTests >= 0 &&
-                presentationUnitTests < requiredUnitTestEvidence &&
-                requiredUnitTestEvidence < appInstrumentation,
+            "The Android wrapper must run instrumentation without duplicate JVM tasks.",
+            evidenceScript.contains("./gradlew :app:verifyConnectedAndroidTests") &&
+                !evidenceScript.contains("testDebugUnitTest") &&
+                !evidenceScript.contains("verifyRequiredUnitTests"),
         )
         assertTrue("The wrapper must identify timeouts.", evidenceScript.contains("timeout"))
         assertTrue("The wrapper must identify cancellations.", evidenceScript.contains("cancellation"))
         assertTrue("The wrapper must identify test failures.", evidenceScript.contains("test_failure"))
         assertTrue("The wrapper must identify installation failures.", evidenceScript.contains("installation_failure"))
         assertTrue("The wrapper must identify emulator failures.", evidenceScript.contains("emulator_failure"))
-        assertTrue("The wrapper must redact sensitive values.", evidenceScript.contains("<redacted>"))
-        assertTrue("The wrapper must redact quoted JSON sensitive values.", evidenceScript.contains("sensitive_key"))
-        assertTrue("The wrapper must redact bare authentication schemes.", evidenceScript.contains("bearer|basic"))
+        val redactionScript = repositoryRoot.resolve(".github/scripts/redact-test-reports.py").readText()
+        assertTrue("The wrapper must use the shared redactor.", evidenceScript.contains("redact-test-reports.py"))
+        assertTrue("The wrapper must redact sensitive values.", redactionScript.contains("<redacted>"))
+        assertTrue("The wrapper must redact quoted JSON sensitive values.", redactionScript.contains("sensitive_key"))
+        assertTrue("The wrapper must redact bare authentication schemes.", redactionScript.contains("bearer|basic"))
         assertTrue("The wrapper must not stream raw output to the Actions log.", !evidenceScript.contains("| tee -a"))
         assertTrue("The wrapper must bound cleanup commands.", evidenceScript.contains("run_cleanup_command"))
         assertTrue("The wrapper must bound total cleanup time.", evidenceScript.contains("cleanup_budget_seconds"))
         assertTrue("The wrapper must ignore cancellation signals during cleanup.", evidenceScript.contains("trap '' TERM INT"))
-        assertTrue("The wrapper must detect NUL-containing files as unsanitizable.", evidenceScript.contains("\\x00"))
-        assertTrue("The wrapper must fail closed when a file cannot be read.", evidenceScript.contains("raise SystemExit(1)"))
+        assertTrue("The shared redactor must detect NUL-containing files as unsanitizable.", redactionScript.contains("\\x00"))
+        assertTrue("The shared redactor must fail closed when a file cannot be read.", redactionScript.contains("raise SystemExit(1)"))
         assertTrue("The wrapper must delete unsanitizable files when possible.", evidenceScript.contains("rm -f --"))
         assertTrue("The wrapper must preserve a fail-closed sanitization marker.", evidenceScript.contains("redaction_pending_marker"))
         assertTrue(
             "The wrapper must redact Authorization values independent of authentication scheme.",
-            evidenceScript.contains("authorization\\s*[:=]"),
+            redactionScript.contains("authorization\\s*[:=]"),
         )
     }
 
@@ -375,8 +385,8 @@ class QualityGateConfigurationTest {
                 fakePython,
                 """
                     #!/usr/bin/env bash
-                    if [[ "${'$'}{2:-}" == *"/runner-output.log" ]]; then
-                        sleep 30
+                    if [[ "${'$'}{3:-}" == *"/runner-output.log" ]]; then
+                        sleep 90
                     fi
                     exit 1
                 """.trimIndent(),
@@ -776,14 +786,13 @@ class QualityGateConfigurationTest {
             "Issue creation must require a non-successful API 24 result.",
             issueJob.contains("needs.api24_instrumentation.result != 'success'"),
         )
-        assertTrue("Issue publication must wait for the emulator job.", issueJob.contains("needs: api24_instrumentation"))
+        assertTrue("Issue publication must wait for every required test job.", issueJob.contains("needs: [unit_tests, compose_test, api24_instrumentation]"))
+        listOf("unit_tests", "compose_test", "api24_instrumentation").forEach { job ->
+            assertTrue("Issue creation must include failures in $job.", issueJob.contains("needs.$job.result != 'success'"))
+        }
         assertTrue("Issue publication must serialize reruns for one workflow run.", issueJob.contains("nightly-failure-issue-${'$'}{{ github.repository }}-${'$'}{{ github.run_id }}"))
         assertTrue("Issue publication must not cancel an earlier rerun.", issueJob.contains("cancel-in-progress: false"))
-        assertTrue(
-            "Issue creation must require a successfully uploaded artifact.",
-            issueJob.contains("gh run download") &&
-                issueJob.contains("ARTIFACT_NAME: android-test-failure-evidence-${'$'}{{ github.run_id }}-${'$'}{{ github.run_attempt }}"),
-        )
+        assertTrue("Missing reports must not suppress publication.", !issueJob.contains("gh run download"))
         assertTrue(
             "The workflow must call the nightly issue creation script.",
             issueJob.contains(".github/scripts/create-nightly-failure-issue.sh"),
@@ -793,8 +802,8 @@ class QualityGateConfigurationTest {
         assertTrue("The issue must use the ready-for-agent label.", script.contains("ready-for-agent"))
         assertTrue("The issue must carry a run marker for deduplication.", script.contains("nightly-run:"))
         assertTrue("The script must update an existing issue before verification.", script.contains("gh api --method PATCH"))
-        assertTrue("The existing issue must be reopened before verification.", script.contains("\"state\": \"open\""))
-        assertTrue("The script must read the published issue back strictly.", script.contains("verify_issue \"${'$'}verified_issue_file\" true true"))
-        assertTrue("The script must verify the artifact before publication.", script.contains("archive_download_url"))
+        assertTrue("The existing issue must be reopened before verification.", script.contains("payload[\"state\"] = \"open\""))
+        assertTrue("The script must read the exact issue after publication.", script.contains("gh api \"${'$'}{issues_endpoint}/${'$'}{issue_number}\""))
+        assertTrue("Artifact links must come from the current run metadata.", script.contains("/actions/runs/${'$'}{GITHUB_RUN_ID}/artifacts?per_page=100"))
     }
 }
