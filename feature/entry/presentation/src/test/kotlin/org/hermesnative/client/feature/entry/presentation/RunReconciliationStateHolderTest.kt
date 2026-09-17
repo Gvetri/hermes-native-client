@@ -1440,6 +1440,93 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun response_loss_with_one_terminal_discovered_run_clears_uncertainty() {
+        val session = session()
+        val run = Run(RunId("run-terminal-after-response-loss"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("terminal", "assistant", "Succeeded", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(run)
+                failRunCreation = true
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    opened.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    !opened.hasUnresolvedSubmission &&
+                    opened.composerText == "Keep this draft" &&
+                    !opened.isReconciliationInProgress
+            }
+            assertEquals(1, gateway.runRequests.size)
+            assertEquals(listOf(run.id), gateway.statusRequests)
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun response_loss_with_terminal_and_active_discoveries_does_not_bind_an_unrelated_run() {
+        val session = session()
+        val terminalRun = Run(RunId("run-terminal-after-response-loss"), session.id, "succeeded")
+        val activeRun = Run(RunId("run-unrelated-active"), session.id, "running")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(
+                    GatewayHistoryMessage("terminal", "assistant", "Succeeded", terminalRun.id, "succeeded"),
+                    GatewayHistoryMessage("active", "assistant", "Running", activeRun.id, "running"),
+                ),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(terminalRun)
+                statuses.add(activeRun)
+                failRunCreation = true
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not duplicate"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    opened.latestRun?.id == activeRun.id &&
+                    !opened.isReconciliationInProgress
+            }
+            assertEquals(1, gateway.runRequests.size)
+            assertEquals(listOf(terminalRun.id, activeRun.id), gateway.statusRequests)
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun unrelated_confirmed_reconciliation_preserves_send_failure_and_draft_before_reopen() {
         val session = session()
         val activeRun = Run(RunId("run-2"), session.id, "running")
@@ -1463,6 +1550,8 @@ class RunReconciliationStateHolderTest {
                 histories.add(terminalHistory)
                 histories.add(terminalHistory)
                 statuses.add(terminalRun)
+                statuses.add(terminalRun)
+                statuses.add(terminalRun)
                 failRunCreation = true
             }
         val holder = holder(gateway, Dispatchers.Default)
@@ -1481,7 +1570,7 @@ class RunReconciliationStateHolderTest {
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
                     it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
                     it.sessionList?.openedSession?.composerText == "Failed first attempt" &&
-                    gateway.statusRequests.size == 1
+                    gateway.statusRequests.size == 2
             }
 
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)

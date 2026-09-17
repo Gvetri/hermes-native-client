@@ -440,8 +440,13 @@ class MessageSubmissionStateHolderTest {
             assertEquals(MessageSendErrorCategory.GATEWAY_REQUEST_FAILED, failed.sendErrorCategory)
             assertFalse(failed.isSending)
             assertEquals(1, gateway.runRequests.size)
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRun == run &&
+                    it.sessionList?.openedSession?.composerText == ""
+            }
 
             val retried = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals(2, gateway.runRequests.size)

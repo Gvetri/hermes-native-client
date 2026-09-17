@@ -296,6 +296,7 @@ class EntryStateHolder(
     private var runGateway: RunGatewayPort? = null
     private val sessionRequestLock = Any()
     private val recoveryPersistenceLock = Any()
+    private val connectionPersistenceLock = Any()
     private var sessionRequestGeneration = 0L
     private var connectionGeneration = 0L
     private val mutationJobs = mutableMapOf<SessionId, Job>()
@@ -386,10 +387,9 @@ class EntryStateHolder(
                 uncertainSendDrafts.clear()
                 uncertainSubmissionRunIds.clear()
                 pendingCreateSessions.forEach { (key, knownRunIds) ->
-                    runSubmissionUncertaintyStore.add(
-                        PendingRunSubmissionKey(key.endpoint, key.sessionId),
-                        knownRunIds,
-                    )
+                    val submissionKey = PendingRunSubmissionKey(key.endpoint, key.sessionId)
+                    runSubmissionUncertaintyStore.add(submissionKey, knownRunIds)
+                    runSubmissionUncertaintyStore.markSettled(submissionKey)
                 }
                 pendingCreateSessions.clear()
                 unresolvedLocalRunIds.clear()
@@ -446,12 +446,24 @@ class EntryStateHolder(
                         bearerCredential = state.bearerCredential,
                     )
                     val normalizedEndpoint = normalizeGatewayEndpoint(state.endpoint)
+                    val canPersist =
+                        synchronized(sessionRequestLock) {
+                            connectionGeneration == requestConnectionGeneration
+                        }
+                    if (!canPersist) return@launch
+                    synchronized(connectionPersistenceLock) {
+                        val stillCurrent =
+                            synchronized(sessionRequestLock) {
+                                connectionGeneration == requestConnectionGeneration
+                            }
+                        if (!stillCurrent) return@launch
+                        verifier.persist(normalizedEndpoint)
+                    }
                     val gateway =
                         synchronized(sessionRequestLock) {
                             if (connectionGeneration != requestConnectionGeneration) {
                                 null
                             } else {
-                                verifier.persist(normalizedEndpoint)
                                 val gateway =
                                     sessionGatewayFactory?.invoke(
                                         normalizedEndpoint,
@@ -517,47 +529,49 @@ class EntryStateHolder(
         sessionJob?.cancel()
         var observationsToClose: List<RunEventObservation> = emptyList()
         val jobsToCancel =
-            synchronized(sessionRequestLock) {
-                sessionRequestGeneration += 1
-                connectionGeneration += 1
-                pendingCreateSessions.forEach { (key, knownRunIds) ->
-                    runSubmissionUncertaintyStore.add(
-                        PendingRunSubmissionKey(key.endpoint, key.sessionId),
-                        knownRunIds,
-                    )
+            synchronized(connectionPersistenceLock) {
+                synchronized(sessionRequestLock) {
+                    sessionRequestGeneration += 1
+                    connectionGeneration += 1
+                    pendingCreateSessions.forEach { (key, knownRunIds) ->
+                        val submissionKey = PendingRunSubmissionKey(key.endpoint, key.sessionId)
+                        runSubmissionUncertaintyStore.add(submissionKey, knownRunIds)
+                        runSubmissionUncertaintyStore.markSettled(submissionKey)
+                    }
+                    sessionGateway = null
+                    runGateway = null
+                    val recoveryJobToCancel = recoveryJob
+                    recoveryJob = null
+                    val connectionRecoveryJobsToCancel = connectionRecoveryJobs.toList()
+                    connectionRecoveryJobs.clear()
+                    sessionDrafts.clear()
+                    sessionSendErrors.clear()
+                    pendingRunDrafts.clear()
+                    sessionRuns.clear()
+                    authoritativeSessionHistoryGenerations.clear()
+                    authoritativeSessionRuns.clear()
+                    observationsToClose = runObservations.values.toList()
+                    (mutationJobs.values + runJobs.values + runObservationJobs.values).toList().also {
+                        mutationJobs.clear()
+                        runJobs.clear()
+                        runObservationJobs.clear()
+                        runObservations.clear()
+                        runObservationRunIds.clear()
+                        pendingRunObservationRequests.clear()
+                        runObservationStates.clear()
+                        unresolvedSubmissionSessions.clear()
+                        recoveryUnavailableSessions.clear()
+                        uncertainSendDrafts.clear()
+                        uncertainSubmissionRunIds.clear()
+                        pendingTimedOutSends.clear()
+                        reconcilingSessions.clear()
+                    }
+                        .plus(listOfNotNull(recoveryJobToCancel))
+                        .plus(connectionRecoveryJobsToCancel)
+                }.also {
+                    removeGatewayConnectionUseCase?.execute()
+                    updateRunRecoveryEndpoint?.invoke(null)
                 }
-                removeGatewayConnectionUseCase?.execute()
-                updateRunRecoveryEndpoint?.invoke(null)
-                sessionGateway = null
-                runGateway = null
-                val recoveryJobToCancel = recoveryJob
-                recoveryJob = null
-                val connectionRecoveryJobsToCancel = connectionRecoveryJobs.toList()
-                connectionRecoveryJobs.clear()
-                sessionDrafts.clear()
-                sessionSendErrors.clear()
-                pendingRunDrafts.clear()
-                sessionRuns.clear()
-                authoritativeSessionHistoryGenerations.clear()
-                authoritativeSessionRuns.clear()
-                observationsToClose = runObservations.values.toList()
-                (mutationJobs.values + runJobs.values + runObservationJobs.values).toList().also {
-                    mutationJobs.clear()
-                    runJobs.clear()
-                    runObservationJobs.clear()
-                    runObservations.clear()
-                    runObservationRunIds.clear()
-                    pendingRunObservationRequests.clear()
-                    runObservationStates.clear()
-                    unresolvedSubmissionSessions.clear()
-                    recoveryUnavailableSessions.clear()
-                    uncertainSendDrafts.clear()
-                    uncertainSubmissionRunIds.clear()
-                    pendingTimedOutSends.clear()
-                    reconcilingSessions.clear()
-                }
-                    .plus(listOfNotNull(recoveryJobToCancel))
-                    .plus(connectionRecoveryJobsToCancel)
             }
         jobsToCancel.forEach(Job::cancel)
         observationsToClose.forEach(RunEventObservation::close)
@@ -716,6 +730,9 @@ class EntryStateHolder(
         run: Run,
         updateVisibleState: Boolean = true,
     ) {
+        if (runSubmissionUncertaintyStore.contains(PendingRunSubmissionKey(_uiState.value.endpoint, entry.sessionId))) {
+            uncertainSubmissionRunIds[entry.sessionId] = entry.runId
+        }
         sessionRuns[entry.sessionId] =
             mergeRuns(sessionRuns[entry.sessionId].orEmpty(), listOf(run))
         val previous = observationStateFor(entry.sessionId, entry.runId)
@@ -2826,6 +2843,7 @@ class EntryStateHolder(
                             PendingRunSubmissionKey(requestEndpoint, sessionId),
                             knownRunIds,
                         )
+                        runSubmissionUncertaintyStore.markSettled(PendingRunSubmissionKey(requestEndpoint, sessionId))
                         val reconciled =
                             reconcileTimedOutSend(
                                 sessionId,
@@ -2851,6 +2869,7 @@ class EntryStateHolder(
                             PendingRunSubmissionKey(requestEndpoint, sessionId),
                             knownRunIds,
                         )
+                        runSubmissionUncertaintyStore.markSettled(PendingRunSubmissionKey(requestEndpoint, sessionId))
                         val reconciled =
                             reconcileTimedOutSend(
                                 sessionId = sessionId,
@@ -2871,6 +2890,7 @@ class EntryStateHolder(
                             PendingRunSubmissionKey(requestEndpoint, sessionId),
                             knownRunIds,
                         )
+                        runSubmissionUncertaintyStore.markSettled(PendingRunSubmissionKey(requestEndpoint, sessionId))
                         val reconciled =
                             reconcileTimedOutSend(
                                 sessionId = sessionId,
@@ -2998,7 +3018,11 @@ class EntryStateHolder(
                 showTimedOutSendFailure(sessionId, requestConnectionGeneration, requestSessionGeneration)
                 true
             } else {
-                val result = ReconcileSession(gateways.first, gateways.second).execute(sessionId, knownRunIds)
+                val reconciliationKnownRunIds =
+                    synchronized(sessionRequestLock) {
+                        knownRunIds + visibleSessionRuns(sessionId).mapTo(mutableSetOf()) { it.id }
+                    }
+                val result = ReconcileSession(gateways.first, gateways.second).execute(sessionId, reconciliationKnownRunIds)
                 val outcome =
                     applyTimedOutSendReconciliation(
                         sessionId,
@@ -3011,6 +3035,13 @@ class EntryStateHolder(
                 if (outcome.applied) {
                     outcome.runToPersist?.let { entry ->
                         persistOrQueueRecoveryEntry(requestEndpoint, entry)
+                    }
+                    outcome.runToRemove?.let { entry ->
+                        try {
+                            removeRunRecoveryEntry?.invoke(requestEndpoint, entry) ?: runRecoveryRegistry?.remove(entry)
+                        } catch (_: Exception) {
+                            // The terminal state is authoritative; the next reconciliation retries cleanup.
+                        }
                     }
                     outcome.runToObserve?.let {
                         startRunObservation(
@@ -3071,9 +3102,21 @@ class EntryStateHolder(
                 reconciliation.history.messages
                     .map { it.toSessionMessageUiState() }
                     .chronological()
+            val uncertaintyBelongsToThisSubmission =
+                !runSubmissionUncertaintyStore.contains(pendingKey) ||
+                    runSubmissionUncertaintyStore.knownRunIds(pendingKey) == pendingRecovery?.knownRunIds.orEmpty()
+            val existingBoundSubmissionRun =
+                uncertainSubmissionRunIds[sessionId]?.let { runId ->
+                    visibleSessionRuns(sessionId).lastOrNull { it.id == runId }
+                }
             val discoveredLocalRun =
-                if (bindDiscoveredRun) {
-                    reconciliation.discoveredRuns.filter(Run::isActive).singleOrNull()
+                if (
+                    bindDiscoveredRun &&
+                    reconciliation.discoveredRuns.size == 1 &&
+                    existingBoundSubmissionRun == null &&
+                    uncertaintyBelongsToThisSubmission
+                ) {
+                    reconciliation.discoveredRuns.single()
                 } else {
                     null
                 }
@@ -3081,16 +3124,35 @@ class EntryStateHolder(
                 uncertainSubmissionRunIds[sessionId] = discoveredRun.id
                 sessionRuns[sessionId] = mergeRuns(sessionRuns[sessionId].orEmpty(), listOf(discoveredRun))
             }
-            val uncertaintyBelongsToThisSubmission =
-                !runSubmissionUncertaintyStore.contains(pendingKey) ||
-                    runSubmissionUncertaintyStore.knownRunIds(pendingKey) == pendingRecovery?.knownRunIds.orEmpty()
-            if (resolveWhenNoNewRun && reconciliation.discoveredRuns.isEmpty() && uncertaintyBelongsToThisSubmission) {
+            val submissionRun = existingBoundSubmissionRun ?: discoveredLocalRun
+            val submissionConfirmed =
+                submissionRun != null &&
+                    !submissionRun.isActive() &&
+                    uncertaintyBelongsToThisSubmission
+            val noNewRunConfirmsNoSubmission =
+                resolveWhenNoNewRun &&
+                    reconciliation.discoveredRuns.isEmpty() &&
+                    uncertainSubmissionRunIds[sessionId] == null
+            val canClearUncertainty =
+                uncertaintyBelongsToThisSubmission &&
+                    (submissionConfirmed || noNewRunConfirmsNoSubmission)
+            if (canClearUncertainty) {
                 unresolvedSubmissionSessions.remove(sessionId)
                 uncertainSubmissionRunIds.remove(sessionId)
+                if (submissionRun != null) {
+                    forgetObservationState(sessionId, submissionRun.id)
+                }
                 val draft = recoveryDraft ?: uncertainSendDrafts[sessionId]
                 uncertainSendDrafts.remove(sessionId)
                 if (draft != null) sessionDrafts[sessionId] = draft
-                sessionSendErrors[sessionId] = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+                val clearedSendErrorCategory =
+                    if (resolveWhenNoNewRun) {
+                        MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+                    } else {
+                        pendingRecovery?.errorCategory ?: MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+                    }
+                sessionSendErrors[sessionId] =
+                    clearedSendErrorCategory
                 runSubmissionUncertaintyStore.removeIfKnownRunIdsMatch(
                     pendingKey,
                     pendingRecovery?.knownRunIds.orEmpty(),
@@ -3110,7 +3172,7 @@ class EntryStateHolder(
                                         activeRuns = knownRuns.activeRuns(),
                                         latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
                                         activeResponse = latestObservation?.toSessionMessageUiState(),
-                                        sendErrorCategory = MessageSendErrorCategory.GATEWAY_REQUEST_FAILED,
+                                        sendErrorCategory = clearedSendErrorCategory,
                                         hasUnresolvedSubmission = false,
                                         errorCategory = null,
                                         isStale = false,
@@ -3130,8 +3192,15 @@ class EntryStateHolder(
             pendingTimedOutSends.remove(sessionId)
             TimedOutSendReconciliationOutcome(
                 applied = true,
-                runToObserve = discoveredLocalRun,
-                runToPersist = discoveredLocalRun?.let { RunRecoveryEntry(sessionId, it.id) },
+                runToObserve = (existingBoundSubmissionRun ?: discoveredLocalRun)?.takeIf(Run::isActive),
+                runToPersist =
+                    discoveredLocalRun
+                        ?.takeIf(Run::isActive)
+                        ?.let { RunRecoveryEntry(sessionId, it.id) },
+                runToRemove =
+                    submissionRun
+                        ?.takeUnless(Run::isActive)
+                        ?.let { RunRecoveryEntry(sessionId, it.id) },
             )
         }
 
@@ -3961,6 +4030,7 @@ private data class TimedOutSendReconciliationOutcome(
     val applied: Boolean,
     val runToObserve: Run? = null,
     val runToPersist: RunRecoveryEntry? = null,
+    val runToRemove: RunRecoveryEntry? = null,
 )
 
 private data class SessionRequestContext(

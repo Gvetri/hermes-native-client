@@ -133,6 +133,56 @@ class EntryWiringRestartIntegrationTest {
         }
     }
 
+    @Test
+    fun production_wiring_settles_a_pending_create_when_the_holder_closes() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val uncertaintyKey = PendingRunSubmissionKey(endpoint, RestartGateway.SESSION_ID)
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        storage.clearForTest()
+        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        try {
+            val firstHolder = createHolder(context, gateway)
+            try {
+                connect(firstHolder, endpoint, hasSavedEndpoint = false)
+                openSession(firstHolder, gateway.session.id)
+                gateway.blockCreate = true
+                firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Do not lose recovery"))
+                firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+                firstHolder.close()
+                assertTrue(ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey))
+            } finally {
+                gateway.releaseCreate.countDown()
+                firstHolder.close()
+            }
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            gateway.terminal = true
+            val restartedHolder = createHolder(context, gateway)
+            try {
+                connect(restartedHolder, endpoint, hasSavedEndpoint = true)
+                openSession(restartedHolder, gateway.session.id)
+                awaitState(restartedHolder) {
+                    val opened = it.sessionList?.openedSession
+                    opened != null &&
+                        !opened.hasUnresolvedSubmission &&
+                        opened.activeRuns.isEmpty() &&
+                        !opened.isReconciliationInProgress
+                }
+                assertEquals(1, gateway.runRequests.size)
+            } finally {
+                restartedHolder.close()
+            }
+        } finally {
+            gateway.releaseCreate.countDown()
+            storage.clearForTest()
+            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        }
+    }
+
     private fun createHolder(
         context: Context,
         gateway: RestartGateway,
@@ -208,6 +258,10 @@ class EntryWiringRestartIntegrationTest {
         var terminal = false
         var failCreateAfterAcceptance = false
         var acceptedRunVisible = false
+        var blockCreate = false
+        val runStarted = CountDownLatch(1)
+        val runFinished = CountDownLatch(1)
+        val releaseCreate = CountDownLatch(1)
 
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
 
@@ -277,6 +331,16 @@ class EntryWiringRestartIntegrationTest {
             if (failCreateAfterAcceptance) {
                 acceptedRunVisible = true
                 throw IllegalStateException("response lost after acceptance")
+            }
+            if (blockCreate) {
+                runStarted.countDown()
+                try {
+                    check(releaseCreate.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                        "Run was not released."
+                    }
+                } finally {
+                    runFinished.countDown()
+                }
             }
             return activeRun
         }
