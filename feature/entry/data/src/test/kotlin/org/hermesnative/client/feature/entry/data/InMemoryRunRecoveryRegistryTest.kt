@@ -38,4 +38,27 @@ class InMemoryRunRecoveryRegistryTest {
 
         assertEquals(emptyList<RunRecoveryEntry>(), registry.load())
     }
+
+    @Test
+    fun default_registry_round_trips_entries_through_persistent_storage() {
+        val storage = FakeRunRecoveryStorage()
+        val registry = DefaultRunRecoveryRegistry(storage)
+
+        registry.save(second)
+        registry.save(first)
+
+        assertEquals(listOf(first, second), DefaultRunRecoveryRegistry(storage).load())
+        registry.remove(first)
+        assertEquals(listOf(second), registry.load())
+    }
+
+    private class FakeRunRecoveryStorage(
+        private var entries: Set<RunRecoveryEntry> = emptySet(),
+    ) : RunRecoveryStorage {
+        override fun load(): Set<RunRecoveryEntry> = entries
+
+        override fun save(entries: Set<RunRecoveryEntry>) {
+            this.entries = entries
+        }
+    }
 }

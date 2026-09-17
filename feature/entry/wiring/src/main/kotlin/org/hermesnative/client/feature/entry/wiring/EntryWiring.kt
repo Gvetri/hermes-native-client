@@ -6,13 +6,14 @@ import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayClient
 import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
+import org.hermesnative.client.feature.entry.data.DefaultRunRecoveryRegistry
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
 
 object EntryWiring {
     fun createEntryStateHolder(context: Context): EntryStateHolder {
         val dataSource = SharedPreferencesGatewayConnectionDataSource(context)
         val repository = DefaultGatewayConnectionRepository(dataSource)
-        val runRecoveryRegistry = SharedPreferencesRunRecoveryRegistry(context)
+        val runRecoveryRegistry = DefaultRunRecoveryRegistry(SharedPreferencesRunRecoveryStorage(context))
         val initialState = LoadEntryState(repository).execute()
         val verifyGatewayConnection =
             VerifyGatewayConnection(repository) { endpoint, bearerCredential ->

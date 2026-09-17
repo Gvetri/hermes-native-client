@@ -53,7 +53,6 @@ import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionReconciliation
-import org.hermesnative.client.feature.entry.domain.decideRunReconciliation
 import org.hermesnative.client.feature.entry.domain.isActive
 import org.hermesnative.client.feature.entry.domain.isTerminal
 import org.hermesnative.client.feature.entry.domain.isValid
@@ -505,44 +504,28 @@ class EntryStateHolder(
         runGateway: RunGatewayPort,
         expectedConnectionGeneration: Long,
     ) {
-        val run =
+        val reconciliation =
             try {
-                runInterruptible { runGateway.getRunStatus(entry.runId) }
+                runInterruptible { ReconcileRun(runGateway, sessionGateway).execute(entry.runId, entry.sessionId) }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
                 return
             }
-        if (
-            run.id != entry.runId ||
-            run.sessionId != entry.sessionId ||
-            run.status.isBlank()
-        ) {
-            return
-        }
 
         val recorded =
             synchronized(sessionRequestLock) {
                 if (connectionGeneration != expectedConnectionGeneration) {
                     false
                 } else {
-                    rememberRecoveredRun(entry, run)
+                    rememberRecoveredRun(entry, reconciliation.run)
                     true
                 }
             }
-        if (!recorded || run.isActive()) return
-
-        val history =
-            try {
-                runInterruptible { sessionGateway.loadSessionHistory(entry.sessionId) }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                return
-            }
         if (
-            history.sessionId != entry.sessionId ||
-            decideRunReconciliation(run, history) != RunReconciliationDecision.CONFIRMED
+            !recorded ||
+            reconciliation.run.isActive() ||
+            reconciliation.decision != RunReconciliationDecision.CONFIRMED
         ) {
             return
         }
@@ -553,9 +536,9 @@ class EntryStateHolder(
                     false
                 } else {
                     authoritativeSessionRuns[entry.sessionId] =
-                        mergeRuns(authoritativeSessionRuns[entry.sessionId].orEmpty(), history.runs())
+                        mergeRuns(authoritativeSessionRuns[entry.sessionId].orEmpty(), reconciliation.history.runs())
                     sessionRuns[entry.sessionId] =
-                        mergeRuns(sessionRuns[entry.sessionId].orEmpty(), listOf(run))
+                        mergeRuns(sessionRuns[entry.sessionId].orEmpty(), listOf(reconciliation.run))
                     forgetObservationState(entry.sessionId, entry.runId)
                     if (uncertainSubmissionRunIds[entry.sessionId] == entry.runId) {
                         uncertainSubmissionRunIds.remove(entry.sessionId)
@@ -573,7 +556,10 @@ class EntryStateHolder(
                                     current.copy(
                                         openedSession =
                                             opened.copy(
-                                                messages = history.messages.map { it.toSessionMessageUiState() }.chronological(),
+                                                messages =
+                                                    reconciliation.history.messages
+                                                        .map { it.toSessionMessageUiState() }
+                                                        .chronological(),
                                                 latestRun = knownRuns.latestRun(),
                                                 activeRuns = knownRuns.activeRuns(),
                                                 latestRunState =
@@ -833,38 +819,61 @@ class EntryStateHolder(
         runIdToReconcile: RunId? = null,
         clearRefreshWhenNoRun: Boolean = false,
     ) {
-        val run =
+        val runIds =
             synchronized(sessionRequestLock) {
-                visibleSessionRuns(sessionId).lastOrNull { it.id == runIdToReconcile }
-                    ?: runIdToReconcile?.let { runId -> observationStateFor(sessionId, runId)?.run }
-                    ?: visibleSessionRuns(sessionId).latestActiveRun()
-                    ?: latestObservedObservationState(sessionId, visibleSessionRuns(sessionId))
+                val ids = linkedSetOf<RunId>()
+                runIdToReconcile?.let(ids::add)
+                runCatching { runRecoveryRegistry?.load().orEmpty() }
+                    .getOrDefault(emptyList())
+                    .filter { entry -> entry.sessionId == sessionId }
+                    .mapTo(ids) { it.runId }
+                sessionRuns[sessionId].orEmpty().filter(Run::isActive).mapTo(ids) { it.id }
+                visibleSessionRuns(sessionId).latestActiveRun()?.id?.let(ids::add)
+                if (ids.isEmpty()) {
+                    latestObservedObservationState(sessionId, visibleSessionRuns(sessionId))
                         ?.takeIf { state -> !state.state.isTerminal() }
                         ?.run
+                        ?.id
+                        ?.let(ids::add)
+                }
+                ids.toList()
             }
-        if (run == null) {
+        if (runIds.isEmpty()) {
             if (clearRefreshWhenNoRun) {
                 finishReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)
             }
             return
         }
 
-        val reconciledRun =
-            reconcileRun(
-                sessionId = sessionId,
-                runId = run.id,
-                requestConnectionGeneration = requestConnectionGeneration,
-                requestSessionGeneration = requestSessionGeneration,
-                sessionGateway = sessionGateway,
-            )?.run ?: run
+        var activeRunToObserve: Run? = null
+        runIds.forEach { runId ->
+            val run =
+                synchronized(sessionRequestLock) {
+                    visibleSessionRuns(sessionId).lastOrNull { it.id == runId }
+                        ?: observationStateFor(sessionId, runId)?.run
+                } ?: return@forEach
+            val reconciliation =
+                reconcileRun(
+                    sessionId = sessionId,
+                    runId = run.id,
+                    requestConnectionGeneration = requestConnectionGeneration,
+                    requestSessionGeneration = requestSessionGeneration,
+                    sessionGateway = sessionGateway,
+                )
+            val reconciledRun = reconciliation?.run
+            if (reconciledRun?.isActive() == true || (reconciledRun == null && activeRunToObserve == null && run.isActive())) {
+                activeRunToObserve = reconciledRun ?: run
+            }
+        }
+        val runToObserve = activeRunToObserve
         if (
             restartObservation &&
-            reconciledRun.isActive() &&
+            runToObserve != null &&
             shouldReconcileCurrentSession(requestConnectionGeneration, requestSessionGeneration, sessionId)
         ) {
             startRunObservation(
                 sessionId = sessionId,
-                run = reconciledRun,
+                run = runToObserve,
                 expectedConnectionGeneration = requestConnectionGeneration,
                 expectedSessionGeneration = requestSessionGeneration,
             )
@@ -2597,7 +2606,6 @@ class EntryStateHolder(
         var requestSessionGeneration = 0L
         var observationJobToCancel: Job? = null
         var observationToClose: RunEventObservation? = null
-        var recoveryEntryToSave: RunRecoveryEntry? = null
         val applied =
             synchronized(sessionRequestLock) {
                 if (connectionGeneration != requestConnectionGeneration) {
@@ -2606,7 +2614,7 @@ class EntryStateHolder(
                 requestSessionGeneration = sessionRequestGeneration
                 shouldObserve = run.isActive()
                 if (shouldObserve) {
-                    recoveryEntryToSave = RunRecoveryEntry(sessionId = sessionId, runId = run.id)
+                    runRecoveryRegistry?.save(RunRecoveryEntry(sessionId = sessionId, runId = run.id))
                 }
                 uncertainSubmissionRunIds[sessionId] = run.id
                 sessionSendErrors.remove(sessionId)
@@ -2653,7 +2661,6 @@ class EntryStateHolder(
             }
         observationToClose?.close()
         observationJobToCancel?.cancel()
-        recoveryEntryToSave?.let { runRecoveryRegistry?.save(it) }
         if (applied && shouldObserve) {
             startRunObservation(
                 sessionId = sessionId,
@@ -3130,7 +3137,10 @@ class EntryStateHolder(
         openedSession: OpenedSession,
     ): RunId? =
         synchronized(sessionRequestLock) {
-            openedSession.history.latestRun()?.id?.takeUnless { hasUnresolvedSubmission(sessionId) }
+            val hasActiveLocalRun = sessionRuns[sessionId].orEmpty().any(Run::isActive)
+            openedSession.history.latestRun()?.id?.takeUnless {
+                hasUnresolvedSubmission(sessionId) && !hasActiveLocalRun
+            }
         }
 }
 

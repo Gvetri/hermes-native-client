@@ -7,6 +7,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -156,6 +157,78 @@ class EntryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Connected to Gateway").assertIsDisplayed()
+    }
+
+    @Test
+    fun switching_from_an_active_run_keeps_send_available_in_another_session() {
+        val first = SessionItemUiState(SessionId("first"), "First Session", null, pinned = false)
+        val second = SessionItemUiState(SessionId("second"), "Second Session", null, pinned = false)
+        val activeRun = Run(RunId("run-first"), first.id, "running")
+        val state =
+            mutableStateOf(
+                EntryUiState(
+                    title = "Gateway connected",
+                    supportingText = "Connected",
+                    actionLabel = "Connected",
+                    isConnected = true,
+                    sessionList =
+                        SessionListUiState(
+                            sessions = listOf(first, second),
+                            openedSession =
+                                OpenSessionUiState(
+                                    session = first,
+                                    messages = emptyList(),
+                                    composerText = "First draft",
+                                    latestRun = activeRun,
+                                    activeRuns = listOf(activeRun),
+                                    latestRunState = RunPresentationState.RUNNING,
+                                ),
+                        ),
+                ),
+            )
+        val events = mutableListOf<EntryUiEvent>()
+
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state = state.value,
+                    onEvent = { event ->
+                        events += event
+                        val sessions = requireNotNull(state.value.sessionList)
+                        when (event) {
+                            EntryUiEvent.ReturnToSessionListClicked ->
+                                state.value = state.value.copy(sessionList = sessions.copy(openedSession = null))
+                            is EntryUiEvent.SessionClicked ->
+                                state.value =
+                                    state.value.copy(
+                                        sessionList =
+                                            sessions.copy(
+                                                openedSession =
+                                                    OpenSessionUiState(
+                                                        session = second,
+                                                        messages = emptyList(),
+                                                        composerText = "Second draft",
+                                                    ),
+                                            ),
+                                    )
+                            else -> Unit
+                        }
+                    },
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Back to Sessions").performClick()
+        composeTestRule.onNodeWithText("Second Session").performClick()
+        composeTestRule.onNodeWithText("Send").assertIsEnabled()
+        assertEquals(
+            listOf(
+                EntryUiEvent.ReturnToSessionListClicked,
+                EntryUiEvent.SessionClicked(second.id),
+            ),
+            events,
+        )
     }
 
     @Test

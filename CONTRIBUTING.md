@@ -105,7 +105,7 @@ and stable instead of adding screenshots only to increase the count.
 
 ## Module changes
 
-Keep feature logic in a feature-first vertical slice. Domain and application modules must remain plain Kotlin/JVM. Put concrete adapters in data, UDF state and Compose rendering in presentation, and implementation selection in wiring. Keep the app module a thin composition root.
+Keep feature logic in a feature-first vertical slice. Domain and application modules must remain plain Kotlin/JVM. Put concrete adapters in data, UDF state and Compose rendering in presentation, and implementation selection in wiring. Android-only persistence bridges may remain in wiring when the data module stays JVM-only; keep their feature behavior in data. Keep the app module a thin composition root.
 
 ## Public documentation
 

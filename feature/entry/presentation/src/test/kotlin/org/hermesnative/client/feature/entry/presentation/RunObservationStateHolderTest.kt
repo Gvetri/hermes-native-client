@@ -187,6 +187,55 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun reopening_reconciles_a_local_run_when_a_newer_history_run_is_latest() {
+        val session = session("session-1")
+        val localRun = Run(RunId("run-local"), session.id, "running")
+        val externalRun = Run(RunId("run-external"), session.id, "succeeded")
+        val initialObservation = BlockingObservation()
+        val reopenedObservation = BlockingObservation()
+        val gateway =
+            ScriptedGateway(session).apply {
+                enqueueRun(localRun)
+                observation = initialObservation
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(initialObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            assertTrue(initialObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            gateway.observation = reopenedObservation
+            gateway.enqueueStatus(externalRun)
+            gateway.enqueueStatus(localRun)
+            gateway.enqueueHistory(
+                SessionHistory(
+                    session.id,
+                    listOf(GatewayHistoryMessage("external-result", "assistant", "Remote result", externalRun.id, "succeeded")),
+                    null,
+                ),
+            )
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                gateway.statusRequests == listOf(externalRun.id, localRun.id) &&
+                    opened?.activeRuns?.any { run -> run.id == localRun.id } == true &&
+                    !opened.isReconciliationInProgress
+            }
+            assertTrue(reopenedObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+        } finally {
+            initialObservation.release.countDown()
+            reopenedObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun restart_reconciles_only_known_local_nonterminal_runs() {
         val session = session("session-1")
         val run = Run(RunId("run-local"), session.id, "running")
