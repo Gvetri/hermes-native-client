@@ -1032,6 +1032,10 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED
             }
             assertTrue(firstObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isRefreshing == false &&
+                    it.sessionList?.openedSession?.isReconciliationInProgress == false
+            }
 
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Second"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
