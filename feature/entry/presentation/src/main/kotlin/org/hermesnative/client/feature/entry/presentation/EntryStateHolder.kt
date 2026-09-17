@@ -426,7 +426,6 @@ class EntryStateHolder(
             }
         jobsToCancel.forEach(Job::cancel)
         observationsToClose.forEach(RunEventObservation::close)
-        runRecoveryRegistry?.clear()
         _uiState.value = EntryState().toUiState()
     }
 
