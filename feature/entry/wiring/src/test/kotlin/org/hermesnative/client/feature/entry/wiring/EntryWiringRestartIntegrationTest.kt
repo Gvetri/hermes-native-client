@@ -48,7 +48,7 @@ class EntryWiringRestartIntegrationTest {
 
         val firstHolder = createHolder(context, gateway)
         try {
-            connect(firstHolder, endpoint, hasSavedEndpoint = false)
+            connect(firstHolder, " $endpoint ", hasSavedEndpoint = false)
             openSession(firstHolder, gateway.session.id)
             firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Persist this run"))
             firstHolder.onEvent(EntryUiEvent.SendMessageClicked)

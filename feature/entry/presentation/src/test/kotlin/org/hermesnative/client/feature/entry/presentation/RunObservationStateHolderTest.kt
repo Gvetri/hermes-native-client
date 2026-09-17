@@ -332,6 +332,39 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun terminal_reconciliation_of_another_run_keeps_the_current_run_observer_open() {
+        val session = session("session-multiple-runs")
+        val observedRun = Run(RunId("run-observed"), session.id, "running")
+        val reconciledRun = Run(RunId("run-reconciled"), session.id, "succeeded")
+        val observation = BlockingObservation()
+        val recoveryRegistry = InMemoryRunRecoveryRegistry()
+        val gateway =
+            ScriptedGateway(session).apply {
+                enqueueRun(observedRun)
+                this.observation = observation
+                statusByRun[reconciledRun.id] = reconciledRun
+            }
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            recoveryRegistry.save(RunRecoveryEntry(session.id, reconciledRun.id))
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+
+            awaitCondition { gateway.statusRequests.contains(reconciledRun.id) }
+            assertEquals(listOf(observedRun.id), gateway.observedRunIds)
+            assertFalse(observation.closed.await(100, TimeUnit.MILLISECONDS))
+        } finally {
+            observation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun restart_reconciles_only_known_local_nonterminal_runs() {
         val session = session("session-1")
         val run = Run(RunId("run-local"), session.id, "running")

@@ -27,6 +27,11 @@ object EntryWiring {
             DefaultRunRecoveryRegistry(
                 SharedPreferencesRunRecoveryStorage(context, recoveryEndpoint::get),
             )
+        val endpointScopedRecoveryRegistry: (String) -> DefaultRunRecoveryRegistry = { endpoint ->
+            DefaultRunRecoveryRegistry(
+                SharedPreferencesRunRecoveryStorage(context) { endpoint },
+            )
+        }
         val initialState = LoadEntryState(repository).execute()
         val verifyGatewayConnection =
             VerifyGatewayConnection(repository) { endpoint, bearerCredential ->
@@ -47,14 +52,10 @@ object EntryWiring {
             runRecoveryRegistry = runRecoveryRegistry,
             updateRunRecoveryEndpoint = recoveryEndpoint::set,
             persistRunRecoveryEntry = { endpoint, entry ->
-                DefaultRunRecoveryRegistry(
-                    SharedPreferencesRunRecoveryStorage(context) { endpoint },
-                ).save(entry)
+                endpointScopedRecoveryRegistry(endpoint).save(entry)
             },
             removeRunRecoveryEntry = { endpoint, entry ->
-                DefaultRunRecoveryRegistry(
-                    SharedPreferencesRunRecoveryStorage(context) { endpoint },
-                ).remove(entry)
+                endpointScopedRecoveryRegistry(endpoint).remove(entry)
             },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
         )

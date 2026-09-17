@@ -34,6 +34,7 @@ import org.hermesnative.client.feature.entry.application.RenameSession
 import org.hermesnative.client.feature.entry.application.SubmitMessage
 import org.hermesnative.client.feature.entry.application.UnpinSession
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
+import org.hermesnative.client.feature.entry.application.normalizeGatewayEndpoint
 import org.hermesnative.client.feature.entry.domain.AuthoritativeRunReconciliation
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
@@ -217,6 +218,7 @@ class EntryStateHolder(
     private val authoritativeSessionRuns = mutableMapOf<SessionId, List<Run>>()
     private val runObservationJobs = mutableMapOf<SessionId, Job>()
     private val runObservations = mutableMapOf<SessionId, RunEventObservation>()
+    private val runObservationRunIds = mutableMapOf<SessionId, RunId>()
     private val pendingRunObservationRequests = mutableMapOf<SessionId, ObserverStartRequest>()
     private val runObservationStates = mutableMapOf<SessionId, MutableMap<RunId, RunObservationState>>()
     private val unresolvedSubmissionSessions = mutableSetOf<SessionId>()
@@ -279,6 +281,7 @@ class EntryStateHolder(
                 runJobs.clear()
                 runObservationJobs.clear()
                 runObservations.clear()
+                runObservationRunIds.clear()
                 pendingRunObservationRequests.clear()
                 runObservationStates.clear()
                 unresolvedSubmissionSessions.clear()
@@ -335,6 +338,7 @@ class EntryStateHolder(
                         endpoint = state.endpoint,
                         bearerCredential = state.bearerCredential,
                     )
+                    val normalizedEndpoint = normalizeGatewayEndpoint(state.endpoint)
                     val gateway =
                         synchronized(sessionRequestLock) {
                             if (connectionGeneration != requestConnectionGeneration) {
@@ -342,18 +346,19 @@ class EntryStateHolder(
                             } else {
                                 val gateway =
                                     sessionGatewayFactory?.invoke(
-                                        state.endpoint,
+                                        normalizedEndpoint,
                                         state.bearerCredential,
                                     )
-                                updateRunRecoveryEndpoint?.invoke(state.endpoint)
+                                updateRunRecoveryEndpoint?.invoke(normalizedEndpoint)
                                 sessionGateway = gateway
                                 runGateway =
                                     runGatewayFactory?.invoke(
-                                        state.endpoint,
+                                        normalizedEndpoint,
                                         state.bearerCredential,
                                     ) ?: (gateway as? RunGatewayPort)
                                 _uiState.value =
                                     _uiState.value.copy(
+                                        endpoint = normalizedEndpoint,
                                         title = "Gateway connected",
                                         supportingText = "The Gateway contract was verified successfully.",
                                         actionLabel = "Connected",
@@ -372,7 +377,7 @@ class EntryStateHolder(
                             }
                         }
                     gateway?.let(::loadInitialSessions)
-                    flushPendingRecoveryEntries(state.endpoint)
+                    flushPendingRecoveryEntries(normalizedEndpoint)
                     startRunRecovery(requestConnectionGeneration)
                 } catch (error: CancellationException) {
                     throw error
@@ -424,6 +429,7 @@ class EntryStateHolder(
                     runJobs.clear()
                     runObservationJobs.clear()
                     runObservations.clear()
+                    runObservationRunIds.clear()
                     pendingRunObservationRequests.clear()
                     runObservationStates.clear()
                     unresolvedSubmissionSessions.clear()
@@ -1050,14 +1056,21 @@ class EntryStateHolder(
                 terminalRunIds.remove(run.id)
             }
             forgetConfirmedObservationStates(sessionId, terminalRunIds)
-            authoritativeSessionRuns[sessionId] = mergeRuns(authoritativeRuns, listOf(run))
+            authoritativeSessionRuns[sessionId] =
+                mergeRuns(
+                    authoritativeSessionRuns[sessionId].orEmpty(),
+                    authoritativeRuns + run,
+                )
             if (isLocallyOwnedRun(sessionId, run.id)) {
                 sessionRuns[sessionId] = mergeRuns(sessionRuns[sessionId].orEmpty(), listOf(run))
             }
             val knownRuns = visibleSessionRuns(sessionId)
             if (!reconciliation.run.isActive()) {
-                observationJobToCancel = runObservationJobs[sessionId]
-                observationToClose = runObservations.remove(sessionId)
+                if (runObservationRunIds[sessionId] == run.id) {
+                    observationJobToCancel = runObservationJobs[sessionId]
+                    observationToClose = runObservations.remove(sessionId)
+                    runObservationRunIds.remove(sessionId)
+                }
             }
             val isBoundSubmission = uncertainSubmissionRunIds[sessionId] == run.id
             val canClearSendState = isBoundSubmission
@@ -1891,6 +1904,7 @@ class EntryStateHolder(
                 if (current.openedSession?.session?.id == sessionId) {
                     observationJobToCancel = runObservationJobs[sessionId]
                     observationToClose = runObservations.remove(sessionId)
+                    runObservationRunIds.remove(sessionId)
                     runObservationStates.remove(sessionId)
                 }
                 _uiState.value =
@@ -2379,6 +2393,7 @@ class EntryStateHolder(
                 retainUnconfirmedTerminalRuns(sessionId)
                 observationJobToCancel = runObservationJobs[sessionId]
                 observationToClose = runObservations.remove(sessionId)
+                runObservationRunIds.remove(sessionId)
             }
             beginSessionRequest()
             _uiState.value =
@@ -2742,6 +2757,7 @@ class EntryStateHolder(
                 if (current != null && opened != null) {
                     observationJobToCancel = runObservationJobs[sessionId]
                     observationToClose = runObservations.remove(sessionId)
+                    runObservationRunIds.remove(sessionId)
                     _uiState.value =
                         _uiState.value.copy(
                             sessionList =
@@ -2869,6 +2885,7 @@ class EntryStateHolder(
                                     null
                                 } else {
                                     runObservationJobs.remove(sessionId)
+                                    runObservationRunIds.remove(sessionId)
                                     val pendingRequest = pendingRunObservationRequests.remove(sessionId)
                                     if (!observationJob.isCancelled) {
                                         null
@@ -2901,6 +2918,7 @@ class EntryStateHolder(
                     }
                 }
             runObservationJobs[sessionId] = observationJob
+            runObservationRunIds[sessionId] = run.id
             jobToStart = observationJob
         }
         val observationJob = jobToStart ?: return
@@ -2911,6 +2929,7 @@ class EntryStateHolder(
                         null
                     } else {
                         runObservationJobs.remove(sessionId)
+                        runObservationRunIds.remove(sessionId)
                         pendingRunObservationRequests.remove(sessionId)
                         visibleSessionRuns(sessionId).latestActiveRun()?.let { nextRun ->
                             if (observationJob.isCancelled &&

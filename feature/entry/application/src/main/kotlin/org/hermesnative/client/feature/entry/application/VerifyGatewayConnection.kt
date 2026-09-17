@@ -17,7 +17,7 @@ class VerifyGatewayConnection(
         endpoint: String,
         bearerCredential: String,
     ): GatewayCapabilities {
-        val normalizedEndpoint = GatewayEndpointValidator.normalize(endpoint)
+        val normalizedEndpoint = normalizeGatewayEndpoint(endpoint)
         if (bearerCredential.isBlank()) {
             throw GatewayException(GatewayErrorCategory.AUTHENTICATION_FAILED)
         }
@@ -31,6 +31,8 @@ class VerifyGatewayConnection(
         return capabilities
     }
 }
+
+fun normalizeGatewayEndpoint(endpoint: String): String = GatewayEndpointValidator.normalize(endpoint)
 
 private object GatewayEndpointValidator {
     private val endpointPattern =
