@@ -8,10 +8,12 @@ import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.isValid
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 /** Android-only persistence bridge; registry behavior remains in the JVM data module. */
 class SharedPreferencesRunRecoveryStorage(
     context: Context,
+    private val endpointProvider: () -> String?,
 ) : RunRecoveryStorage {
     private val preferences =
         context.applicationContext.getSharedPreferences(
@@ -21,7 +23,7 @@ class SharedPreferencesRunRecoveryStorage(
 
     override fun load(): Set<RunRecoveryEntry> =
         preferences
-            .getStringSet(ENTRIES_KEY, emptySet())
+            .getStringSet(entriesKey(), emptySet())
             .orEmpty()
             .mapNotNull(::decode)
             .filter(RunRecoveryEntry::isValid)
@@ -31,7 +33,7 @@ class SharedPreferencesRunRecoveryStorage(
         check(
             preferences
                 .edit()
-                .putStringSet(ENTRIES_KEY, entries.filter(RunRecoveryEntry::isValid).map(::encode).toSet())
+                .putStringSet(entriesKey(), entries.filter(RunRecoveryEntry::isValid).map(::encode).toSet())
                 .commit(),
         ) { "Could not persist Gateway Run recovery metadata." }
     }
@@ -53,8 +55,19 @@ class SharedPreferencesRunRecoveryStorage(
 
     private fun decodePart(value: String): String = Base64.decode(value, Base64.NO_WRAP).toString(StandardCharsets.UTF_8)
 
+    private fun entriesKey(): String = "$ENTRIES_KEY.${endpointNamespace(endpointProvider())}"
+
+    private fun endpointNamespace(endpoint: String?): String {
+        val value = endpoint?.takeIf(String::isNotBlank) ?: UNBOUND_ENDPOINT
+        return MessageDigest
+            .getInstance("SHA-256")
+            .digest(value.toByteArray(StandardCharsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "gateway_run_recovery"
         const val ENTRIES_KEY = "entries"
+        const val UNBOUND_ENDPOINT = "unbound"
     }
 }

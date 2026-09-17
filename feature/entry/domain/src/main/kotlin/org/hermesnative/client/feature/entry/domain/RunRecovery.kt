@@ -14,6 +14,4 @@ interface RunRecoveryRegistry {
     fun save(entry: RunRecoveryEntry)
 
     fun remove(entry: RunRecoveryEntry)
-
-    fun clear()
 }

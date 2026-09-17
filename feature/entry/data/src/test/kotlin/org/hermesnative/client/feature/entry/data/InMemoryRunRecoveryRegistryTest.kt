@@ -31,15 +31,6 @@ class InMemoryRunRecoveryRegistryTest {
     }
 
     @Test
-    fun clear_removes_all_local_recovery_entries() {
-        val registry = InMemoryRunRecoveryRegistry(listOf(first, second))
-
-        registry.clear()
-
-        assertEquals(emptyList<RunRecoveryEntry>(), registry.load())
-    }
-
-    @Test
     fun default_registry_round_trips_entries_through_persistent_storage() {
         val storage = FakeRunRecoveryStorage()
         val registry = DefaultRunRecoveryRegistry(storage)

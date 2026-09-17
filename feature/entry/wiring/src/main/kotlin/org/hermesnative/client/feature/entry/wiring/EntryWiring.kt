@@ -13,7 +13,10 @@ object EntryWiring {
     fun createEntryStateHolder(context: Context): EntryStateHolder {
         val dataSource = SharedPreferencesGatewayConnectionDataSource(context)
         val repository = DefaultGatewayConnectionRepository(dataSource)
-        val runRecoveryRegistry = DefaultRunRecoveryRegistry(SharedPreferencesRunRecoveryStorage(context))
+        val runRecoveryRegistry =
+            DefaultRunRecoveryRegistry(
+                SharedPreferencesRunRecoveryStorage(context, dataSource::loadEndpoint),
+            )
         val initialState = LoadEntryState(repository).execute()
         val verifyGatewayConnection =
             VerifyGatewayConnection(repository) { endpoint, bearerCredential ->

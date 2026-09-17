@@ -25,6 +25,7 @@ import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
+import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -37,6 +38,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.ArrayDeque
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -187,6 +189,37 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun recovery_persistence_failure_keeps_the_created_run_and_marks_its_outcome_uncertain() {
+        val session = session("session-1")
+        val run = Run(RunId("run-1"), session.id, "running")
+        val observation = BlockingObservation()
+        val gateway =
+            ScriptedGateway(session).apply {
+                enqueueRun(run)
+                this.observation = observation
+            }
+        val holder = holder(gateway, Dispatchers.Default, FailingRunRecoveryRegistry())
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.UNCERTAIN &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.composerText == "Run this"
+            }
+            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+        } finally {
+            observation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun reopening_reconciles_a_local_run_when_a_newer_history_run_is_latest() {
         val session = session("session-1")
         val localRun = Run(RunId("run-local"), session.id, "running")
@@ -225,6 +258,9 @@ class RunObservationStateHolderTest {
                 val opened = it.sessionList?.openedSession
                 gateway.statusRequests == listOf(externalRun.id, localRun.id) &&
                     opened?.activeRuns?.any { run -> run.id == localRun.id } == true &&
+                    opened.latestRun?.id == localRun.id &&
+                    opened.messages.map { message -> message.runId } == listOf(externalRun.id) &&
+                    opened.activeResponse?.runId == localRun.id &&
                     !opened.isReconciliationInProgress
             }
             assertTrue(reopenedObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
@@ -303,7 +339,7 @@ class RunObservationStateHolderTest {
     private fun holder(
         gateway: ScriptedGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-        recoveryRegistry: InMemoryRunRecoveryRegistry? = null,
+        recoveryRegistry: RunRecoveryRegistry? = null,
     ): EntryStateHolder {
         val repository: GatewayConnectionRepository =
             DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())
@@ -362,9 +398,9 @@ class RunObservationStateHolderTest {
         private val historyResults = ArrayDeque<SessionHistory>()
         private val statusResults = ArrayDeque<Run>()
         var observation: RunEventObservation = ScriptedObservation(emptyList())
-        val observedRunIds = mutableListOf<RunId>()
-        val statusRequests = mutableListOf<RunId>()
-        val cancelledRunIds = mutableListOf<RunId>()
+        val observedRunIds = CopyOnWriteArrayList<RunId>()
+        val statusRequests = CopyOnWriteArrayList<RunId>()
+        val cancelledRunIds = CopyOnWriteArrayList<RunId>()
 
         fun enqueueRun(run: Run) {
             runResults += run
@@ -471,6 +507,14 @@ class RunObservationStateHolderTest {
             }
             release.countDown()
         }
+    }
+
+    private class FailingRunRecoveryRegistry : RunRecoveryRegistry {
+        override fun load(): List<RunRecoveryEntry> = emptyList()
+
+        override fun save(entry: RunRecoveryEntry): Unit = error("recovery storage unavailable")
+
+        override fun remove(entry: RunRecoveryEntry) = Unit
     }
 
     private companion object {

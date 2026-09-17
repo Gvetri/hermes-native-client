@@ -24,9 +24,4 @@ class InMemoryRunRecoveryRegistry(
     override fun remove(entry: RunRecoveryEntry) {
         entries -= entry
     }
-
-    @Synchronized
-    override fun clear() {
-        entries.clear()
-    }
 }

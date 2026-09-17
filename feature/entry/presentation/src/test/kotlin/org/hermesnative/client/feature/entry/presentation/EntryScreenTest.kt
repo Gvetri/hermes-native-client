@@ -18,11 +18,30 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import org.hermesnative.client.feature.entry.application.EntryState
+import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
+import org.hermesnative.client.feature.entry.data.InMemoryRunRecoveryRegistry
+import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
+import org.hermesnative.client.feature.entry.domain.GatewayConnection
+import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
+import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
+import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
+import org.hermesnative.client.feature.entry.domain.RunEvent
+import org.hermesnative.client.feature.entry.domain.RunEventObservation
+import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
+import org.hermesnative.client.feature.entry.domain.Session
+import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
+import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.SessionListRequest
+import org.hermesnative.client.feature.entry.domain.SessionPage
+import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -161,74 +180,53 @@ class EntryScreenTest {
 
     @Test
     fun switching_from_an_active_run_keeps_send_available_in_another_session() {
-        val first = SessionItemUiState(SessionId("first"), "First Session", null, pinned = false)
-        val second = SessionItemUiState(SessionId("second"), "Second Session", null, pinned = false)
+        val first = Session(SessionId("first"), "First Session", null, pinned = false, updatedAt = null)
+        val second = Session(SessionId("second"), "Second Session", null, pinned = false, updatedAt = null)
         val activeRun = Run(RunId("run-first"), first.id, "running")
-        val state =
-            mutableStateOf(
-                EntryUiState(
-                    title = "Gateway connected",
-                    supportingText = "Connected",
-                    actionLabel = "Connected",
-                    isConnected = true,
-                    sessionList =
-                        SessionListUiState(
-                            sessions = listOf(first, second),
-                            openedSession =
-                                OpenSessionUiState(
-                                    session = first,
-                                    messages = emptyList(),
-                                    composerText = "First draft",
-                                    latestRun = activeRun,
-                                    activeRuns = listOf(activeRun),
-                                    latestRunState = RunPresentationState.RUNNING,
-                                ),
-                        ),
-                ),
+        val gateway = SwitchingGateway(first, second, activeRun)
+        val holder =
+            EntryStateHolder(
+                initialState = EntryState(isGatewayConnectionConfigured = false),
+                verifyGatewayConnection =
+                    VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
+                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                    },
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                sessionGatewayFactory = { _, _ -> gateway },
+                runGatewayFactory = { _, _ -> gateway },
+                runRecoveryRegistry = InMemoryRunRecoveryRegistry(),
             )
-        val events = mutableListOf<EntryUiEvent>()
 
         composeTestRule.setContent {
             HermesTheme {
                 EntryScreen(
-                    state = state.value,
-                    onEvent = { event ->
-                        events += event
-                        val sessions = requireNotNull(state.value.sessionList)
-                        when (event) {
-                            EntryUiEvent.ReturnToSessionListClicked ->
-                                state.value = state.value.copy(sessionList = sessions.copy(openedSession = null))
-                            is EntryUiEvent.SessionClicked ->
-                                state.value =
-                                    state.value.copy(
-                                        sessionList =
-                                            sessions.copy(
-                                                openedSession =
-                                                    OpenSessionUiState(
-                                                        session = second,
-                                                        messages = emptyList(),
-                                                        composerText = "Second draft",
-                                                    ),
-                                            ),
-                                    )
-                            else -> Unit
-                        }
-                    },
+                    state = holder.uiState.collectAsState().value,
+                    onEvent = holder::onEvent,
                 )
             }
         }
 
-        composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
-        composeTestRule.onNodeWithText("Back to Sessions").performClick()
-        composeTestRule.onNodeWithText("Second Session").performClick()
-        composeTestRule.onNodeWithText("Send").assertIsEnabled()
-        assertEquals(
-            listOf(
-                EntryUiEvent.ReturnToSessionListClicked,
-                EntryUiEvent.SessionClicked(second.id),
-            ),
-            events,
-        )
+        try {
+            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+            holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
+            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+            composeTestRule.onNodeWithText("First Session").performClick()
+            composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("First draft")) }
+            composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
+
+            composeTestRule.onNodeWithText("Back to Sessions").performClick()
+            composeTestRule.onNodeWithText("Second Session").performClick()
+            composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("Second draft")) }
+            composeTestRule.onNodeWithText("Send").assertIsEnabled()
+
+            composeTestRule.onNodeWithText("Back to Sessions").performClick()
+            composeTestRule.onNodeWithText("First Session").performClick()
+            composeTestRule.onNodeWithText("First draft").assertIsDisplayed()
+            composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
+        } finally {
+            holder.close()
+        }
     }
 
     @Test
@@ -879,5 +877,68 @@ class EntryScreenTest {
         runStateNodes[0].assertIsDisplayed()
         runStateNodes[1].assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Running").assertDoesNotExist()
+    }
+
+    private class SwitchingGateway(
+        private val first: Session,
+        private val second: Session,
+        private val activeRun: Run,
+    ) : SessionGatewayPort, RunGatewayPort {
+        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(first, second), nextCursor = null)
+
+        override fun createSession(title: String?): Session = error("not used")
+
+        override fun openSession(sessionId: SessionId): Session = listOf(first, second).single { it.id == sessionId }
+
+        override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
+            SessionHistory(
+                sessionId = sessionId,
+                messages =
+                    if (sessionId == first.id) {
+                        listOf(
+                            GatewayHistoryMessage(
+                                id = "active-run",
+                                role = "assistant",
+                                content = "Still running",
+                                runId = activeRun.id,
+                                runStatus = activeRun.status,
+                            ),
+                        )
+                    } else {
+                        emptyList()
+                    },
+                nextCursor = null,
+            )
+
+        override fun renameSession(
+            sessionId: SessionId,
+            title: String,
+        ): Session = error("not used")
+
+        override fun deleteSession(sessionId: SessionId) = error("not used")
+
+        override fun pinSession(sessionId: SessionId): SessionPinResult = error("not used")
+
+        override fun unpinSession(sessionId: SessionId): SessionPinResult = error("not used")
+
+        override fun createRun(
+            sessionId: SessionId,
+            input: String,
+        ): Run = error("not used")
+
+        override fun getRunStatus(runId: RunId): Run = activeRun
+
+        override fun observeRun(runId: RunId): RunEventObservation =
+            object : RunEventObservation {
+                override fun iterator(): Iterator<RunEvent> = emptyList<RunEvent>().iterator()
+
+                override fun close() = Unit
+            }
+    }
+
+    private class FakeGatewayConnectionRepository : GatewayConnectionRepository {
+        override fun load(): GatewayConnection? = null
+
+        override fun save(connection: GatewayConnection) = Unit
     }
 }

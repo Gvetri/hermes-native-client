@@ -585,7 +585,8 @@ class EntryStateHolderFixtureIntegrationTest {
     fun restart_reconciles_a_known_local_run_through_the_gateway_fixture() {
         val sessionId = "recovery-session"
         val session = SessionId(sessionId)
-        val localRun = Run(RunId("local-recovered"), session, "succeeded")
+        val localRun = Run(RunId("local-recovered"), session, "running")
+        val recoveredRun = localRun.copy(status = "succeeded")
         val externalRun = Run(RunId("external-run"), session, "succeeded")
         val history =
             listOf(
@@ -603,7 +604,7 @@ class EntryStateHolderFixtureIntegrationTest {
                     role = "assistant",
                     content = "Recovered result",
                     runId = localRun.id.value,
-                    runStatus = localRun.status,
+                    runStatus = recoveredRun.status,
                     runResult = "Recovered result",
                     timestamp = "2026-09-08T21:00:00Z",
                 ),
@@ -625,13 +626,15 @@ class EntryStateHolderFixtureIntegrationTest {
             )
         val runGateway =
             FixtureRunGateway(
-                statuses = mapOf(localRun.id to localRun, externalRun.id to externalRun),
+                statuses = mapOf(localRun.id to recoveredRun, externalRun.id to externalRun),
             )
         val recoveryRegistry = InMemoryRunRecoveryRegistry(listOf(RunRecoveryEntry(session, localRun.id)))
 
         fixture(behavior).execute { context ->
+            stateHolder(client(context), runGateway = runGateway, recoveryRegistry = recoveryRegistry).close()
             val holder = stateHolder(client(context), runGateway = runGateway, recoveryRegistry = recoveryRegistry)
             try {
+                assertEquals(listOf(RunRecoveryEntry(session, localRun.id)), recoveryRegistry.load())
                 connect(holder)
                 awaitState(holder) { state ->
                     state.sessionList?.sessions?.singleOrNull()?.id == session &&

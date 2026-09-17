@@ -33,12 +33,6 @@ class DefaultRunRecoveryRegistry(
         updateEntries { it - entry }
     }
 
-    override fun clear() {
-        synchronized(lock) {
-            storage.save(emptySet())
-        }
-    }
-
     private fun updateEntries(transform: (Set<RunRecoveryEntry>) -> Set<RunRecoveryEntry>) {
         synchronized(lock) {
             storage.save(transform(storage.load().filter(RunRecoveryEntry::isValid).toSet()))
