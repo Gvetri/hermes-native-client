@@ -7,3 +7,4 @@ fixture_contract
 android_build
 architecture_check
 compose_test
+api24_instrumentation

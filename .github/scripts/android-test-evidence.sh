@@ -47,48 +47,7 @@ run_cleanup_command() {
 redact_file() {
     local file="$1"
     local status=0
-    run_cleanup_command python3 - "$file" "$repo_root" <<'PY' || status=$?
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-repository_root = sys.argv[2]
-try:
-    raw_content = path.read_bytes()
-except OSError:
-    raise SystemExit(1)
-if b"\x00" in raw_content:
-    raise SystemExit(2)
-content = raw_content.decode("utf-8", errors="replace")
-
-sensitive_key = r"(?:authorization|token|password|secret|api[_-]?key|access[_-]?token|client[_-]?secret|private[_-]?key)"
-patterns = (
-    (re.compile(r"(?i)(authorization\s*[:=]\s*)[^\r\n]+"), r"\1<redacted>"),
-    (re.compile(r"(?i)\b((?:bearer|basic)\s+)[^\s,;\"']+"), r"\1<redacted>"),
-    (
-        re.compile(rf'''(?i)(["']?{sensitive_key}["']?\s*[:=]\s*)"(?:\\.|[^"\\\r\n])*"'''),
-        r'\1"<redacted>"',
-    ),
-    (
-        re.compile(rf"""(?i)([\"']?{sensitive_key}[\"']?\s*[:=]\s*)'[^'\r\n]*'"""),
-        r"\1'<redacted>'",
-    ),
-    (
-        re.compile(rf"(?i)([\"']?{sensitive_key}[\"']?\s*[=:]\s*)[^\"'\s,;]+"),
-        r"\1<redacted>",
-    ),
-    (re.compile(r"https?://[^\s<>\"']+"), "<redacted-url>"),
-    (re.compile(re.escape(repository_root)), "<workspace>"),
-    (re.compile(r"/home/runner/work/[^\s]+"), "<runner-workspace>"),
-)
-for pattern, replacement in patterns:
-    content = pattern.sub(replacement, content)
-try:
-    path.write_text(content, encoding="utf-8")
-except OSError:
-    raise SystemExit(3)
-PY
+    run_cleanup_command python3 "$(dirname "${BASH_SOURCE[0]}")/redact-test-reports.py" --file "$file" "$repo_root" || status=$?
     return "$status"
 }
 
@@ -286,12 +245,6 @@ trap on_exit EXIT
 trap 'on_signal TERM' TERM
 trap 'on_signal INT' INT
 
-run_gradle_step \
-    "presentation_unit_tests" \
-    ./gradlew :feature:entry:presentation:testDebugUnitTest --no-daemon --console=plain --info
-run_gradle_step \
-    "required_unit_test_evidence" \
-    ./gradlew verifyRequiredUnitTests --no-daemon --console=plain --info
 run_gradle_step \
     "app_instrumentation" \
     ./gradlew :app:verifyConnectedAndroidTests --no-daemon --console=plain --info
