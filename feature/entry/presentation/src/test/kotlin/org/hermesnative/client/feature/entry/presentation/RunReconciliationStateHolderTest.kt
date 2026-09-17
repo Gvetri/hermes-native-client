@@ -1528,6 +1528,7 @@ class RunReconciliationStateHolderTest {
                 histories.add(otherTerminalHistory)
                 histories.add(otherTerminalHistory)
                 statuses.add(run.copy(status = "cancelled"))
+                statuses.add(run.copy(status = "cancelled"))
                 statuses.add(otherRun)
                 statuses.add(otherTerminalRun)
                 runs.add(run)
@@ -1556,7 +1557,7 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.isRefreshing == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
                     it.sessionList?.openedSession?.latestRun?.id == run.id &&
-                    gateway.statusRequests.size == 2
+                    gateway.statusRequests.size == 3
             }
             assertTrue(otherObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
@@ -1565,14 +1566,14 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.isRefreshing == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
                     it.sessionList?.openedSession?.latestRun?.id == run.id &&
-                    gateway.statusRequests.size == 3
+                    gateway.statusRequests.size == 4
             }
             assertTrue(otherObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertEquals(1, gateway.runRequests.size)
-            assertEquals(3, gateway.statusRequests.size)
+            assertEquals(5, gateway.statusRequests.size)
             assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
         } finally {
             observation.release.countDown()

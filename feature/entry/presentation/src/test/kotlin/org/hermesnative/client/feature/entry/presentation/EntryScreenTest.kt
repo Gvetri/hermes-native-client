@@ -49,6 +49,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w411dp-h891dp")
@@ -212,13 +214,21 @@ class EntryScreenTest {
             holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
             holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
             composeTestRule.onNodeWithText("First Session").performClick()
+            composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("First request")) }
+            composeTestRule.onNodeWithText("Send").performClick()
+            assertTrue(gateway.firstRunCreated.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
             composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("First draft")) }
             composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
 
             composeTestRule.onNodeWithText("Back to Sessions").performClick()
+            assertTrue(gateway.firstObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             composeTestRule.onNodeWithText("Second Session").performClick()
             composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("Second draft")) }
             composeTestRule.onNodeWithText("Send").assertIsEnabled()
+            composeTestRule.onNodeWithText("Send").performClick()
+            assertTrue(gateway.secondRunCreated.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             composeTestRule.onNodeWithText("Back to Sessions").performClick()
             composeTestRule.onNodeWithText("First Session").performClick()
@@ -884,6 +894,13 @@ class EntryScreenTest {
         private val second: Session,
         private val activeRun: Run,
     ) : SessionGatewayPort, RunGatewayPort {
+        val firstRunCreated = CountDownLatch(1)
+        val secondRunCreated = CountDownLatch(1)
+        val firstObservation = BlockingObservation()
+        private val secondRun = Run(RunId("run-second"), second.id, "running")
+        private var firstRunHasBeenCreated = false
+        private var firstObservationRequested = false
+
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(first, second), nextCursor = null)
 
         override fun createSession(title: String?): Session = error("not used")
@@ -894,7 +911,7 @@ class EntryScreenTest {
             SessionHistory(
                 sessionId = sessionId,
                 messages =
-                    if (sessionId == first.id) {
+                    if (sessionId == first.id && firstRunHasBeenCreated) {
                         listOf(
                             GatewayHistoryMessage(
                                 id = "active-run",
@@ -924,21 +941,66 @@ class EntryScreenTest {
         override fun createRun(
             sessionId: SessionId,
             input: String,
-        ): Run = error("not used")
+        ): Run {
+            return if (sessionId == first.id) {
+                firstRunHasBeenCreated = true
+                firstRunCreated.countDown()
+                activeRun
+            } else {
+                secondRunCreated.countDown()
+                secondRun
+            }
+        }
 
-        override fun getRunStatus(runId: RunId): Run = activeRun
+        override fun getRunStatus(runId: RunId): Run =
+            when (runId) {
+                activeRun.id -> activeRun
+                secondRun.id -> secondRun
+                else -> error("Unknown Run: $runId")
+            }
 
-        override fun observeRun(runId: RunId): RunEventObservation =
-            object : RunEventObservation {
+        override fun observeRun(runId: RunId): RunEventObservation {
+            if (runId == activeRun.id && !firstObservationRequested) {
+                firstObservationRequested = true
+                return firstObservation
+            }
+            return object : RunEventObservation {
                 override fun iterator(): Iterator<RunEvent> = emptyList<RunEvent>().iterator()
 
                 override fun close() = Unit
             }
+        }
+    }
+
+    private class BlockingObservation : RunEventObservation {
+        val started = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        private val release = CountDownLatch(1)
+
+        override fun iterator(): Iterator<RunEvent> =
+            object : Iterator<RunEvent> {
+                override fun hasNext(): Boolean {
+                    started.countDown()
+                    release.await(TEST_TIMEOUT_MILLIS * 6, TimeUnit.MILLISECONDS)
+                    return false
+                }
+
+                override fun next(): RunEvent = error("not used")
+            }
+
+        override fun close() {
+            closed.countDown()
+            release.countDown()
+        }
     }
 
     private class FakeGatewayConnectionRepository : GatewayConnectionRepository {
         override fun load(): GatewayConnection? = null
 
         override fun save(connection: GatewayConnection) = Unit
+    }
+
+    private companion object {
+        const val TEST_TIMEOUT_MILLIS = 5_000L
     }
 }

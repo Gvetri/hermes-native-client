@@ -355,10 +355,25 @@ class MessageSubmissionStateHolderTest {
             gateway.blockRunCreation = false
             gateway.releaseRun.countDown()
             assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            gateway.setRunStatus(oldRun.copy(status = "succeeded"))
+            gateway.setHistory(
+                SessionHistory(
+                    session.id,
+                    listOf(GatewayHistoryMessage("old-result", "assistant", "Old result", oldRun.id, "succeeded")),
+                    null,
+                ),
+            )
 
             connect(holder, gateway)
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == session.id }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { opened ->
+                    opened.session.id == session.id &&
+                        !opened.isReconciliationInProgress &&
+                        !opened.hasUnresolvedSubmission &&
+                        opened.sendErrorCategory == null
+                } == true
+            }
             holder.onEvent(EntryUiEvent.ComposerTextChanged("New request"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
@@ -558,6 +573,8 @@ class MessageSubmissionStateHolderTest {
         private val histories: Map<SessionId, SessionHistory> = emptyMap(),
         private val runStatuses: Map<RunId, Run> = emptyMap(),
     ) : SessionGatewayPort, RunGatewayPort {
+        private val mutableHistories = histories.toMutableMap()
+        private val mutableRunStatuses = runStatuses.toMutableMap()
         val runRequests = mutableListOf<Pair<SessionId, String>>()
         private val runResults = ArrayDeque<Result<Run>>()
         val runStarted = CountDownLatch(1)
@@ -573,6 +590,14 @@ class MessageSubmissionStateHolderTest {
             runResults += Result.failure(error)
         }
 
+        fun setRunStatus(run: Run) {
+            mutableRunStatuses[run.id] = run
+        }
+
+        fun setHistory(history: SessionHistory) {
+            mutableHistories[history.sessionId] = history
+        }
+
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(sessions, null)
 
         override fun createSession(title: String?): Session = error("not used")
@@ -580,7 +605,7 @@ class MessageSubmissionStateHolderTest {
         override fun openSession(sessionId: SessionId): Session = sessions.single { it.id == sessionId }
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            histories[sessionId] ?: SessionHistory(sessionId, emptyList(), null)
+            mutableHistories[sessionId] ?: SessionHistory(sessionId, emptyList(), null)
 
         override fun renameSession(
             sessionId: SessionId,
@@ -605,7 +630,7 @@ class MessageSubmissionStateHolderTest {
             return runResults.removeFirst().getOrThrow()
         }
 
-        override fun getRunStatus(runId: RunId): Run = runStatuses[runId] ?: error("not used")
+        override fun getRunStatus(runId: RunId): Run = mutableRunStatuses[runId] ?: error("not used")
 
         override fun observeRun(runId: RunId) = error("not used")
     }

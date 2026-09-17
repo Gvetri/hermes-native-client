@@ -24,6 +24,7 @@ Run focused tests while working:
 ./gradlew :feature:entry:application:test
 ./gradlew :feature:entry:data:test
 ./gradlew :feature:entry:presentation:testDebugUnitTest
+./gradlew :feature:entry:wiring:testDebugUnitTest
 ```
 
 Run the local deterministic gate before submitting a change:

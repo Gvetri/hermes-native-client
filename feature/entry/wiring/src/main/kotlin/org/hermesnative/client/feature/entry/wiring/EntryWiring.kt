@@ -6,7 +6,7 @@ import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayClient
 import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
-import org.hermesnative.client.feature.entry.data.DefaultRunRecoveryRegistry
+import org.hermesnative.client.feature.entry.data.EndpointScopedRunRecoveryRegistry
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
@@ -24,14 +24,12 @@ object EntryWiring {
         val repository = DefaultGatewayConnectionRepository(dataSource)
         val recoveryEndpoint = AtomicReference(dataSource.loadEndpoint())
         val runRecoveryRegistry =
-            DefaultRunRecoveryRegistry(
-                SharedPreferencesRunRecoveryStorage(context, recoveryEndpoint::get),
+            EndpointScopedRunRecoveryRegistry(
+                endpointProvider = recoveryEndpoint::get,
+                storageForEndpoint = { endpoint ->
+                    SharedPreferencesRunRecoveryStorage(context) { endpoint }
+                },
             )
-        val endpointScopedRecoveryRegistry: (String) -> DefaultRunRecoveryRegistry = { endpoint ->
-            DefaultRunRecoveryRegistry(
-                SharedPreferencesRunRecoveryStorage(context) { endpoint },
-            )
-        }
         val initialState = LoadEntryState(repository).execute()
         val verifyGatewayConnection =
             VerifyGatewayConnection(repository) { endpoint, bearerCredential ->
@@ -52,10 +50,10 @@ object EntryWiring {
             runRecoveryRegistry = runRecoveryRegistry,
             updateRunRecoveryEndpoint = recoveryEndpoint::set,
             persistRunRecoveryEntry = { endpoint, entry ->
-                endpointScopedRecoveryRegistry(endpoint).save(entry)
+                runRecoveryRegistry.registryForEndpoint(endpoint).save(entry)
             },
             removeRunRecoveryEntry = { endpoint, entry ->
-                endpointScopedRecoveryRegistry(endpoint).remove(entry)
+                runRecoveryRegistry.registryForEndpoint(endpoint).remove(entry)
             },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
         )
