@@ -18,6 +18,57 @@ roborazzi {
     }
 }
 
+val roborazziBaselineDirectory = layout.projectDirectory.dir("src/test/snapshots")
+val roborazziBaselineManifest = layout.projectDirectory.file("src/test/roborazzi-baselines.txt")
+
+tasks.register("verifyRoborazziBaselineManifest") {
+    group = "verification"
+    description = "Verifies that the selected Roborazzi baseline set has no missing or unexpected PNGs."
+    inputs.dir(roborazziBaselineDirectory)
+    inputs.file(roborazziBaselineManifest)
+    doLast {
+        val manifestEntries =
+            roborazziBaselineManifest.asFile.readLines()
+                .map(String::trim)
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+        val expectedBaselines = manifestEntries.toSet()
+        check(expectedBaselines.size == manifestEntries.size) {
+            "Roborazzi baseline manifest contains duplicate entries."
+        }
+        check(expectedBaselines.all { it.endsWith(".png") && !it.startsWith("/") && !it.contains("..") }) {
+            "Roborazzi baseline manifest must contain only relative PNG paths."
+        }
+
+        val actualBaselines =
+            roborazziBaselineDirectory.asFile.walkTopDown()
+                .filter { it.isFile && it.extension == "png" }
+                .map { it.relativeTo(roborazziBaselineDirectory.asFile).invariantSeparatorsPath }
+                .toSet()
+        val missingBaselines = expectedBaselines - actualBaselines
+        val unexpectedBaselines = actualBaselines - expectedBaselines
+        check(missingBaselines.isEmpty() && unexpectedBaselines.isEmpty()) {
+            buildString {
+                appendLine("Roborazzi baseline manifest mismatch.")
+                if (missingBaselines.isNotEmpty()) {
+                    appendLine("Missing baselines:")
+                    missingBaselines.sorted().forEach { appendLine("- $it") }
+                }
+                if (unexpectedBaselines.isNotEmpty()) {
+                    appendLine("Unexpected baselines:")
+                    unexpectedBaselines.sorted().forEach { appendLine("- $it") }
+                }
+            }
+        }
+        logger.lifecycle("Roborazzi baseline manifest verified: ${actualBaselines.size} PNG baseline(s).")
+    }
+}
+
+tasks.configureEach {
+    if (name == "verifyRoborazziDebug") {
+        dependsOn("verifyRoborazziBaselineManifest")
+    }
+}
+
 android {
     namespace = "org.hermesnative.client.feature.entry.presentation"
     compileSdk = 35

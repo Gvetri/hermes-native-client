@@ -40,9 +40,50 @@ If an emulator is available, also run the app instrumentation scope:
 
 ## Visual regression baselines
 
-The presentation module keeps a small set of Roborazzi reference images in
-`feature/entry/presentation/src/test/snapshots`. Pull requests verify these
+The presentation module keeps the approved Roborazzi reference images in
+`feature/entry/presentation/src/test/snapshots`. Pull requests verify the
 images with the JVM/Robolectric Compose test gate.
+
+### Approved state matrix
+
+`feature/entry/presentation/src/test/roborazzi-baselines.txt` lists the PNGs
+that belong to the matrix. Each entry maps to one test method in
+`SelectedVisualRegressionTest`.
+
+| State | Compose surface | Reason for inclusion |
+| --- | --- | --- |
+| `connection_form` | Gateway connection | Stable first-use form with synthetic inputs |
+| `connection_error` | Gateway connection | Recoverable authentication error |
+| `empty_session_list` | Session list | Valid empty Gateway response |
+| `populated_session_list` | Session list | Pinned and unpinned server metadata |
+| `session_list_unavailable` | Session list | Stale data, unavailable state, and retry |
+| `create_session` | Session list | In-memory title draft before confirmation |
+| `rename_session_confirmation` | Session list | Inline modal-equivalent rename confirmation mode |
+| `delete_session_confirmation` | Session list | Inline modal-equivalent delete confirmation mode |
+| `empty_session_detail` | Session detail | New Session with no history |
+| `session_detail_with_messages` | Session detail | Stable user and assistant history |
+| `session_detail_active_run` | Session detail | Active run with a partial response |
+| `session_detail_error` | Session detail | Failed send with the draft preserved |
+
+The current implementation has no dialog overlay such as `Dialog` or
+`AlertDialog`. Here, "modal" means a conditional confirmation mode in the
+existing Compose state model. The rename and delete confirmation modes are
+therefore covered without changing production behavior only to create a
+screenshot.
+
+The matrix uses Robolectric SDK 35, a fixed `w411dp-h891dp-notnight` viewport,
+native graphics mode, the light `HermesTheme`, and synthetic in-memory values.
+It excludes timestamps, live Gateway/provider data, credentials, animated
+loading states, Activity lifecycle behavior, system theme switching, and other
+system-dependent rendering. Behavior and semantics tests remain in their
+existing test classes.
+
+The pull-request Compose job first runs
+`verifyRoborazziBaselineManifest`. It reports `Missing baselines` and
+`Unexpected baselines` by path. It then runs `verifyRoborazziDebug`, which
+compares each captured image and fails changed pixels with the Roborazzi
+comparison report. Both steps are part of the required `compose-jvm-tests`
+check.
 
 When a deliberate UI change requires a baseline update:
 
@@ -53,12 +94,14 @@ When a deliberate UI change requires a baseline update:
    `feature/entry/presentation/build/outputs/roborazzi-comparison`.
 3. Run `./gradlew :feature:entry:presentation:recordRoborazziDebug` to replace
    the approved reference images.
-4. Review the PNG changes in the pull request and run
-   `./gradlew :feature:entry:presentation:verifyRoborazziDebug`.
+4. Review the PNG changes and update
+   `feature/entry/presentation/src/test/roborazzi-baselines.txt` when the
+   selected state matrix changes.
+5. Run `./gradlew :feature:entry:presentation:verifyRoborazziBaselineManifest`
+   and `./gradlew :feature:entry:presentation:verifyRoborazziDebug`.
 
-Do not update a baseline to hide an unintended change. Keep behavior and
-semantics assertions in the existing behavior test classes; screenshot tests
-only capture the approved stable UI states.
+Do not update a baseline to hide an unintended change. Keep the matrix small
+and stable instead of adding screenshots only to increase the count.
 
 ## Module changes
 
