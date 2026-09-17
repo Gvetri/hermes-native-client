@@ -114,6 +114,41 @@ else:
                         for excluded_id in (98, 97, 96):
                             self.assertNotIn(f"/artifacts/{excluded_id}", issue["body"])
 
+    def test_android_redaction_uses_remaining_budget_and_preserves_timeout(self):
+        prefix = (ROOT / ".github/scripts/android-test-evidence.sh").read_text().split("redact_evidence() {", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "redaction-timeout.sh"
+            script.write_text(prefix + '''
+# Record timeout allocation without delaying this contract test.
+timeout() { printf '%s\\n' "$3" >> timeouts; return "${FIXTURE_STATUS:-0}"; }
+redact_file "$runner_output"
+cleanup_deadline_seconds=$((SECONDS + 11))
+redact_file "$runner_output"
+run_cleanup_command true
+[[ "$cleanup_timeout_seconds" == 5 ]]
+FIXTURE_STATUS=124
+status=0
+redact_file "$runner_output" || status=$?
+[[ "$status" == 124 ]]
+SECONDS=100
+cleanup_deadline_seconds=99
+status=0
+redact_file "$runner_output" || status=$?
+[[ "$status" == 124 ]]
+''')
+            result = subprocess.run(["bash", str(script)], cwd=root,
+                                    env={**os.environ, "GITHUB_WORKSPACE": directory},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(0, result.returncode, result.stderr)
+            limits = (root / "timeouts").read_text().splitlines()
+            self.assertEqual(4, len(limits), "Expired deadline must not start redaction")
+            self.assertEqual("60s", limits[0])
+            for limit in (limits[1], limits[3]):
+                self.assertGreater(int(limit[:-1]), 5)
+                self.assertLessEqual(int(limit[:-1]), 11)
+            self.assertEqual("5s", limits[2])
+
     def test_android_wrapper_runs_only_instrumentation_and_preserves_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

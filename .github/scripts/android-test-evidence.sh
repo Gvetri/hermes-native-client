@@ -47,7 +47,8 @@ run_cleanup_command() {
 redact_file() {
     local file="$1"
     local status=0
-    run_cleanup_command python3 "$(dirname "${BASH_SOURCE[0]}")/redact-test-reports.py" --file "$file" "$repo_root" || status=$?
+    # Redaction may use the remaining cleanup budget; other commands keep their short limit.
+    cleanup_timeout_seconds="$cleanup_budget_seconds" run_cleanup_command python3 "$(dirname "${BASH_SOURCE[0]}")/redact-test-reports.py" --file "$file" "$repo_root" || status=$?
     return "$status"
 }
 

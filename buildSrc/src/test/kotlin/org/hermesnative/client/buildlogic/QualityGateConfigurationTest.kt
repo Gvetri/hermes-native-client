@@ -386,7 +386,7 @@ class QualityGateConfigurationTest {
                 """
                     #!/usr/bin/env bash
                     if [[ "${'$'}{3:-}" == *"/runner-output.log" ]]; then
-                        sleep 30
+                        sleep 90
                     fi
                     exit 1
                 """.trimIndent(),
