@@ -6,6 +6,9 @@ data class RunRecoveryEntry(
     val runId: RunId,
 )
 
+fun RunRecoveryEntry.isValid(): Boolean =
+    sessionId.value.isNotBlank() && runId.value.isNotBlank()
+
 interface RunRecoveryRegistry {
     fun load(): List<RunRecoveryEntry>
 

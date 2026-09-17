@@ -56,6 +56,7 @@ import org.hermesnative.client.feature.entry.domain.SessionReconciliation
 import org.hermesnative.client.feature.entry.domain.decideRunReconciliation
 import org.hermesnative.client.feature.entry.domain.isActive
 import org.hermesnative.client.feature.entry.domain.isTerminal
+import org.hermesnative.client.feature.entry.domain.isValid
 import org.hermesnative.client.feature.entry.domain.runs
 import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 
@@ -159,6 +160,7 @@ enum class EntryErrorCategory(
 private const val SESSION_SEARCH_DEBOUNCE_MILLIS = 300L
 private const val DEFAULT_SEND_TIMEOUT_MILLIS = 30_000L
 private const val UNCERTAIN_RUN_STATUS = "uncertain"
+private const val RECOVERY_PENDING_STATUS = "recovery_pending"
 
 data class EntryUiState(
     val title: String,
@@ -455,8 +457,22 @@ class EntryStateHolder(
                     }
                 }
             } ?: return
-        val entries = runCatching { registry.load() }.getOrNull().orEmpty()
+        val entries =
+            runCatching { registry.load() }
+                .getOrNull()
+                .orEmpty()
+                .filter(RunRecoveryEntry::isValid)
         if (entries.isEmpty()) return
+
+        synchronized(sessionRequestLock) {
+            if (connectionGeneration != expectedConnectionGeneration) return
+            entries.forEach { entry ->
+                rememberRecoveredRun(
+                    entry = entry,
+                    run = Run(entry.runId, entry.sessionId, RECOVERY_PENDING_STATUS),
+                )
+            }
+        }
 
         recoveryJob?.cancel()
         lateinit var job: Job
@@ -588,7 +604,13 @@ class EntryStateHolder(
         val previous = observationStateFor(entry.sessionId, entry.runId)
         val state =
             if (run.isActive()) {
-                previous ?: RunEventStateTransition.initial(run)
+                val initial = RunEventStateTransition.initial(run)
+                previous?.let {
+                    initial.copy(
+                        responseText = it.responseText,
+                        processedEventIds = it.processedEventIds,
+                    )
+                } ?: initial
             } else {
                 uncertainObservationState(run, previous)
             }

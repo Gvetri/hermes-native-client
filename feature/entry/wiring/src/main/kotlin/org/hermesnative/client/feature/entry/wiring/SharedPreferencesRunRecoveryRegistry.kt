@@ -6,6 +6,7 @@ import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
 import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
 import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.isValid
 import java.nio.charset.StandardCharsets
 
 class SharedPreferencesRunRecoveryRegistry(
@@ -22,11 +23,13 @@ class SharedPreferencesRunRecoveryRegistry(
         synchronized(lock) {
             storedEntries()
                 .mapNotNull(::decode)
+                .filter(RunRecoveryEntry::isValid)
                 .distinct()
                 .sortedWith(compareBy({ it.sessionId.value }, { it.runId.value }))
         }
 
     override fun save(entry: RunRecoveryEntry) {
+        if (!entry.isValid()) return
         updateEntries { it + encode(entry) }
     }
 
