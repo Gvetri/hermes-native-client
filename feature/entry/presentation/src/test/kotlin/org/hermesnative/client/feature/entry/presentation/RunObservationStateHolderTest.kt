@@ -195,6 +195,49 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun late_create_result_reconciles_after_reconnecting_before_recovery_metadata_is_written() {
+        val session = session("disconnect-reconnect-race")
+        val run = Run(RunId("run-reconnect-race"), session.id, "running")
+        val gateway =
+            ScriptedGateway(session).apply {
+                enqueueRun(run)
+                statusByRun[run.id] = run
+                blockCreate = true
+            }
+        val persisted = CopyOnWriteArrayList<Pair<String, RunRecoveryEntry>>()
+        val holder =
+            holder(
+                gateway = gateway,
+                dispatcher = Dispatchers.Default,
+                persistRunRecoveryEntry = { endpoint, entry -> persisted += endpoint to entry },
+            )
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.createStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+            holder.onEvent(EntryUiEvent.BearerCredentialChanged("test-only-credential"))
+            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+            awaitState(holder) { it.sessionList?.sessions == listOf(session.toSessionItemUiState()) }
+
+            gateway.createRelease.countDown()
+
+            awaitCondition {
+                persisted.isNotEmpty() &&
+                    gateway.statusRequests.contains(run.id)
+            }
+        } finally {
+            gateway.createRelease.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun a_locally_started_nonterminal_run_is_registered_and_survives_screen_switching() {
         val session = session("session-1")
         val run = Run(RunId("run-1"), session.id, "running")
@@ -253,6 +296,44 @@ class RunObservationStateHolderTest {
                     opened.composerText == "Run this"
             }
             assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+        } finally {
+            observation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun recovery_persistence_failure_is_retried_after_connection_recreation() {
+        val session = session("recovery-retry")
+        val run = Run(RunId("run-recovery-retry"), session.id, "running")
+        val observation = BlockingObservation()
+        val gateway =
+            ScriptedGateway(session).apply {
+                enqueueRun(run)
+                this.observation = observation
+            }
+        val recoveryRegistry = FlakyRunRecoveryRegistry()
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Retry this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.hasUnresolvedSubmission == true
+            }
+
+            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+            recoveryRegistry.failSave = false
+            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+            holder.onEvent(EntryUiEvent.BearerCredentialChanged("test-only-credential"))
+            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+
+            awaitCondition {
+                recoveryRegistry.load() == listOf(RunRecoveryEntry(session.id, run.id))
+            }
+            assertEquals(1, gateway.createRunCount.get())
         } finally {
             observation.release.countDown()
             holder.close()
@@ -738,6 +819,22 @@ class RunObservationStateHolderTest {
         override fun save(entry: RunRecoveryEntry) = Unit
 
         override fun remove(entry: RunRecoveryEntry) = Unit
+    }
+
+    private class FlakyRunRecoveryRegistry : RunRecoveryRegistry {
+        private val entries = CopyOnWriteArrayList<RunRecoveryEntry>()
+        var failSave = true
+
+        override fun load(): List<RunRecoveryEntry> = entries.toList()
+
+        override fun save(entry: RunRecoveryEntry) {
+            if (failSave) error("recovery storage unavailable")
+            if (entry !in entries) entries += entry
+        }
+
+        override fun remove(entry: RunRecoveryEntry) {
+            entries -= entry
+        }
     }
 
     private class FailingRemoveRunRecoveryRegistry(

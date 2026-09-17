@@ -13,10 +13,8 @@ interface RunRecoveryStorage {
 class DefaultRunRecoveryRegistry(
     private val storage: RunRecoveryStorage,
 ) : RunRecoveryRegistry {
-    private val lock = Any()
-
     override fun load(): List<RunRecoveryEntry> =
-        synchronized(lock) {
+        synchronized(storageTransactionLock) {
             storage
                 .load()
                 .filter(RunRecoveryEntry::isValid)
@@ -34,8 +32,12 @@ class DefaultRunRecoveryRegistry(
     }
 
     private fun updateEntries(transform: (Set<RunRecoveryEntry>) -> Set<RunRecoveryEntry>) {
-        synchronized(lock) {
+        synchronized(storageTransactionLock) {
             storage.save(transform(storage.load().filter(RunRecoveryEntry::isValid).toSet()))
         }
+    }
+
+    private companion object {
+        val storageTransactionLock = Any()
     }
 }
