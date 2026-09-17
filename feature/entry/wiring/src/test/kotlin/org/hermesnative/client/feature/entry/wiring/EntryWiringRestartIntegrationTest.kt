@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.wiring
 
 import android.content.Context
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -12,6 +13,7 @@ import org.hermesnative.client.feature.entry.domain.RunEvent
 import org.hermesnative.client.feature.entry.domain.RunEventObservation
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -107,7 +109,7 @@ class EntryWiringRestartIntegrationTest {
                         it.sessionList?.openedSession?.isSending == false
                 }
                 assertEquals(1, gateway.runRequests.size)
-                assertTrue(storage.load().isEmpty())
+                awaitRecoveryEntries(storage, setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)))
             } finally {
                 firstHolder.close()
             }
@@ -173,6 +175,17 @@ class EntryWiringRestartIntegrationTest {
         runBlocking {
             withTimeout(TEST_TIMEOUT_MILLIS) {
                 holder.uiState.first(predicate)
+            }
+        }
+    }
+
+    private fun awaitRecoveryEntries(
+        storage: SharedPreferencesRunRecoveryStorage,
+        expected: Set<RunRecoveryEntry>,
+    ) {
+        runBlocking {
+            withTimeout(TEST_TIMEOUT_MILLIS) {
+                while (storage.load() != expected) delay(10)
             }
         }
     }
