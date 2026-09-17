@@ -143,7 +143,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
-      - run: ./gradlew :feature:entry:presentation:testDebugUnitTest --no-daemon --console=plain
+      - run: ./gradlew :feature:entry:presentation:verifyRoborazziDebug --no-daemon --console=plain
 
   api24_instrumentation:
     name: api24-instrumentation

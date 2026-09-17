@@ -687,12 +687,25 @@ class QualityGateConfigurationTest {
         )
         assertTrue(
             "The pull-request Compose job must use the JVM replacement.",
-            composeJob.contains("./gradlew :feature:entry:presentation:testDebugUnitTest --no-daemon"),
+            composeJob.contains("./gradlew :feature:entry:presentation:verifyRoborazziDebug --no-daemon"),
         )
         assertTrue(
             "The pull-request Compose job must not start an emulator.",
             !composeJob.contains("reactivecircus/android-emulator-runner"),
         )
+    }
+
+    @Test
+    fun pull_request_compose_job_verifies_roborazzi_baselines() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val requiredChecks = repositoryRoot.resolve(".github/quality-gate/required-checks.txt").readLines()
+        val composeJob = workflow.substringAfter("  compose_test:").substringBefore("  api24_instrumentation:")
+
+        assertTrue(
+            "The pull-request Compose job must verify Roborazzi baselines.",
+            composeJob.contains("./gradlew :feature:entry:presentation:verifyRoborazziDebug --no-daemon --console=plain"),
+        )
+        assertTrue("The Roborazzi verification must remain an aggregate required check.", requiredChecks.contains("compose_test"))
     }
 
     @Test

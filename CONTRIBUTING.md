@@ -38,6 +38,28 @@ If an emulator is available, also run the app instrumentation scope:
 ./gradlew :app:verifyConnectedAndroidTests
 ```
 
+## Visual regression baselines
+
+The presentation module keeps a small set of Roborazzi reference images in
+`feature/entry/presentation/src/test/snapshots`. Pull requests verify these
+images with the JVM/Robolectric Compose test gate.
+
+When a deliberate UI change requires a baseline update:
+
+1. Run `./gradlew :feature:entry:presentation:compareRoborazziDebug`.
+2. Review the comparison report at
+   `feature/entry/presentation/build/reports/roborazzi/debug/index.html` and
+   the generated images under
+   `feature/entry/presentation/build/outputs/roborazzi-comparison`.
+3. Run `./gradlew :feature:entry:presentation:recordRoborazziDebug` to replace
+   the approved reference images.
+4. Review the PNG changes in the pull request and run
+   `./gradlew :feature:entry:presentation:verifyRoborazziDebug`.
+
+Do not update a baseline to hide an unintended change. Keep behavior and
+semantics assertions in the existing behavior test classes; screenshot tests
+only capture the approved stable UI states.
+
 ## Module changes
 
 Keep feature logic in a feature-first vertical slice. Domain and application modules must remain plain Kotlin/JVM. Put concrete adapters in data, UDF state and Compose rendering in presentation, and implementation selection in wiring. Keep the app module a thin composition root.
