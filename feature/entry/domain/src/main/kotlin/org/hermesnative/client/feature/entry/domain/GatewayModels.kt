@@ -67,8 +67,11 @@ const val UNKNOWN_RUN_STATUS = "unknown"
 private val terminalRunStatuses =
     setOf(
         "completed",
+        "complete",
         "succeeded",
+        "success",
         "failed",
+        "failure",
         "error",
         "cancelled",
         "canceled",

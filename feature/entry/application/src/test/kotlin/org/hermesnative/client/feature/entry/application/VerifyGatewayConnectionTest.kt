@@ -23,7 +23,7 @@ class VerifyGatewayConnectionTest {
                 GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers + "future.capability")
             }
 
-        val capabilities = verifier.execute("  https://gateway.example/profile  ", "memory-only-token")
+        val capabilities = verifier.execute("  https://gateway.example/profile/  ", "memory-only-token")
 
         assertEquals("https://gateway.example/profile", receivedEndpoint)
         assertEquals("memory-only-token", receivedCredential)

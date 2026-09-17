@@ -22,6 +22,7 @@ import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
 import org.hermesnative.client.feature.entry.presentation.EntryUiEvent
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,35 +46,38 @@ class EntryWiringRestartIntegrationTest {
             SharedPreferencesRunRecoveryStorage(context) { "https://other-gateway.example/profile" }
         storage.clearForTest()
         otherEndpointStorage.clearForTest()
-
-        val firstHolder = createHolder(context, gateway)
         try {
-            connect(firstHolder, " $endpoint ", hasSavedEndpoint = false)
-            openSession(firstHolder, gateway.session.id)
-            firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Persist this run"))
-            firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
-            awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
-            assertTrue(gateway.observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertEquals(1, storage.load().size)
-            assertTrue(otherEndpointStorage.load().isEmpty())
-        } finally {
-            firstHolder.close()
-        }
+            val firstHolder = createHolder(context, gateway)
+            try {
+                connect(firstHolder, " $endpoint ", hasSavedEndpoint = false)
+                openSession(firstHolder, gateway.session.id)
+                firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Persist this run"))
+                firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
+                assertTrue(gateway.observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                assertEquals(1, storage.load().size)
+                assertTrue(otherEndpointStorage.load().isEmpty())
+            } finally {
+                firstHolder.close()
+            }
 
-        gateway.terminal = true
-        val restartedHolder = createHolder(context, gateway)
-        try {
-            connect(restartedHolder, endpoint, hasSavedEndpoint = true)
-            runBlocking {
-                withTimeout(TEST_TIMEOUT_MILLIS) {
-                    while (!gateway.statusRequests.contains(gateway.activeRun.id) || storage.load().isNotEmpty()) {
-                        kotlinx.coroutines.delay(25)
+            gateway.terminal = true
+            val restartedHolder = createHolder(context, gateway)
+            try {
+                connect(restartedHolder, endpoint, hasSavedEndpoint = true)
+                runBlocking {
+                    withTimeout(TEST_TIMEOUT_MILLIS) {
+                        while (!gateway.statusRequests.contains(gateway.activeRun.id) || storage.load().isNotEmpty()) {
+                            kotlinx.coroutines.delay(25)
+                        }
                     }
                 }
+                assertTrue(storage.load().isEmpty())
+                assertFalse(gateway.statusRequests.contains(gateway.externalRun.id))
+            } finally {
+                restartedHolder.close()
             }
-            assertTrue(storage.load().isEmpty())
         } finally {
-            restartedHolder.close()
             storage.clearForTest()
             otherEndpointStorage.clearForTest()
         }
@@ -136,6 +140,7 @@ class EntryWiringRestartIntegrationTest {
 
         val session = Session(SESSION_ID, "Wiring session", null, pinned = false, updatedAt = null)
         val activeRun = Run(RunId("wiring-run"), SESSION_ID, "running")
+        val externalRun = Run(RunId("external-run"), SESSION_ID, "succeeded")
         val statusRequests = CopyOnWriteArrayList<RunId>()
         val observation = BlockingObservation()
         var terminal = false
@@ -151,6 +156,14 @@ class EntryWiringRestartIntegrationTest {
                 SessionHistory(
                     sessionId,
                     listOf(
+                        GatewayHistoryMessage(
+                            id = "external-result",
+                            role = "assistant",
+                            content = "External result",
+                            runId = externalRun.id,
+                            runStatus = externalRun.status,
+                            runResult = "External result",
+                        ),
                         GatewayHistoryMessage(
                             id = "wiring-result",
                             role = "assistant",

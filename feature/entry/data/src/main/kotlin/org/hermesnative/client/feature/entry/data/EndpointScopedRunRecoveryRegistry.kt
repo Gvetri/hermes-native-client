@@ -9,21 +9,69 @@ class EndpointScopedRunRecoveryRegistry(
     private val storageForEndpoint: (String?) -> RunRecoveryStorage,
 ) : RunRecoveryRegistry {
     private val registries = mutableMapOf<String?, DefaultRunRecoveryRegistry>()
-    private val registryLock = Any()
+    private val endpointViews = mutableMapOf<String, RunRecoveryRegistry>()
+    private val registryLock = RunRecoveryStorageTransactions.lock
 
-    override fun load(): List<RunRecoveryEntry> = currentRegistry().load()
+    override fun load(): List<RunRecoveryEntry> = loadForEndpoint(endpointProvider())
 
     override fun save(entry: RunRecoveryEntry) {
-        currentRegistry().save(entry)
+        saveForEndpoint(endpointProvider(), entry)
+    }
+
+    fun saveForEndpoint(
+        endpoint: String?,
+        entry: RunRecoveryEntry,
+    ) {
+        try {
+            synchronized(RunRecoveryStorageTransactions.lock) {
+                registry(endpoint).save(entry)
+                removeFallbackEntry(endpoint, entry)
+            }
+        } catch (error: Exception) {
+            synchronized(RunRecoveryStorageTransactions.lock) {
+                fallbackEntries(endpoint).add(entry)
+            }
+            throw error
+        }
     }
 
     override fun remove(entry: RunRecoveryEntry) {
-        currentRegistry().remove(entry)
+        removeForEndpoint(endpointProvider(), entry)
     }
 
-    fun registryForEndpoint(endpoint: String): RunRecoveryRegistry = registry(endpoint)
+    fun removeForEndpoint(
+        endpoint: String?,
+        entry: RunRecoveryEntry,
+    ) {
+        synchronized(RunRecoveryStorageTransactions.lock) {
+            registry(endpoint).remove(entry)
+            removeFallbackEntry(endpoint, entry)
+        }
+    }
 
-    private fun currentRegistry(): DefaultRunRecoveryRegistry = registry(endpointProvider())
+    fun registryForEndpoint(endpoint: String): RunRecoveryRegistry =
+        synchronized(registryLock) {
+            endpointViews.getOrPut(endpoint) {
+                object : RunRecoveryRegistry {
+                    override fun load(): List<RunRecoveryEntry> = loadForEndpoint(endpoint)
+
+                    override fun save(entry: RunRecoveryEntry) {
+                        saveForEndpoint(endpoint, entry)
+                    }
+
+                    override fun remove(entry: RunRecoveryEntry) {
+                        removeForEndpoint(endpoint, entry)
+                    }
+                }
+            }
+        }
+
+    private fun loadForEndpoint(endpoint: String?): List<RunRecoveryEntry> =
+        synchronized(RunRecoveryStorageTransactions.lock) {
+            (registry(endpoint).load() + fallbackEntries(endpoint))
+                .distinct()
+                .sortedWith(compareBy({ it.sessionId.value }, { it.runId.value }))
+        }
 
     private fun registry(endpoint: String?): DefaultRunRecoveryRegistry =
         synchronized(registryLock) {
@@ -31,4 +79,20 @@ class EndpointScopedRunRecoveryRegistry(
                 DefaultRunRecoveryRegistry(storageForEndpoint(endpoint))
             }
         }
+
+    private fun fallbackEntries(endpoint: String?): MutableSet<RunRecoveryEntry> {
+        return pendingEntries.getOrPut(endpoint) { mutableSetOf() }
+    }
+
+    private fun removeFallbackEntry(
+        endpoint: String?,
+        entry: RunRecoveryEntry,
+    ) {
+        fallbackEntries(endpoint).remove(entry)
+        if (pendingEntries[endpoint].isNullOrEmpty()) pendingEntries.remove(endpoint)
+    }
+
+    private companion object {
+        val pendingEntries = mutableMapOf<String?, MutableSet<RunRecoveryEntry>>()
+    }
 }

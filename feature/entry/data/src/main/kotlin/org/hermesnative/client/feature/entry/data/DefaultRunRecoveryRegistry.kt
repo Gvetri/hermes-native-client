@@ -10,6 +10,10 @@ interface RunRecoveryStorage {
     fun save(entries: Set<RunRecoveryEntry>)
 }
 
+internal object RunRecoveryStorageTransactions {
+    val lock = Any()
+}
+
 class DefaultRunRecoveryRegistry(
     private val storage: RunRecoveryStorage,
 ) : RunRecoveryRegistry {
@@ -38,6 +42,6 @@ class DefaultRunRecoveryRegistry(
     }
 
     private companion object {
-        val storageTransactionLock = Any()
+        val storageTransactionLock = RunRecoveryStorageTransactions.lock
     }
 }

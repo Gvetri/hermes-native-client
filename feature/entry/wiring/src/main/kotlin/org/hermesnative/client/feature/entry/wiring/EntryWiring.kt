@@ -11,6 +11,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
+import org.hermesnative.client.feature.entry.presentation.ProcessRunSubmissionUncertaintyStore
 import java.util.concurrent.atomic.AtomicReference
 
 object EntryWiring {
@@ -50,12 +51,13 @@ object EntryWiring {
             runRecoveryRegistry = runRecoveryRegistry,
             updateRunRecoveryEndpoint = recoveryEndpoint::set,
             persistRunRecoveryEntry = { endpoint, entry ->
-                runRecoveryRegistry.registryForEndpoint(endpoint).save(entry)
+                runRecoveryRegistry.saveForEndpoint(endpoint, entry)
             },
             removeRunRecoveryEntry = { endpoint, entry ->
-                runRecoveryRegistry.registryForEndpoint(endpoint).remove(entry)
+                runRecoveryRegistry.removeForEndpoint(endpoint, entry)
             },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+            runSubmissionUncertaintyStore = ProcessRunSubmissionUncertaintyStore,
         )
     }
 }

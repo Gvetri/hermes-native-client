@@ -17,6 +17,24 @@ class VerifyGatewayConnection(
         endpoint: String,
         bearerCredential: String,
     ): GatewayCapabilities {
+        val capabilities = verify(endpoint, bearerCredential)
+        gatewayConnectionRepository.save(GatewayConnection(normalizeGatewayEndpoint(endpoint)))
+        return capabilities
+    }
+
+    fun executeWithoutPersistence(
+        endpoint: String,
+        bearerCredential: String,
+    ): GatewayCapabilities = verify(endpoint, bearerCredential)
+
+    fun persist(endpoint: String) {
+        gatewayConnectionRepository.save(GatewayConnection(normalizeGatewayEndpoint(endpoint)))
+    }
+
+    private fun verify(
+        endpoint: String,
+        bearerCredential: String,
+    ): GatewayCapabilities {
         val normalizedEndpoint = normalizeGatewayEndpoint(endpoint)
         if (bearerCredential.isBlank()) {
             throw GatewayException(GatewayErrorCategory.AUTHENTICATION_FAILED)
@@ -26,8 +44,6 @@ class VerifyGatewayConnection(
         if (!manifest.requiredIdentifiers.all(capabilities::supports)) {
             throw GatewayException(GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE)
         }
-
-        gatewayConnectionRepository.save(GatewayConnection(normalizedEndpoint))
         return capabilities
     }
 }
@@ -53,7 +69,7 @@ private object GatewayEndpointValidator {
         ) {
             throw invalidAddress()
         }
-        return normalizedEndpoint
+        return normalizedEndpoint.trimEnd('/')
     }
 
     private fun invalidHostLabel(label: String): Boolean =
