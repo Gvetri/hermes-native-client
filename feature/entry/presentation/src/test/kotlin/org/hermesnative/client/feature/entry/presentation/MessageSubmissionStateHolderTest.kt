@@ -249,6 +249,7 @@ class MessageSubmissionStateHolderTest {
             assertEquals(listOf(session.id to "Run once"), gateway.runRequests)
 
             gateway.releaseRun.countDown()
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
             val completed = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals("New draft", completed.composerText)
