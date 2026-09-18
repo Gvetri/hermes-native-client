@@ -25,15 +25,18 @@ class SharedPreferencesRunSubmissionUncertaintyStore(
         knownRunIds: Set<RunId>,
         attemptId: String?,
     ): Boolean {
-        update(key) { current ->
-            if (current != null && attemptId != null && current.attemptId != attemptId) {
-                return@update current
+        synchronized(lock) {
+            val current = read(key)
+            if (current != null && attemptId != null && current.attemptId != attemptId) return false
+            val next =
+                (current ?: StoredRecord(attemptId = attemptId ?: LEGACY_ATTEMPT_ID)).copy(
+                    knownRunIds = current?.knownRunIds.orEmpty() + knownRunIds,
+                )
+            check(preferences.edit().putString(recordKey(key), encode(next)).commit()) {
+                "Could not persist the Gateway Run submission uncertainty marker."
             }
-            (current ?: StoredRecord(attemptId = attemptId ?: LEGACY_ATTEMPT_ID)).copy(
-                knownRunIds = current?.knownRunIds.orEmpty() + knownRunIds,
-            )
+            return true
         }
-        return attemptId == null || readAttemptId(key) == attemptId
     }
 
     override fun remove(
@@ -143,18 +146,6 @@ class SharedPreferencesRunSubmissionUncertaintyStore(
         return removed
     }
 
-    private fun update(
-        key: PendingRunSubmissionKey,
-        transform: (StoredRecord?) -> StoredRecord,
-    ) {
-        synchronized(lock) {
-            val next = transform(read(key))
-            check(preferences.edit().putString(recordKey(key), encode(next)).commit()) {
-                "Could not persist the Gateway Run submission uncertainty marker."
-            }
-        }
-    }
-
     private fun updateIfMatching(
         key: PendingRunSubmissionKey,
         attemptId: String?,
@@ -169,8 +160,6 @@ class SharedPreferencesRunSubmissionUncertaintyStore(
             return true
         }
     }
-
-    private fun readAttemptId(key: PendingRunSubmissionKey): String? = synchronized(lock) { read(key)?.attemptId }
 
     private fun read(key: PendingRunSubmissionKey): StoredRecord? = preferences.getString(recordKey(key), null)?.let(::decode)
 

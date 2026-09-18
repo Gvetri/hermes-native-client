@@ -186,6 +186,7 @@ class EntryScreenTest {
         val second = Session(SessionId("second"), "Second Session", null, pinned = false, updatedAt = null)
         val activeRun = Run(RunId("run-first"), first.id, "running")
         val gateway = SwitchingGateway(first, second, activeRun)
+        val recoveryRegistry = InMemoryRunRecoveryRegistry()
         val holder =
             EntryStateHolder(
                 initialState = EntryState(isGatewayConnectionConfigured = false),
@@ -193,10 +194,12 @@ class EntryScreenTest {
                     VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
                         GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
                     },
-                scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
                 sessionGatewayFactory = { _, _ -> gateway },
                 runGatewayFactory = { _, _ -> gateway },
-                runRecoveryRegistry = InMemoryRunRecoveryRegistry(),
+                runRecoveryRegistry = recoveryRegistry,
+                persistRunRecoveryEntry = { _, entry -> recoveryRegistry.save(entry) },
+                removeRunRecoveryEntry = { _, entry -> recoveryRegistry.remove(entry) },
             )
 
         composeTestRule.setContent {
@@ -213,11 +216,18 @@ class EntryScreenTest {
             holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
             holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
             holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+            composeTestRule.waitUntil(TEST_TIMEOUT_MILLIS) { holder.uiState.value.sessionList?.isLoading == false }
             composeTestRule.onNodeWithText("First Session").performClick()
+            composeTestRule.waitUntil(TEST_TIMEOUT_MILLIS) {
+                holder.uiState.value.sessionList?.openedSession?.session?.id == first.id &&
+                    holder.uiState.value.sessionList?.openedSession?.isReconciliationInProgress == false
+            }
             composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("First request")) }
             composeTestRule.onNodeWithText("Send").performClick()
             assertTrue(gateway.firstRunCreated.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             assertTrue(gateway.firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertEquals(1L, gateway.firstObservation.closed.count)
+            assertEquals(false, holder.uiState.value.sessionList?.openedSession?.hasUnresolvedSubmission)
 
             composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("First draft")) }
             composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
@@ -225,6 +235,10 @@ class EntryScreenTest {
             composeTestRule.onNodeWithText("Back to Sessions").performClick()
             assertTrue(gateway.firstObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             composeTestRule.onNodeWithText("Second Session").performClick()
+            composeTestRule.waitUntil(TEST_TIMEOUT_MILLIS) {
+                holder.uiState.value.sessionList?.openedSession?.session?.id == second.id &&
+                    holder.uiState.value.sessionList?.openedSession?.isReconciliationInProgress == false
+            }
             composeTestRule.runOnIdle { holder.onEvent(EntryUiEvent.ComposerTextChanged("Second draft")) }
             composeTestRule.onNodeWithText("Send").assertIsEnabled()
             composeTestRule.onNodeWithText("Send").performClick()
@@ -232,6 +246,10 @@ class EntryScreenTest {
 
             composeTestRule.onNodeWithText("Back to Sessions").performClick()
             composeTestRule.onNodeWithText("First Session").performClick()
+            composeTestRule.waitUntil(TEST_TIMEOUT_MILLIS) {
+                holder.uiState.value.sessionList?.openedSession?.session?.id == first.id &&
+                    holder.uiState.value.sessionList?.openedSession?.isReconciliationInProgress == false
+            }
             composeTestRule.onNodeWithText("First draft").assertIsDisplayed()
             composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
         } finally {

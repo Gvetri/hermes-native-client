@@ -1,5 +1,7 @@
 package org.hermesnative.client.feature.entry.wiring
 
+import android.content.Context
+import android.content.SharedPreferences
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.presentation.PendingRunSubmissionKey
@@ -15,6 +17,32 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class SharedPreferencesRunSubmissionUncertaintyStoreTest {
+    @Test
+    fun an_accepted_add_stays_successful_when_a_listener_removes_the_written_marker() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = PendingRunSubmissionKey("https://gateway.example/profile", SessionId("session-1"))
+        val writer = SharedPreferencesRunSubmissionUncertaintyStore(context)
+        val remover = SharedPreferencesRunSubmissionUncertaintyStore(context)
+        val preferences = context.getSharedPreferences("gateway_run_submission_uncertainty", Context.MODE_PRIVATE)
+        var removed = false
+        val listener =
+            SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+                if (remover.remove(key, "attempt-1")) removed = true
+            }
+        writer.remove(key)
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+
+        try {
+            val accepted = writer.add(key, emptySet(), "attempt-1")
+            assertTrue("The listener must remove the successfully written marker", removed)
+            assertTrue("The successful write must remain accepted", accepted)
+            assertFalse(writer.contains(key))
+        } finally {
+            preferences.unregisterOnSharedPreferenceChangeListener(listener)
+            writer.remove(key)
+        }
+    }
+
     @Test
     fun a_pre_send_marker_survives_store_recreation_and_keeps_only_identifier_state() {
         val context = RuntimeEnvironment.getApplication()

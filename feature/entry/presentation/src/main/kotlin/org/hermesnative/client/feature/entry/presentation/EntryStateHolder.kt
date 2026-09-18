@@ -4208,6 +4208,10 @@ class EntryStateHolder(
                 }
                 sessionRuns[sessionId] =
                     (sessionRuns[sessionId].orEmpty().filterNot { it.id == run.id } + run)
+                val recoveryKey = RecoverySessionKey(requestEndpoint, sessionId)
+                pendingCreateSessions[recoveryKey]
+                    ?.takeIf { it.attemptId == attemptId }
+                    ?.let { forgetPendingCreate(recoveryKey, it) }
                 val knownRuns = visibleSessionRuns(sessionId)
                 val observationState =
                     if (run.isActive() && !recoveryPersistenceFailed) {

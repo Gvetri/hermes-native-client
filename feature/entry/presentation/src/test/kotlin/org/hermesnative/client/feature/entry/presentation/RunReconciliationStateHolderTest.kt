@@ -2267,14 +2267,10 @@ class RunReconciliationStateHolderTest {
         }
 
         override fun getRunStatus(runId: RunId): Run {
-            if (runId in failStatusRunIds) {
-                statusRequests += runId
-                failStatusRunIds.remove(runId)
-                error("status request failed")
-            }
             val (shouldBlock, status) =
                 synchronized(this) {
                     statusRequests += runId
+                    if (failStatusRunIds.remove(runId)) error("status request failed")
                     val shouldBlock = blockNextStatus.also { blockNextStatus = false }
                     val status = if (statuses.isEmpty()) error("missing status") else statuses.removeFirst()
                     shouldBlock to status
