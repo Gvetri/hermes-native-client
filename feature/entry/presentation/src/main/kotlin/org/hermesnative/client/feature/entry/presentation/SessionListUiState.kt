@@ -6,6 +6,8 @@ import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.isRunRetryEligible
+import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 import java.time.Instant
 
 enum class SessionListErrorCategory(
@@ -61,7 +63,13 @@ data class SessionMessageUiState(
     val isStreaming: Boolean = false,
     val runState: RunPresentationState? = null,
     val streamInterrupted: Boolean = false,
-)
+    val failureSafeMessage: String? = null,
+    val failureTechnicalDetail: String? = null,
+    val retryAvailable: Boolean = false,
+) {
+    val isFailedRun: Boolean
+        get() = runState == RunPresentationState.FAILED || runStatus?.toRunPresentationState() == RunPresentationState.FAILED
+}
 
 enum class SessionHistoryErrorCategory(
     val safeMessage: String,
@@ -75,6 +83,12 @@ enum class MessageSendErrorCategory(
 ) {
     GATEWAY_REQUEST_FAILED("Message was not sent. Your draft is preserved. Try again."),
     UNCERTAIN("Message outcome is uncertain. The Gateway may have received it. No automatic retry was made."),
+}
+
+enum class RunFailureCategory(
+    val safeMessage: String,
+) {
+    GATEWAY_REPORTED("This Run failed. Your conversation is preserved."),
 }
 
 data class OpenSessionUiState(
@@ -165,8 +179,9 @@ internal fun Session.toSessionItemUiState(): SessionItemUiState =
         updatedAt = updatedAt,
     )
 
-internal fun GatewayHistoryMessage.toSessionMessageUiState(): SessionMessageUiState =
-    SessionMessageUiState(
+internal fun GatewayHistoryMessage.toSessionMessageUiState(retryInput: String? = null): SessionMessageUiState {
+    val failed = runStatus?.toRunPresentationState() == RunPresentationState.FAILED
+    return SessionMessageUiState(
         id = id,
         role = role,
         content = content,
@@ -174,7 +189,10 @@ internal fun GatewayHistoryMessage.toSessionMessageUiState(): SessionMessageUiSt
         runStatus = runStatus,
         runResult = runResult,
         timestamp = timestamp?.let { runCatching { Instant.parse(it) }.getOrNull() },
+        failureSafeMessage = if (failed) RunFailureCategory.GATEWAY_REPORTED.safeMessage else null,
+        retryAvailable = isRunRetryEligible(if (failed) RunPresentationState.FAILED else null, retryInput),
     )
+}
 
 internal fun List<SessionMessageUiState>.chronological(): List<SessionMessageUiState> {
     val timestamped =

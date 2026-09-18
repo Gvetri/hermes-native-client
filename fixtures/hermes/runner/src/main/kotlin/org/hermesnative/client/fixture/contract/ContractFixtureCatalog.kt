@@ -43,6 +43,7 @@ object ContractFixtureCatalog {
             ContractFixtureDefinition("sessions/unpin-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("runs/create-request.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("runs/create-response.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("runs/create-response-retry.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("runs/status-request.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("runs/status-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("runs/observation.sse", ContractFixtureFormat.SSE),
