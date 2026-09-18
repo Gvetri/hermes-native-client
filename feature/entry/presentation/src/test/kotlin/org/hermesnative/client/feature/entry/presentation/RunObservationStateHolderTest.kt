@@ -506,6 +506,57 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun terminal_observation_forgets_a_recovery_write_queued_after_save_failure() {
+        val session = session("session-queued-removal")
+        val run = Run(RunId("run-queued-removal"), session.id, "running")
+        val observation =
+            DelayedTerminalObservation(
+                RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded"),
+            )
+        val recoveryRegistry = FlakyRunRecoveryRegistry()
+        val gateway =
+            ScriptedGateway(session).apply {
+                enqueueRun(run)
+                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(
+                    SessionHistory(
+                        session.id,
+                        listOf(GatewayHistoryMessage("result", "assistant", "Done", run.id, "succeeded")),
+                        null,
+                    ),
+                )
+                enqueueStatus(run.copy(status = "succeeded"))
+                this.observation = observation
+            }
+        val holder = holder(gateway, recoveryRegistry = recoveryRegistry)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertEquals(1, recoveryRegistry.saveAttempts.get())
+
+            recoveryRegistry.failSave = false
+            observation.release.countDown()
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.hasUnresolvedSubmission == false
+            }
+            assertTrue(recoveryRegistry.load().isEmpty())
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) { it.sessionList?.isRefreshing == false }
+            assertEquals(1, recoveryRegistry.saveAttempts.get())
+            assertTrue(recoveryRegistry.load().isEmpty())
+        } finally {
+            observation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun recovery_continues_after_switching_sessions_while_authoritative_queries_are_blocked() {
         val firstSession = session("session-recovery-1")
         val secondSession = session("session-recovery-2")
@@ -805,6 +856,33 @@ class RunObservationStateHolderTest {
         }
     }
 
+    private class DelayedTerminalObservation(
+        private val terminalEvent: RunEvent,
+    ) : RunEventObservation {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        private var emitted = false
+
+        override fun iterator(): Iterator<RunEvent> =
+            object : Iterator<RunEvent> {
+                override fun hasNext(): Boolean {
+                    started.countDown()
+                    check(release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Observation was not released." }
+                    return !emitted
+                }
+
+                override fun next(): RunEvent {
+                    check(!emitted) { "Terminal event was already emitted." }
+                    emitted = true
+                    return terminalEvent
+                }
+            }
+
+        override fun close() {
+            release.countDown()
+        }
+    }
+
     private class FailingRunRecoveryRegistry : RunRecoveryRegistry {
         override fun load(): List<RunRecoveryEntry> = emptyList()
 
@@ -824,10 +902,12 @@ class RunObservationStateHolderTest {
     private class FlakyRunRecoveryRegistry : RunRecoveryRegistry {
         private val entries = CopyOnWriteArrayList<RunRecoveryEntry>()
         var failSave = true
+        val saveAttempts = AtomicInteger(0)
 
         override fun load(): List<RunRecoveryEntry> = entries.toList()
 
         override fun save(entry: RunRecoveryEntry) {
+            saveAttempts.incrementAndGet()
             if (failSave) error("recovery storage unavailable")
             if (entry !in entries) entries += entry
         }

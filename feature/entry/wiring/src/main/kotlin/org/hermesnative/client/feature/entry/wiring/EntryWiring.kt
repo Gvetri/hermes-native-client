@@ -1,6 +1,9 @@
 package org.hermesnative.client.feature.entry.wiring
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import org.hermesnative.client.feature.entry.application.LoadEntryState
 import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
@@ -20,6 +23,7 @@ object EntryWiring {
         capabilityDiscovery: ((String, String) -> GatewayCapabilities)? = null,
         sessionGatewayFactory: ((String, String) -> SessionGatewayPort)? = null,
         runGatewayFactory: ((String, String) -> RunGatewayPort)? = null,
+        coroutineScope: CoroutineScope? = null,
     ): EntryStateHolder {
         val dataSource = SharedPreferencesGatewayConnectionDataSource(context)
         val repository = DefaultGatewayConnectionRepository(dataSource)
@@ -40,6 +44,7 @@ object EntryWiring {
         return EntryStateHolder(
             initialState = initialState,
             verifyGatewayConnection = verifyGatewayConnection,
+            scope = coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO),
             sessionGatewayFactory =
                 sessionGatewayFactory ?: { endpoint, bearerCredential ->
                     DefaultGatewayClient(endpoint, bearerCredential)

@@ -1521,6 +1521,22 @@ class RunReconciliationStateHolderTest {
             assertEquals(1, gateway.runRequests.size)
             assertEquals(listOf(terminalRun.id, activeRun.id), gateway.statusRequests)
             assertTrue(gateway.observedRunIds.isEmpty())
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            }
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
+                    it.sessionList?.openedSession?.isSending == false
+            }
+            assertEquals(1, gateway.runRequests.size)
         } finally {
             holder.close()
         }

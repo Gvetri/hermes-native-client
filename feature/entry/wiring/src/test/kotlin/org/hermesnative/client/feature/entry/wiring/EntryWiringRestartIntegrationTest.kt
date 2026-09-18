@@ -1,6 +1,9 @@
 package org.hermesnative.client.feature.entry.wiring
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -134,6 +137,46 @@ class EntryWiringRestartIntegrationTest {
     }
 
     @Test
+    fun production_wiring_does_not_bind_a_known_recovery_run_to_a_new_uncertain_submission() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        val uncertaintyKey = PendingRunSubmissionKey(endpoint, RestartGateway.SESSION_ID)
+        val knownRun = gateway.externalRun
+        val submittedRun = gateway.activeRun
+        storage.clearForTest()
+        storage.save(setOf(RunRecoveryEntry(gateway.session.id, knownRun.id), RunRecoveryEntry(gateway.session.id, submittedRun.id)))
+        gateway.statusByRun[knownRun.id] = knownRun
+        gateway.statusByRun[submittedRun.id] = submittedRun
+        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        ProcessRunSubmissionUncertaintyStore.add(uncertaintyKey, setOf(knownRun.id))
+        ProcessRunSubmissionUncertaintyStore.markSettled(uncertaintyKey)
+        try {
+            val holder = createHolder(context, gateway)
+            try {
+                connect(holder, endpoint, hasSavedEndpoint = false)
+                openSession(holder, gateway.session.id)
+                awaitState(holder) {
+                    val opened = it.sessionList?.openedSession
+                    opened != null &&
+                        opened.hasUnresolvedSubmission &&
+                        opened.activeRuns.any { run -> run.id == submittedRun.id } &&
+                        !opened.isReconciliationInProgress
+                }
+                holder.onEvent(EntryUiEvent.SendMessageClicked)
+                assertTrue(gateway.runRequests.isEmpty())
+                assertTrue(ProcessRunSubmissionUncertaintyStore.contains(uncertaintyKey))
+            } finally {
+                holder.close()
+            }
+        } finally {
+            storage.clearForTest()
+            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        }
+    }
+
+    @Test
     fun production_wiring_settles_a_pending_create_when_the_holder_closes() {
         val context = RuntimeEnvironment.getApplication()
         val gateway = RestartGateway()
@@ -153,12 +196,13 @@ class EntryWiringRestartIntegrationTest {
                 assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
                 firstHolder.close()
-                assertTrue(ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey))
+                assertFalse(ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey))
             } finally {
                 gateway.releaseCreate.countDown()
                 firstHolder.close()
             }
             assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitCondition { ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey) }
 
             gateway.terminal = true
             val restartedHolder = createHolder(context, gateway)
@@ -183,9 +227,48 @@ class EntryWiringRestartIntegrationTest {
         }
     }
 
+    @Test
+    fun production_wiring_settles_a_create_canceled_before_its_body_starts() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val uncertaintyKey = PendingRunSubmissionKey(endpoint, RestartGateway.SESSION_ID)
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        val dispatcher = PausingDispatcher()
+        storage.clearForTest()
+        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        try {
+            val holder =
+                createHolder(
+                    context = context,
+                    gateway = gateway,
+                    coroutineScope = CoroutineScope(SupervisorJob() + dispatcher),
+                )
+            try {
+                connect(holder, endpoint, hasSavedEndpoint = false)
+                openSession(holder, gateway.session.id)
+                dispatcher.paused = true
+                holder.onEvent(EntryUiEvent.ComposerTextChanged("Cancel before create"))
+                holder.onEvent(EntryUiEvent.SendMessageClicked)
+
+                holder.close()
+
+                assertTrue(dispatcher.queuedCount > 0)
+                assertTrue(ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey))
+                assertTrue(gateway.runRequests.isEmpty())
+            } finally {
+                holder.close()
+            }
+        } finally {
+            storage.clearForTest()
+            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        }
+    }
+
     private fun createHolder(
         context: Context,
         gateway: RestartGateway,
+        coroutineScope: CoroutineScope? = null,
     ): EntryStateHolder =
         EntryWiring.createEntryStateHolder(
             context = context,
@@ -194,6 +277,7 @@ class EntryWiringRestartIntegrationTest {
             },
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
+            coroutineScope = coroutineScope,
         )
 
     private fun connect(
@@ -240,6 +324,14 @@ class EntryWiringRestartIntegrationTest {
         }
     }
 
+    private fun awaitCondition(predicate: () -> Boolean) {
+        runBlocking {
+            withTimeout(TEST_TIMEOUT_MILLIS) {
+                while (!predicate()) delay(10)
+            }
+        }
+    }
+
     private fun SharedPreferencesRunRecoveryStorage.clearForTest() {
         save(emptySet())
     }
@@ -255,6 +347,7 @@ class EntryWiringRestartIntegrationTest {
         val statusRequests = CopyOnWriteArrayList<RunId>()
         val runRequests = CopyOnWriteArrayList<Pair<SessionId, String>>()
         val observation = BlockingObservation()
+        val statusByRun = mutableMapOf<RunId, Run>()
         var terminal = false
         var failCreateAfterAcceptance = false
         var acceptedRunVisible = false
@@ -347,7 +440,7 @@ class EntryWiringRestartIntegrationTest {
 
         override fun getRunStatus(runId: RunId): Run {
             statusRequests += runId
-            return if (terminal) activeRun.copy(status = "succeeded") else activeRun
+            return statusByRun[runId] ?: if (terminal) activeRun.copy(status = "succeeded") else activeRun
         }
 
         override fun observeRun(runId: RunId): RunEventObservation = observation
@@ -370,6 +463,27 @@ class EntryWiringRestartIntegrationTest {
 
         override fun close() {
             release.countDown()
+        }
+    }
+
+    private class PausingDispatcher : CoroutineDispatcher() {
+        @Volatile
+        var paused = false
+
+        private val queued = ArrayDeque<Runnable>()
+
+        val queuedCount: Int
+            get() = synchronized(queued) { queued.size }
+
+        override fun dispatch(
+            context: kotlin.coroutines.CoroutineContext,
+            block: Runnable,
+        ) {
+            if (paused) {
+                synchronized(queued) { queued.addLast(block) }
+            } else {
+                block.run()
+            }
         }
     }
 
