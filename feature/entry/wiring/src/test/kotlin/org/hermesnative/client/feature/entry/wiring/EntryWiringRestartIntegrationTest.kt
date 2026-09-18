@@ -27,7 +27,6 @@ import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
 import org.hermesnative.client.feature.entry.presentation.EntryUiEvent
 import org.hermesnative.client.feature.entry.presentation.PendingRunSubmissionKey
-import org.hermesnative.client.feature.entry.presentation.ProcessRunSubmissionUncertaintyStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -98,7 +97,7 @@ class EntryWiringRestartIntegrationTest {
         val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
         val uncertaintyKey = PendingRunSubmissionKey(endpoint, RestartGateway.SESSION_ID)
         storage.clearForTest()
-        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
         try {
             val firstHolder = createHolder(context, gateway)
             try {
@@ -112,7 +111,8 @@ class EntryWiringRestartIntegrationTest {
                         it.sessionList?.openedSession?.isSending == false
                 }
                 assertEquals(1, gateway.runRequests.size)
-                awaitRecoveryEntries(storage, setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)))
+                assertTrue(SharedPreferencesRunSubmissionUncertaintyStore(context).contains(uncertaintyKey))
+                assertTrue(storage.load().isEmpty())
             } finally {
                 firstHolder.close()
             }
@@ -132,7 +132,53 @@ class EntryWiringRestartIntegrationTest {
             }
         } finally {
             storage.clearForTest()
-            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+            SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
+        }
+    }
+
+    @Test
+    fun production_wiring_persists_uncertainty_before_a_create_returns() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val uncertaintyKey = PendingRunSubmissionKey(endpoint, RestartGateway.SESSION_ID)
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        storage.clearForTest()
+        SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
+        try {
+            gateway.blockCreate = true
+            val firstHolder = createHolder(context, gateway)
+            try {
+                connect(firstHolder, endpoint, hasSavedEndpoint = false)
+                openSession(firstHolder, gateway.session.id)
+                firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Keep one request"))
+                firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                assertTrue(SharedPreferencesRunSubmissionUncertaintyStore(context).contains(uncertaintyKey))
+
+                val restartedHolder = createHolder(context, gateway)
+                try {
+                    connect(restartedHolder, endpoint, hasSavedEndpoint = true)
+                    openSession(restartedHolder, gateway.session.id)
+                    awaitState(restartedHolder) {
+                        it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
+                            !it.sessionList!!.openedSession!!.isSending
+                    }
+                    restartedHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                    assertEquals(1, gateway.runRequests.size)
+                } finally {
+                    restartedHolder.close()
+                }
+            } finally {
+                firstHolder.close()
+            }
+            gateway.releaseCreate.countDown()
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitCondition { !SharedPreferencesRunSubmissionUncertaintyStore(context).contains(uncertaintyKey) }
+        } finally {
+            gateway.releaseCreate.countDown()
+            storage.clearForTest()
+            SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
         }
     }
 
@@ -149,9 +195,9 @@ class EntryWiringRestartIntegrationTest {
         storage.save(setOf(RunRecoveryEntry(gateway.session.id, knownRun.id), RunRecoveryEntry(gateway.session.id, submittedRun.id)))
         gateway.statusByRun[knownRun.id] = knownRun
         gateway.statusByRun[submittedRun.id] = submittedRun
-        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
-        ProcessRunSubmissionUncertaintyStore.add(uncertaintyKey, setOf(knownRun.id))
-        ProcessRunSubmissionUncertaintyStore.markSettled(uncertaintyKey)
+        SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
+        SharedPreferencesRunSubmissionUncertaintyStore(context).add(uncertaintyKey, setOf(knownRun.id))
+        SharedPreferencesRunSubmissionUncertaintyStore(context).markSettled(uncertaintyKey)
         try {
             val holder = createHolder(context, gateway)
             try {
@@ -166,13 +212,13 @@ class EntryWiringRestartIntegrationTest {
                 }
                 holder.onEvent(EntryUiEvent.SendMessageClicked)
                 assertTrue(gateway.runRequests.isEmpty())
-                assertTrue(ProcessRunSubmissionUncertaintyStore.contains(uncertaintyKey))
+                assertTrue(SharedPreferencesRunSubmissionUncertaintyStore(context).contains(uncertaintyKey))
             } finally {
                 holder.close()
             }
         } finally {
             storage.clearForTest()
-            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+            SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
         }
     }
 
@@ -184,7 +230,7 @@ class EntryWiringRestartIntegrationTest {
         val uncertaintyKey = PendingRunSubmissionKey(endpoint, RestartGateway.SESSION_ID)
         val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
         storage.clearForTest()
-        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
         try {
             val firstHolder = createHolder(context, gateway)
             try {
@@ -196,13 +242,13 @@ class EntryWiringRestartIntegrationTest {
                 assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
                 firstHolder.close()
-                assertFalse(ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey))
+                assertFalse(SharedPreferencesRunSubmissionUncertaintyStore(context).isSettled(uncertaintyKey))
             } finally {
                 gateway.releaseCreate.countDown()
                 firstHolder.close()
             }
             assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            awaitCondition { ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey) }
+            awaitCondition { !SharedPreferencesRunSubmissionUncertaintyStore(context).contains(uncertaintyKey) }
 
             gateway.terminal = true
             val restartedHolder = createHolder(context, gateway)
@@ -223,7 +269,7 @@ class EntryWiringRestartIntegrationTest {
         } finally {
             gateway.releaseCreate.countDown()
             storage.clearForTest()
-            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+            SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
         }
     }
 
@@ -236,7 +282,7 @@ class EntryWiringRestartIntegrationTest {
         val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
         val dispatcher = PausingDispatcher()
         storage.clearForTest()
-        ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+        SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
         try {
             val holder =
                 createHolder(
@@ -254,14 +300,14 @@ class EntryWiringRestartIntegrationTest {
                 holder.close()
 
                 assertTrue(dispatcher.queuedCount > 0)
-                assertTrue(ProcessRunSubmissionUncertaintyStore.isSettled(uncertaintyKey))
+                assertTrue(SharedPreferencesRunSubmissionUncertaintyStore(context).isSettled(uncertaintyKey))
                 assertTrue(gateway.runRequests.isEmpty())
             } finally {
                 holder.close()
             }
         } finally {
             storage.clearForTest()
-            ProcessRunSubmissionUncertaintyStore.remove(uncertaintyKey)
+            SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
         }
     }
 
