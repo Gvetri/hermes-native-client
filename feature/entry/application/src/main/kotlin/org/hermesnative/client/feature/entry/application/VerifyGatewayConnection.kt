@@ -52,6 +52,7 @@ class VerifyGatewayConnection(
 fun normalizeGatewayEndpoint(endpoint: String): String = GatewayEndpointValidator.normalize(endpoint)
 
 private object GatewayEndpointValidator {
+    private val percentEscapePattern = Regex("%([0-9a-fA-F]{2})")
     private val endpointPattern =
         Regex(
             """(?i)^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]{1,5}))?((?:/[a-z0-9._~!&'()*+,;=:@%/-]*)?)\z""",
@@ -71,11 +72,20 @@ private object GatewayEndpointValidator {
         ) {
             throw invalidAddress()
         }
+        val canonicalPath =
+            path.replace(percentEscapePattern) { escape ->
+                val character = escape.groupValues[1].toInt(16).toChar()
+                if (character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "-._~") {
+                    character.toString()
+                } else {
+                    escape.value
+                }
+            }
         return buildString {
             append("https://")
             append(host)
             port?.takeUnless { it == 443 }?.let { append(':').append(it) }
-            append(path)
+            append(canonicalPath)
         }
     }
 

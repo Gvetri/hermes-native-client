@@ -45,6 +45,19 @@ class SharedPreferencesRunRecoveryStorageTest {
     }
 
     @Test
+    fun unreserved_percent_encoded_path_spellings_share_the_recovery_namespace() {
+        val context = RuntimeEnvironment.getApplication()
+        var endpoint: String? = "https://gateway.example/profile/%61"
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        val entry = RunRecoveryEntry(SessionId("session-1"), RunId("run-1"))
+
+        storage.save(setOf(entry))
+        endpoint = "https://gateway.example/profile/a"
+
+        assertEquals(setOf(entry), storage.load())
+    }
+
+    @Test
     fun malformed_persisted_values_are_ignored_without_exposing_transcript_data() {
         val context = RuntimeEnvironment.getApplication()
         val preferences = context.getSharedPreferences("gateway_run_recovery", 0)

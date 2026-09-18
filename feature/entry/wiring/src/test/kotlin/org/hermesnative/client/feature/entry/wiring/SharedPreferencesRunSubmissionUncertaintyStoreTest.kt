@@ -18,6 +18,24 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class SharedPreferencesRunSubmissionUncertaintyStoreTest {
     @Test
+    fun unreserved_path_aliases_cannot_start_a_second_submission_attempt() {
+        val store = SharedPreferencesRunSubmissionUncertaintyStore(RuntimeEnvironment.getApplication())
+        val encoded = PendingRunSubmissionKey("https://gateway.example/profile/%61", SessionId("session-1"))
+        val decoded = encoded.copy(endpoint = "https://gateway.example/profile/a")
+        store.remove(encoded)
+        store.remove(decoded)
+
+        try {
+            assertTrue(store.add(encoded, emptySet(), "attempt-1"))
+            assertTrue(store.contains(decoded))
+            assertFalse(store.add(decoded, emptySet(), "attempt-2"))
+        } finally {
+            store.remove(encoded)
+            store.remove(decoded)
+        }
+    }
+
+    @Test
     fun an_accepted_add_stays_successful_when_a_listener_removes_the_written_marker() {
         val context = RuntimeEnvironment.getApplication()
         val key = PendingRunSubmissionKey("https://gateway.example/profile", SessionId("session-1"))
