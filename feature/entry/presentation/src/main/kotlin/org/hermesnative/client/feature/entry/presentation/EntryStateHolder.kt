@@ -50,6 +50,9 @@ import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunReconciliationDecision
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
 import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
+import org.hermesnative.client.feature.entry.domain.RunStatusNotificationPermission
+import org.hermesnative.client.feature.entry.domain.RunStatusNotificationSettingsStore
+import org.hermesnative.client.feature.entry.domain.RunStatusNotifier
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintySnapshot
 import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyStore
@@ -61,10 +64,12 @@ import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionReconciliation
 import org.hermesnative.client.feature.entry.domain.decideRunReconciliation
 import org.hermesnative.client.feature.entry.domain.isActive
+import org.hermesnative.client.feature.entry.domain.isNotifiableTerminal
 import org.hermesnative.client.feature.entry.domain.isRunRetryEligible
 import org.hermesnative.client.feature.entry.domain.isTerminal
 import org.hermesnative.client.feature.entry.domain.isValid
 import org.hermesnative.client.feature.entry.domain.runs
+import org.hermesnative.client.feature.entry.domain.shouldPostRunStatusNotification
 import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 import java.util.UUID
 
@@ -159,6 +164,12 @@ sealed interface EntryUiEvent {
     ) : EntryUiEvent
 
     data object RemoveGatewayConnectionClicked : EntryUiEvent
+
+    data object RunStatusNotificationsToggleClicked : EntryUiEvent
+
+    data class RunStatusNotificationPermissionResult(
+        val granted: Boolean,
+    ) : EntryUiEvent
 }
 
 enum class EntryErrorCategory(
@@ -358,7 +369,21 @@ data class EntryUiState(
     val isConnected: Boolean = false,
     val errorCategory: EntryErrorCategory? = null,
     val sessionList: SessionListUiState? = null,
+    val runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
 )
+
+data class RunStatusNotificationsUiState(
+    val enabled: Boolean = false,
+    val explanation: RunStatusNotificationExplanation? = null,
+)
+
+enum class RunStatusNotificationExplanation(
+    val safeMessage: String,
+) {
+    PERMISSION_DENIED(
+        "Notifications are blocked for this app. Allow notifications in Android settings, then enable this option again.",
+    ),
+}
 
 class EntryStateHolder(
     initialState: EntryState,
@@ -374,13 +399,25 @@ class EntryStateHolder(
     private val runSubmissionUncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
     private val onRunSubmissionCompleted: (() -> Unit)? = null,
     private val onRunSubmissionSettled: (() -> Unit)? = null,
+    private val runStatusNotificationSettingsStore: RunStatusNotificationSettingsStore? = null,
+    private val runStatusNotificationPermission: RunStatusNotificationPermission? = null,
+    private val runStatusNotifier: RunStatusNotifier? = null,
     private val sendTimeoutMillis: Long = DEFAULT_SEND_TIMEOUT_MILLIS,
 ) {
+    /**
+     * Requests the Android notification permission. Assigned by the app
+     * composition root before the Settings control is reachable.
+     */
+    var requestRunStatusNotificationPermission: (() -> Unit)? = null
+
     init {
         require(sendTimeoutMillis > 0) { "sendTimeoutMillis must be positive." }
     }
 
-    private val _uiState = MutableStateFlow(initialState.toUiState())
+    private val _uiState =
+        MutableStateFlow(
+            initialState.toUiState().copy(runStatusNotifications = restoredRunStatusNotificationState()),
+        )
     val uiState: StateFlow<EntryUiState> = _uiState.asStateFlow()
     private var verificationJob: Job? = null
     private var sessionJob: Job? = null
@@ -434,6 +471,7 @@ class EntryStateHolder(
     private val uncertainSubmissionAttemptIds = mutableMapOf<SessionId, String>()
     private val pendingTimedOutSends = mutableMapOf<SessionId, TimedOutSendRecovery>()
     private val reconcilingSessions = mutableMapOf<SessionId, Long>()
+    private val notifiedTerminalRunIds = mutableSetOf<RunId>()
 
     fun onEvent(event: EntryUiEvent) {
         when (event) {
@@ -466,6 +504,9 @@ class EntryStateHolder(
             EntryUiEvent.SendMessageClicked -> retryUncertainSubmissionOrSend()
             is EntryUiEvent.RetryRunClicked -> retryRun(event.runId)
             EntryUiEvent.RemoveGatewayConnectionClicked -> removeGatewayConnection()
+            EntryUiEvent.RunStatusNotificationsToggleClicked -> toggleRunStatusNotifications()
+            is EntryUiEvent.RunStatusNotificationPermissionResult ->
+                applyRunStatusNotificationPermissionResult(event.granted)
         }
     }
 
@@ -523,6 +564,7 @@ class EntryStateHolder(
                     unresolvedLocalRunAttempts.clear()
                     pendingTimedOutSends.clear()
                     reconcilingSessions.clear()
+                    notifiedTerminalRunIds.clear()
                     connectionRecoveryJobs.clear()
                     connectionRecoverySessionCounts.clear()
                     connectionRecoveryFailedSessions.clear()
@@ -739,6 +781,7 @@ class EntryStateHolder(
                             uncertainSubmissionAttemptIds.clear()
                             pendingTimedOutSends.clear()
                             reconcilingSessions.clear()
+                            notifiedTerminalRunIds.clear()
                         }
                             .plus(listOfNotNull(verificationJobToCancel, sessionJobToCancel, recoveryJobToCancel))
                             .plus(connectionRecoveryJobsToCancel)
@@ -746,11 +789,109 @@ class EntryStateHolder(
                         removeGatewayConnectionUseCase?.execute()
                         updateRunRecoveryEndpoint?.invoke(null)
                     }
-                _uiState.value = EntryState().toUiState()
+                // The notification preference is app-level, not Gateway-level:
+                // resetting the connection UI must not reset the setting.
+                _uiState.value =
+                    EntryState()
+                        .toUiState()
+                        .copy(runStatusNotifications = restoredRunStatusNotificationState())
                 jobsToCancelInside
             }
         jobsToCancel.forEach(Job::cancel)
         observationsToClose.forEach(RunEventObservation::close)
+    }
+
+    private fun deniedRunStatusNotificationsUiState(): RunStatusNotificationsUiState =
+        RunStatusNotificationsUiState(
+            enabled = false,
+            explanation = RunStatusNotificationExplanation.PERMISSION_DENIED,
+        )
+
+    private fun restoredRunStatusNotificationState(): RunStatusNotificationsUiState {
+        val store = runStatusNotificationSettingsStore ?: return RunStatusNotificationsUiState()
+        if (!store.loadEnabled()) return RunStatusNotificationsUiState()
+        if (runStatusNotificationPermission?.canPost() == true) {
+            return RunStatusNotificationsUiState(enabled = true)
+        }
+        // The persisted preference is stale: the platform permission was
+        // revoked. Clear it so a later permission grant cannot silently
+        // re-enable notifications without an explicit user selection.
+        store.saveEnabled(false)
+        return deniedRunStatusNotificationsUiState()
+    }
+
+    private fun toggleRunStatusNotifications() {
+        val store = runStatusNotificationSettingsStore ?: return
+        val current = _uiState.value.runStatusNotifications
+        if (current.enabled) {
+            store.saveEnabled(false)
+            _uiState.value =
+                _uiState.value.copy(runStatusNotifications = RunStatusNotificationsUiState())
+            return
+        }
+        val permission = runStatusNotificationPermission
+        if (permission?.requiresRuntimePermissionRequest() == true) {
+            requestRunStatusNotificationPermission?.invoke()
+            return
+        }
+        val canPost = permission?.canPost() ?: true
+        if (!canPost) {
+            _uiState.value =
+                _uiState.value.copy(
+                    runStatusNotifications = deniedRunStatusNotificationsUiState(),
+                )
+            return
+        }
+        store.saveEnabled(true)
+        _uiState.value =
+            _uiState.value.copy(
+                runStatusNotifications = RunStatusNotificationsUiState(enabled = true),
+            )
+    }
+
+    private fun applyRunStatusNotificationPermissionResult(granted: Boolean) {
+        val store = runStatusNotificationSettingsStore ?: return
+        if (granted) {
+            store.saveEnabled(true)
+            _uiState.value =
+                _uiState.value.copy(
+                    runStatusNotifications = RunStatusNotificationsUiState(enabled = true),
+                )
+        } else {
+            store.saveEnabled(false)
+            _uiState.value =
+                _uiState.value.copy(
+                    runStatusNotifications = deniedRunStatusNotificationsUiState(),
+                )
+        }
+    }
+
+    /**
+     * Posts at most one best-effort notification per Run for a terminal
+     * success or failure, deduplicated across observation and authoritative
+     * reconciliation paths.
+     */
+    private fun postTerminalRunStatusNotificationOnce(
+        run: Run,
+        state: RunPresentationState,
+    ) {
+        if (
+            state.isNotifiableTerminal() &&
+            notifiedTerminalRunIds.add(run.id)
+        ) {
+            maybePostTerminalRunStatusNotification(run, state)
+        }
+    }
+
+    private fun maybePostTerminalRunStatusNotification(
+        run: Run,
+        state: RunPresentationState,
+    ) {
+        val notifier = runStatusNotifier ?: return
+        val enabled = runStatusNotificationSettingsStore?.loadEnabled() == true
+        val canPost = runStatusNotificationPermission?.canPost() ?: true
+        if (!shouldPostRunStatusNotification(enabled, canPost, state)) return
+        runCatching { notifier.postTerminal(run, state) }
     }
 
     private fun loadInitialSessions(gateway: SessionGatewayPort) {
@@ -1698,6 +1839,12 @@ class EntryStateHolder(
                     (authoritativeSessionHistoryGenerations[sessionId] ?: 0L) == requestHistoryGeneration
 
             if (shouldApplyReconciliationState) {
+                // A notification is allowed only for the Run the client is
+                // actively observing through a live observation job. Recovery
+                // entries re-loaded after a process restart remember
+                // observation state without any live observation, and must
+                // not notify.
+                val wasActivelyObserved = runObservationRunIds[sessionId] == run.id
                 forgetConfirmedObservationStates(sessionId, terminalRunIds)
                 val incomingAuthoritativeRuns = authoritativeRuns + run
                 val incomingAuthoritativeRunIds = incomingAuthoritativeRuns.mapTo(mutableSetOf()) { it.id }
@@ -1769,6 +1916,9 @@ class EntryStateHolder(
                         ambiguousSubmissionSessions.remove(sessionId)
                     }
                     forgetObservationState(sessionId, reconciliation.run.id)
+                    if (wasActivelyObserved) {
+                        postTerminalRunStatusNotificationOnce(run, run.toRunPresentationState())
+                    }
                     if (!run.isActive()) {
                         forgetUnresolvedLocalRun(sessionId, run.id)
                     }
@@ -4586,6 +4736,9 @@ class EntryStateHolder(
             val previous = observationStateFor(sessionId, event.runId) ?: return
             val next = RunEventStateTransition.apply(previous, event)
             rememberObservationState(next)
+            if (next.state != previous.state) {
+                postTerminalRunStatusNotificationOnce(next.run, next.state)
+            }
             val submissionHasUnresolvedMarker =
                 runSubmissionUncertaintyStore.contains(pendingRunSubmissionKey(sessionId)) ||
                     unresolvedSubmissionSessions.contains(sessionId) ||
