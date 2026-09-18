@@ -117,6 +117,32 @@ class SharedPreferencesRunSubmissionUncertaintyStore(
         return removed
     }
 
+    override fun removeIfSnapshotMatches(
+        key: PendingRunSubmissionKey,
+        snapshot: RunSubmissionUncertaintySnapshot,
+    ): Boolean {
+        val removed =
+            synchronized(lock) {
+                val current = read(key)
+                if (
+                    current == null ||
+                    current.attemptId != snapshot.attemptId ||
+                    current.knownRunIds != snapshot.knownRunIds ||
+                    current.boundRunId != snapshot.boundRunId ||
+                    current.settled != snapshot.settled ||
+                    current.requiresRunMatch != snapshot.requiresRunMatch
+                ) {
+                    false
+                } else {
+                    check(preferences.edit().remove(recordKey(key)).commit()) {
+                        "Could not remove the Gateway Run submission uncertainty marker."
+                    }
+                    true
+                }
+            }
+        return removed
+    }
+
     private fun update(
         key: PendingRunSubmissionKey,
         transform: (StoredRecord?) -> StoredRecord,

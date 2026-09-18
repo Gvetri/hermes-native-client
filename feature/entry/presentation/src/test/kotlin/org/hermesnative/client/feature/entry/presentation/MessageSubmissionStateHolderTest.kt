@@ -486,6 +486,25 @@ class MessageSubmissionStateHolderTest {
             assertEquals("new-attempt", store.attemptId(key))
             assertNull(store.boundRunId(key))
             assertEquals(1, gateway.runRequests.size)
+
+            gateway.setRunStatus(run.copy(status = "succeeded"))
+            gateway.setHistory(
+                SessionHistory(
+                    session.id,
+                    listOf(GatewayHistoryMessage("late-result", "assistant", "Late result", run.id, "succeeded")),
+                    null,
+                ),
+            )
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { refreshed ->
+                    refreshed.latestRun?.id == run.id &&
+                        refreshed.latestRun?.status == "succeeded" &&
+                        !refreshed.isRefreshing
+                } == true
+            }
+            assertEquals("new-attempt", store.attemptId(key))
+            assertTrue(requireNotNull(holder.uiState.value.sessionList).openedSession!!.hasUnresolvedSubmission)
         } finally {
             gateway.releaseRun.countDown()
             store.remove(key)

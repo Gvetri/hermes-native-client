@@ -65,4 +65,24 @@ class SharedPreferencesRunSubmissionUncertaintyStoreTest {
             store.remove(key)
         }
     }
+
+    @Test
+    fun removal_requires_the_complete_uncertainty_snapshot_to_match() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = PendingRunSubmissionKey("https://gateway.example/profile", SessionId("session-1"))
+        val store = SharedPreferencesRunSubmissionUncertaintyStore(context)
+        store.remove(key)
+
+        try {
+            assertTrue(store.add(key, setOf(RunId("known-run")), "attempt-1"))
+            val snapshot = requireNotNull(store.snapshot(key))
+            assertTrue(store.markAmbiguous(key, "attempt-1"))
+            assertFalse(store.removeIfSnapshotMatches(key, snapshot))
+            assertTrue(store.contains(key))
+            assertTrue(store.removeIfSnapshotMatches(key, requireNotNull(store.snapshot(key))))
+            assertFalse(store.contains(key))
+        } finally {
+            store.remove(key)
+        }
+    }
 }

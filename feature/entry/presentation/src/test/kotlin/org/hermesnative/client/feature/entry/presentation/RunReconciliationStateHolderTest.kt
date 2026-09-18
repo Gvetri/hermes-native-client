@@ -1697,6 +1697,37 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun startup_recovery_load_failure_clears_refreshing_and_keeps_send_fail_closed() {
+        val gateway = FakeGateway(session())
+        val failingRegistry =
+            object : RunRecoveryRegistry {
+                override fun load(): List<RunRecoveryEntry> = error("recovery storage unavailable")
+
+                override fun save(entry: RunRecoveryEntry) = Unit
+
+                override fun remove(entry: RunRecoveryEntry) = Unit
+            }
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = failingRegistry)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { opened ->
+                    !opened.isRefreshing &&
+                        !opened.isReconciliationInProgress &&
+                        opened.hasUnresolvedSubmission &&
+                        opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
+                } == true
+            }
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send while recovery is unavailable"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runRequests.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun refreshing_a_history_only_terminal_run_refetches_authoritative_status() {
         val session = session()
         val run = Run(RunId("run-history-only-refresh"), session.id, "succeeded")
