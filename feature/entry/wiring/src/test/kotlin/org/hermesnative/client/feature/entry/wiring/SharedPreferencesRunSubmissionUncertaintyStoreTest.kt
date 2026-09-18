@@ -2,9 +2,9 @@ package org.hermesnative.client.feature.entry.wiring
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.SessionId
-import org.hermesnative.client.feature.entry.presentation.PendingRunSubmissionKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

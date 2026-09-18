@@ -38,6 +38,7 @@ import org.hermesnative.client.feature.entry.application.normalizeGatewayEndpoin
 import org.hermesnative.client.feature.entry.domain.AuthoritativeRunReconciliation
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
+import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunEvent
 import org.hermesnative.client.feature.entry.domain.RunEventObservation
@@ -50,6 +51,8 @@ import org.hermesnative.client.feature.entry.domain.RunReconciliationDecision
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
 import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintySnapshot
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyStore
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -167,73 +170,6 @@ private const val SESSION_SEARCH_DEBOUNCE_MILLIS = 300L
 private const val DEFAULT_SEND_TIMEOUT_MILLIS = 30_000L
 private const val UNCERTAIN_RUN_STATUS = "uncertain"
 private const val RECOVERY_PENDING_STATUS = "recovery_pending"
-
-data class PendingRunSubmissionKey(
-    val endpoint: String,
-    val sessionId: SessionId,
-)
-
-data class RunSubmissionUncertaintySnapshot(
-    val attemptId: String,
-    val knownRunIds: Set<RunId>,
-    val boundRunId: RunId?,
-    val settled: Boolean,
-    val requiresRunMatch: Boolean,
-)
-
-interface RunSubmissionUncertaintyStore {
-    fun add(
-        key: PendingRunSubmissionKey,
-        knownRunIds: Set<RunId> = emptySet(),
-        attemptId: String? = null,
-    ): Boolean
-
-    fun remove(
-        key: PendingRunSubmissionKey,
-        attemptId: String? = null,
-    ): Boolean
-
-    fun contains(key: PendingRunSubmissionKey): Boolean
-
-    fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = emptySet()
-
-    fun attemptId(key: PendingRunSubmissionKey): String? = null
-
-    fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? = null
-
-    fun bindRun(
-        key: PendingRunSubmissionKey,
-        runId: RunId,
-        attemptId: String? = null,
-    ): Boolean = true
-
-    fun boundRunId(key: PendingRunSubmissionKey): RunId? = null
-
-    fun markSettled(
-        key: PendingRunSubmissionKey,
-        attemptId: String? = null,
-    ): Boolean = true
-
-    fun isSettled(key: PendingRunSubmissionKey): Boolean = false
-
-    fun markAmbiguous(
-        key: PendingRunSubmissionKey,
-        attemptId: String? = null,
-    ): Boolean = true
-
-    fun requiresRunMatch(key: PendingRunSubmissionKey): Boolean = false
-
-    fun removeIfKnownRunIdsMatch(
-        key: PendingRunSubmissionKey,
-        knownRunIds: Set<RunId>,
-        attemptId: String? = null,
-    ): Boolean = false
-
-    fun removeIfSnapshotMatches(
-        key: PendingRunSubmissionKey,
-        snapshot: RunSubmissionUncertaintySnapshot,
-    ): Boolean = false
-}
 
 object ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
     private val lock = Any()
