@@ -17,10 +17,12 @@ import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
+import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyStore
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -154,6 +156,70 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun close_cancels_cleanup_even_when_the_uncertainty_marker_write_fails() {
+        val session = session("session-1")
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val holder =
+            holder(
+                gateway = gateway,
+                dispatcher = Dispatchers.Default,
+                uncertaintyStore = FailingShutdownUncertaintyStore(),
+            )
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run once"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.close()
+            gateway.releaseRun.countDown()
+
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun editing_a_draft_away_and_back_does_not_clear_the_new_draft_when_submission_completes() {
+        val session = session("session-1")
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Original draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Different draft"))
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Original draft"))
+            gateway.releaseRun.countDown()
+            awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
+
+            assertEquals(
+                "Original draft",
+                requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).composerText,
+            )
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun reopening_a_pending_submission_preserves_a_changed_draft_and_blocks_duplicate_send() {
         val session = session("session-1")
         val run = Run(RunId("run-1"), session.id, "starting")
@@ -183,6 +249,7 @@ class MessageSubmissionStateHolderTest {
             assertEquals(listOf(session.id to "Run once"), gateway.runRequests)
 
             gateway.releaseRun.countDown()
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
             val completed = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals("New draft", completed.composerText)
@@ -355,10 +422,25 @@ class MessageSubmissionStateHolderTest {
             gateway.blockRunCreation = false
             gateway.releaseRun.countDown()
             assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            gateway.setRunStatus(oldRun.copy(status = "succeeded"))
+            gateway.setHistory(
+                SessionHistory(
+                    session.id,
+                    listOf(GatewayHistoryMessage("old-result", "assistant", "Old result", oldRun.id, "succeeded")),
+                    null,
+                ),
+            )
 
             connect(holder, gateway)
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == session.id }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { opened ->
+                    opened.session.id == session.id &&
+                        !opened.isReconciliationInProgress &&
+                        !opened.hasUnresolvedSubmission &&
+                        opened.sendErrorCategory == null
+                } == true
+            }
             holder.onEvent(EntryUiEvent.ComposerTextChanged("New request"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
@@ -369,6 +451,66 @@ class MessageSubmissionStateHolderTest {
             )
         } finally {
             gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun a_late_completion_cannot_replace_a_newer_attempt_or_its_draft() {
+        val session = session("session-late-attempt")
+        val run = Run(RunId("run-late-attempt"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val store = ProcessRunSubmissionUncertaintyStore
+        val key = PendingRunSubmissionKey("https://gateway.example/profile", session.id)
+        store.remove(key)
+        val holder = holder(gateway, Dispatchers.Default, uncertaintyStore = store)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Original attempt"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Newer draft"))
+            val oldAttemptId = requireNotNull(store.attemptId(key))
+            assertTrue(store.remove(key, oldAttemptId))
+            assertTrue(store.add(key, emptySet(), "new-attempt"))
+
+            gateway.releaseRun.countDown()
+            awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
+
+            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertEquals("Newer draft", opened.composerText)
+            assertTrue(opened.hasUnresolvedSubmission)
+            assertEquals("new-attempt", store.attemptId(key))
+            assertNull(store.boundRunId(key))
+            assertEquals(1, gateway.runRequests.size)
+
+            gateway.setRunStatus(run.copy(status = "succeeded"))
+            gateway.setHistory(
+                SessionHistory(
+                    session.id,
+                    listOf(GatewayHistoryMessage("late-result", "assistant", "Late result", run.id, "succeeded")),
+                    null,
+                ),
+            )
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { refreshed ->
+                    refreshed.latestRun?.id == run.id &&
+                        refreshed.latestRun?.status == "succeeded" &&
+                        !refreshed.isRefreshing
+                } == true
+            }
+            assertEquals("new-attempt", store.attemptId(key))
+            assertTrue(requireNotNull(holder.uiState.value.sessionList).openedSession!!.hasUnresolvedSubmission)
+        } finally {
+            gateway.releaseRun.countDown()
+            store.remove(key)
             holder.close()
         }
     }
@@ -425,8 +567,13 @@ class MessageSubmissionStateHolderTest {
             assertEquals(MessageSendErrorCategory.GATEWAY_REQUEST_FAILED, failed.sendErrorCategory)
             assertFalse(failed.isSending)
             assertEquals(1, gateway.runRequests.size)
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRun == run &&
+                    it.sessionList?.openedSession?.composerText == ""
+            }
 
             val retried = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals(2, gateway.runRequests.size)
@@ -495,6 +642,7 @@ class MessageSubmissionStateHolderTest {
         gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         repository: GatewayConnectionRepository = DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
+        uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
     ): EntryStateHolder =
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
@@ -506,6 +654,7 @@ class MessageSubmissionStateHolderTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+            runSubmissionUncertaintyStore = uncertaintyStore,
             onRunSubmissionSettled = gateway.runFinished::countDown,
         )
 
@@ -558,6 +707,8 @@ class MessageSubmissionStateHolderTest {
         private val histories: Map<SessionId, SessionHistory> = emptyMap(),
         private val runStatuses: Map<RunId, Run> = emptyMap(),
     ) : SessionGatewayPort, RunGatewayPort {
+        private val mutableHistories = histories.toMutableMap()
+        private val mutableRunStatuses = runStatuses.toMutableMap()
         val runRequests = mutableListOf<Pair<SessionId, String>>()
         private val runResults = ArrayDeque<Result<Run>>()
         val runStarted = CountDownLatch(1)
@@ -573,6 +724,14 @@ class MessageSubmissionStateHolderTest {
             runResults += Result.failure(error)
         }
 
+        fun setRunStatus(run: Run) {
+            mutableRunStatuses[run.id] = run
+        }
+
+        fun setHistory(history: SessionHistory) {
+            mutableHistories[history.sessionId] = history
+        }
+
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(sessions, null)
 
         override fun createSession(title: String?): Session = error("not used")
@@ -580,7 +739,7 @@ class MessageSubmissionStateHolderTest {
         override fun openSession(sessionId: SessionId): Session = sessions.single { it.id == sessionId }
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            histories[sessionId] ?: SessionHistory(sessionId, emptyList(), null)
+            mutableHistories[sessionId] ?: SessionHistory(sessionId, emptyList(), null)
 
         override fun renameSession(
             sessionId: SessionId,
@@ -605,8 +764,29 @@ class MessageSubmissionStateHolderTest {
             return runResults.removeFirst().getOrThrow()
         }
 
-        override fun getRunStatus(runId: RunId): Run = runStatuses[runId] ?: error("not used")
+        override fun getRunStatus(runId: RunId): Run = mutableRunStatuses[runId] ?: error("not used")
 
         override fun observeRun(runId: RunId) = error("not used")
+    }
+
+    private class FailingShutdownUncertaintyStore : RunSubmissionUncertaintyStore {
+        private var addCount = 0
+
+        override fun add(
+            key: PendingRunSubmissionKey,
+            knownRunIds: Set<RunId>,
+            attemptId: String?,
+        ): Boolean {
+            addCount += 1
+            if (addCount > 1) throw IllegalStateException("test persistence failure")
+            return true
+        }
+
+        override fun remove(
+            key: PendingRunSubmissionKey,
+            attemptId: String?,
+        ): Boolean = true
+
+        override fun contains(key: PendingRunSubmissionKey): Boolean = addCount > 0
     }
 }

@@ -7,6 +7,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
+import java.util.Locale
 
 class VerifyGatewayConnection(
     private val gatewayConnectionRepository: GatewayConnectionRepository,
@@ -17,7 +18,25 @@ class VerifyGatewayConnection(
         endpoint: String,
         bearerCredential: String,
     ): GatewayCapabilities {
-        val normalizedEndpoint = GatewayEndpointValidator.normalize(endpoint)
+        val capabilities = verify(endpoint, bearerCredential)
+        gatewayConnectionRepository.save(GatewayConnection(normalizeGatewayEndpoint(endpoint)))
+        return capabilities
+    }
+
+    fun executeWithoutPersistence(
+        endpoint: String,
+        bearerCredential: String,
+    ): GatewayCapabilities = verify(endpoint, bearerCredential)
+
+    fun persist(endpoint: String) {
+        gatewayConnectionRepository.save(GatewayConnection(normalizeGatewayEndpoint(endpoint)))
+    }
+
+    private fun verify(
+        endpoint: String,
+        bearerCredential: String,
+    ): GatewayCapabilities {
+        val normalizedEndpoint = normalizeGatewayEndpoint(endpoint)
         if (bearerCredential.isBlank()) {
             throw GatewayException(GatewayErrorCategory.AUTHENTICATION_FAILED)
         }
@@ -26,23 +45,25 @@ class VerifyGatewayConnection(
         if (!manifest.requiredIdentifiers.all(capabilities::supports)) {
             throw GatewayException(GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE)
         }
-
-        gatewayConnectionRepository.save(GatewayConnection(normalizedEndpoint))
         return capabilities
     }
 }
 
+fun normalizeGatewayEndpoint(endpoint: String): String = GatewayEndpointValidator.normalize(endpoint)
+
 private object GatewayEndpointValidator {
+    private val percentEscapePattern = Regex("%([0-9a-fA-F]{2})")
     private val endpointPattern =
         Regex(
-            """(?i)^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]{1,5}))?(?:/[a-z0-9._~!&'()*+,;=:@%/-]*)?\z""",
+            """(?i)^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]{1,5}))?((?:/[a-z0-9._~!&'()*+,;=:@%/-]*)?)\z""",
         )
 
     fun normalize(endpoint: String): String {
         val normalizedEndpoint = endpoint.trim()
         val match = endpointPattern.matchEntire(normalizedEndpoint) ?: throw invalidAddress()
-        val host = match.groupValues[1]
+        val host = match.groupValues[1].lowercase(Locale.ROOT)
         val port = match.groupValues[2].takeIf(String::isNotEmpty)?.toIntOrNull()
+        val path = match.groupValues[3].trimEnd('/')
 
         if (
             host.split('.').any(::invalidHostLabel) ||
@@ -51,7 +72,21 @@ private object GatewayEndpointValidator {
         ) {
             throw invalidAddress()
         }
-        return normalizedEndpoint
+        val canonicalPath =
+            path.replace(percentEscapePattern) { escape ->
+                val character = escape.groupValues[1].toInt(16).toChar()
+                if (character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "-._~") {
+                    character.toString()
+                } else {
+                    escape.value
+                }
+            }
+        return buildString {
+            append("https://")
+            append(host)
+            port?.takeUnless { it == 443 }?.let { append(':').append(it) }
+            append(canonicalPath)
+        }
     }
 
     private fun invalidHostLabel(label: String): Boolean =

@@ -18,6 +18,7 @@ import org.hermesnative.client.feature.entry.data.GatewayEventStream
 import org.hermesnative.client.feature.entry.data.GatewayHttpRequest
 import org.hermesnative.client.feature.entry.data.GatewayHttpResponse
 import org.hermesnative.client.feature.entry.data.GatewayTransport
+import org.hermesnative.client.feature.entry.data.InMemoryRunRecoveryRegistry
 import org.hermesnative.client.feature.entry.data.OkHttpGatewayTransport
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnection
@@ -28,6 +29,8 @@ import org.hermesnative.client.feature.entry.domain.RunEventObservation
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
+import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
+import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.fixture.DeterministicGatewayFixture
 import org.hermesnative.client.fixture.FixtureTestContext
@@ -579,6 +582,82 @@ class EntryStateHolderFixtureIntegrationTest {
     }
 
     @Test
+    fun restart_reconciles_a_known_local_run_through_the_gateway_fixture() {
+        val sessionId = "recovery-session"
+        val session = SessionId(sessionId)
+        val localRun = Run(RunId("local-recovered"), session, "running")
+        val recoveredRun = localRun.copy(status = "succeeded")
+        val externalRun = Run(RunId("external-run"), session, "succeeded")
+        val history =
+            listOf(
+                SyntheticGatewayMessage(
+                    id = "external-result",
+                    role = "assistant",
+                    content = "External result",
+                    runId = externalRun.id.value,
+                    runStatus = externalRun.status,
+                    runResult = "External result",
+                    timestamp = "2026-09-08T20:00:00Z",
+                ),
+                SyntheticGatewayMessage(
+                    id = "local-result",
+                    role = "assistant",
+                    content = "Recovered result",
+                    runId = localRun.id.value,
+                    runStatus = recoveredRun.status,
+                    runResult = "Recovered result",
+                    timestamp = "2026-09-08T21:00:00Z",
+                ),
+            )
+        val behavior =
+            SyntheticGatewayBehavior(
+                capabilities = requiredCapabilities + "client-manifest",
+                initialSessions =
+                    listOf(
+                        SyntheticGatewaySession(
+                            id = sessionId,
+                            title = "Recovery",
+                            preview = null,
+                            pinned = false,
+                            updatedAt = "2026-09-08T21:00:00Z",
+                            history = history,
+                        ),
+                    ),
+            )
+        val runGateway =
+            FixtureRunGateway(
+                statuses = mapOf(localRun.id to recoveredRun, externalRun.id to externalRun),
+            )
+        val recoveryRegistry = InMemoryRunRecoveryRegistry(listOf(RunRecoveryEntry(session, localRun.id)))
+
+        fixture(behavior).execute { context ->
+            stateHolder(client(context), runGateway = runGateway, recoveryRegistry = recoveryRegistry).close()
+            val holder = stateHolder(client(context), runGateway = runGateway, recoveryRegistry = recoveryRegistry)
+            try {
+                assertEquals(listOf(RunRecoveryEntry(session, localRun.id)), recoveryRegistry.load())
+                connect(holder)
+                awaitState(holder) { state ->
+                    state.sessionList?.sessions?.singleOrNull()?.id == session &&
+                        runGateway.statusRequests == listOf(localRun.id) &&
+                        recoveryRegistry.load().isEmpty()
+                }
+
+                holder.onEvent(EntryUiEvent.SessionClicked(session))
+                awaitState(holder) { state ->
+                    val opened = state.sessionList?.openedSession
+                    opened?.latestRun?.id == localRun.id &&
+                        opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                        !opened.isReconciliationInProgress &&
+                        runGateway.statusRequests == listOf(localRun.id, localRun.id)
+                }
+                assertTrue(recoveryRegistry.load().isEmpty())
+            } finally {
+                holder.close()
+            }
+        }
+    }
+
+    @Test
     fun external_runs_remain_authoritative_after_refresh_without_local_recovery_registration() {
         val sessionId = "external-session"
         val externalFailed = RunId("external-run-failed")
@@ -866,6 +945,7 @@ class EntryStateHolderFixtureIntegrationTest {
         client: DefaultGatewayClient,
         asynchronous: Boolean = false,
         runGateway: RunGatewayPort? = null,
+        recoveryRegistry: RunRecoveryRegistry? = null,
     ): EntryStateHolder =
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
@@ -879,6 +959,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 ),
             sessionGatewayFactory = { _, _ -> client },
             runGatewayFactory = runGateway?.let { gateway -> { _, _ -> gateway } },
+            runRecoveryRegistry = recoveryRegistry,
         )
 
     private fun connect(holder: EntryStateHolder) {

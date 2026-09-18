@@ -1,0 +1,75 @@
+package org.hermesnative.client.feature.entry.wiring
+
+import android.content.Context
+import android.util.Base64
+import org.hermesnative.client.feature.entry.application.normalizeGatewayEndpoint
+import org.hermesnative.client.feature.entry.data.RunRecoveryStorage
+import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
+import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.isValid
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+
+/** Android-only persistence bridge; registry behavior remains in the JVM data module. */
+class SharedPreferencesRunRecoveryStorage(
+    context: Context,
+    private val endpointProvider: () -> String?,
+) : RunRecoveryStorage {
+    private val preferences =
+        context.applicationContext.getSharedPreferences(
+            PREFERENCES_NAME,
+            Context.MODE_PRIVATE,
+        )
+
+    override fun load(): Set<RunRecoveryEntry> =
+        preferences
+            .getStringSet(entriesKey(), emptySet())
+            .orEmpty()
+            .mapNotNull(::decode)
+            .filter(RunRecoveryEntry::isValid)
+            .toSet()
+
+    override fun save(entries: Set<RunRecoveryEntry>) {
+        check(
+            preferences
+                .edit()
+                .putStringSet(entriesKey(), entries.filter(RunRecoveryEntry::isValid).map(::encode).toSet())
+                .commit(),
+        ) { "Could not persist Gateway Run recovery metadata." }
+    }
+
+    private fun encode(entry: RunRecoveryEntry): String = "${encode(entry.sessionId.value)}.${encode(entry.runId.value)}"
+
+    private fun decode(value: String): RunRecoveryEntry? {
+        val parts = value.split('.', limit = 2)
+        if (parts.size != 2) return null
+        return runCatching {
+            RunRecoveryEntry(
+                sessionId = SessionId(decodePart(parts[0])),
+                runId = RunId(decodePart(parts[1])),
+            )
+        }.getOrNull()
+    }
+
+    private fun encode(value: String): String = Base64.encodeToString(value.toByteArray(StandardCharsets.UTF_8), Base64.NO_WRAP)
+
+    private fun decodePart(value: String): String = Base64.decode(value, Base64.NO_WRAP).toString(StandardCharsets.UTF_8)
+
+    private fun entriesKey(): String = "$ENTRIES_KEY.${endpointNamespace(endpointProvider())}"
+
+    private fun endpointNamespace(endpoint: String?): String {
+        val value = endpoint?.takeIf(String::isNotBlank) ?: UNBOUND_ENDPOINT
+        val canonicalValue = runCatching { normalizeGatewayEndpoint(value) }.getOrDefault(value.trim())
+        return MessageDigest
+            .getInstance("SHA-256")
+            .digest(canonicalValue.toByteArray(StandardCharsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
+    private companion object {
+        const val PREFERENCES_NAME = "gateway_run_recovery"
+        const val ENTRIES_KEY = "entries"
+        const val UNBOUND_ENDPOINT = "unbound"
+    }
+}

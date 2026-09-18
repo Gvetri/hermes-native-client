@@ -288,6 +288,7 @@ val requiredUnitTestTasks = listOf(
     ":feature:entry:application:test",
     ":feature:entry:data:test",
     ":feature:entry:presentation:testDebugUnitTest",
+    ":feature:entry:wiring:testDebugUnitTest",
 )
 
 tasks.register("verifyRequiredUnitTests") {
@@ -299,6 +300,7 @@ tasks.register("verifyRequiredUnitTests") {
             file("feature/entry/application/build/test-results/test"),
             file("feature/entry/data/build/test-results/test"),
             file("feature/entry/presentation/build/test-results/testDebugUnitTest"),
+            file("feature/entry/wiring/build/test-results/testDebugUnitTest"),
         )
         val failures = resultDirectories.flatMap { resultDirectory ->
             if (!resultDirectory.isDirectory) {

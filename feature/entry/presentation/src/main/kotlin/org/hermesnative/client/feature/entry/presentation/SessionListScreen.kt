@@ -467,10 +467,15 @@ private fun SessionActionControls(
                 OutlinedButton(
                     onClick = {
                         onEvent(
-                            if (session.pinned) {
-                                EntryUiEvent.UnpinSessionClicked(session.id)
-                            } else {
-                                EntryUiEvent.PinSessionClicked(session.id)
+                            when (mutation?.retryAction) {
+                                SessionMutationAction.PIN -> EntryUiEvent.PinSessionClicked(session.id)
+                                SessionMutationAction.UNPIN -> EntryUiEvent.UnpinSessionClicked(session.id)
+                                else ->
+                                    if (session.pinned) {
+                                        EntryUiEvent.UnpinSessionClicked(session.id)
+                                    } else {
+                                        EntryUiEvent.PinSessionClicked(session.id)
+                                    }
                             },
                         )
                     },

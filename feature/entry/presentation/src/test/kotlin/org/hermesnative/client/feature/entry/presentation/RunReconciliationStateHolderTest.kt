@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -12,6 +13,7 @@ import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
 import org.hermesnative.client.feature.entry.data.InMemoryGatewayConnectionDataSource
+import org.hermesnative.client.feature.entry.data.InMemoryRunRecoveryRegistry
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
@@ -23,6 +25,8 @@ import org.hermesnative.client.feature.entry.domain.RunEventType
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
+import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
+import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -216,7 +220,8 @@ class RunReconciliationStateHolderTest {
                 blockNextStatus = true
                 observation = ScriptedObservation(listOf(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "done")))
             }
-        val holder = holder(gateway, Dispatchers.Default)
+        val recoveryRegistry = InMemoryRunRecoveryRegistry()
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = recoveryRegistry)
 
         try {
             open(holder, gateway)
@@ -227,6 +232,7 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
                     it.sessionList?.openedSession?.isReconciliationInProgress == true
             }
+            assertEquals(listOf(RunRecoveryEntry(session.id, run.id)), recoveryRegistry.load())
 
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Second"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
@@ -237,6 +243,7 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.isReconciliationInProgress == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED
             }
+            assertTrue(recoveryRegistry.load().isEmpty())
         } finally {
             gateway.releaseStatus.countDown()
             holder.close()
@@ -1367,6 +1374,8 @@ class RunReconciliationStateHolderTest {
                 histories.add(otherHistory)
                 histories.add(otherHistory)
                 histories.add(otherHistory)
+                histories.add(otherHistory)
+                statuses.add(otherRun)
                 statuses.add(otherRun)
                 blockRunCreation = true
             }
@@ -1405,6 +1414,7 @@ class RunReconciliationStateHolderTest {
             assertEquals(2, gateway.historyRequests)
             assertEquals(listOf(otherRun.id), gateway.statusRequests)
 
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Edited after timeout"))
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             awaitState(holder) {
                 val opened = it.sessionList?.openedSession
@@ -1413,6 +1423,7 @@ class RunReconciliationStateHolderTest {
                     opened.latestRunState == RunPresentationState.SUCCEEDED &&
                     opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
                     opened.hasUnresolvedSubmission &&
+                    opened.composerText == "Edited after timeout" &&
                     opened.messages.map { message -> message.id } == listOf("other") &&
                     opened.messages.single().runResult == "External result" &&
                     opened.messages.single().timestamp?.toString() == "2026-09-08T21:00:00Z"
@@ -1425,16 +1436,127 @@ class RunReconciliationStateHolderTest {
                     it.sessionList?.openedSession?.latestRun?.id == otherRun.id &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
                     it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
+                    it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.composerText == "Edited after timeout"
+            }
+            assertEquals(4, gateway.historyRequests)
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitCondition { gateway.historyRequests == 5 }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
                     it.sessionList?.openedSession?.hasUnresolvedSubmission == true
             }
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertEquals(1, gateway.runRequests.size)
             assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
-            assertEquals(listOf(otherRun.id), gateway.statusRequests)
+            assertEquals(listOf(otherRun.id, otherRun.id), gateway.statusRequests)
             assertTrue(gateway.observedRunIds.isEmpty())
-            assertEquals(4, gateway.historyRequests)
+            assertEquals(5, gateway.historyRequests)
         } finally {
             gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun response_loss_with_one_terminal_discovered_run_remains_uncertain() {
+        val session = session()
+        val run = Run(RunId("run-terminal-after-response-loss"), session.id, "succeeded")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(GatewayHistoryMessage("terminal", "assistant", "Succeeded", run.id, "succeeded")),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(run)
+                failRunCreation = true
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Keep this draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    opened.latestRun?.id == run.id &&
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.composerText == "Keep this draft" &&
+                    !opened.isReconciliationInProgress
+            }
+            assertEquals(1, gateway.runRequests.size)
+            assertEquals(listOf(run.id), gateway.statusRequests)
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun response_loss_with_terminal_and_active_discoveries_does_not_bind_an_unrelated_run() {
+        val session = session()
+        val terminalRun = Run(RunId("run-terminal-after-response-loss"), session.id, "succeeded")
+        val activeRun = Run(RunId("run-unrelated-active"), session.id, "running")
+        val history =
+            SessionHistory(
+                session.id,
+                listOf(
+                    GatewayHistoryMessage("terminal", "assistant", "Succeeded", terminalRun.id, "succeeded"),
+                    GatewayHistoryMessage("active", "assistant", "Running", activeRun.id, "running"),
+                ),
+                null,
+            )
+        val gateway =
+            FakeGateway(session).apply {
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(history)
+                statuses.add(terminalRun)
+                statuses.add(activeRun)
+                failRunCreation = true
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not duplicate"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    opened.latestRun?.id == activeRun.id &&
+                    !opened.isReconciliationInProgress
+            }
+            assertEquals(1, gateway.runRequests.size)
+            assertEquals(listOf(terminalRun.id, activeRun.id), gateway.statusRequests)
+            assertTrue(gateway.observedRunIds.isEmpty())
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened != null &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress &&
+                    opened.hasUnresolvedSubmission &&
+                    opened.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            }
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
+                    it.sessionList?.openedSession?.isSending == false
+            }
+            assertEquals(1, gateway.runRequests.size)
+        } finally {
             holder.close()
         }
     }
@@ -1463,6 +1585,8 @@ class RunReconciliationStateHolderTest {
                 histories.add(terminalHistory)
                 histories.add(terminalHistory)
                 statuses.add(terminalRun)
+                statuses.add(terminalRun)
+                statuses.add(terminalRun)
                 failRunCreation = true
             }
         val holder = holder(gateway, Dispatchers.Default)
@@ -1481,7 +1605,7 @@ class RunReconciliationStateHolderTest {
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
                     it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
                     it.sessionList?.openedSession?.composerText == "Failed first attempt" &&
-                    gateway.statusRequests.size == 1
+                    gateway.statusRequests.isNotEmpty()
             }
 
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
@@ -1527,8 +1651,14 @@ class RunReconciliationStateHolderTest {
                 histories.add(otherActiveHistory)
                 histories.add(otherTerminalHistory)
                 histories.add(otherTerminalHistory)
+                histories.add(otherTerminalHistory)
+                histories.add(otherTerminalHistory)
+                histories.add(otherTerminalHistory)
+                statuses.add(run.copy(status = "cancelled"))
                 statuses.add(run.copy(status = "cancelled"))
                 statuses.add(otherRun)
+                statuses.add(otherTerminalRun)
+                statuses.add(run.copy(status = "cancelled"))
                 statuses.add(otherTerminalRun)
                 runs.add(run)
                 observations.add(observation)
@@ -1556,7 +1686,7 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.isRefreshing == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
                     it.sessionList?.openedSession?.latestRun?.id == run.id &&
-                    gateway.statusRequests.size == 2
+                    gateway.statusRequests.size == 3
             }
             assertTrue(otherObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
@@ -1565,18 +1695,153 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.isRefreshing == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
                     it.sessionList?.openedSession?.latestRun?.id == run.id &&
-                    gateway.statusRequests.size == 3
+                    gateway.statusRequests.size == 5
             }
             assertTrue(otherObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
+            assertEquals(9, gateway.historyRequests)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitCondition { gateway.historyRequests == 10 }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true
+            }
             assertEquals(1, gateway.runRequests.size)
-            assertEquals(3, gateway.statusRequests.size)
+            assertEquals(6, gateway.statusRequests.size)
             assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
         } finally {
             observation.release.countDown()
             otherObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun startup_recovery_load_failure_clears_refreshing_and_keeps_send_fail_closed() {
+        val gateway = FakeGateway(session())
+        val failingRegistry =
+            object : RunRecoveryRegistry {
+                override fun load(): List<RunRecoveryEntry> = error("recovery storage unavailable")
+
+                override fun save(entry: RunRecoveryEntry) = Unit
+
+                override fun remove(entry: RunRecoveryEntry) = Unit
+            }
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = failingRegistry)
+
+        try {
+            open(holder, gateway)
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { opened ->
+                    !opened.isRefreshing &&
+                        !opened.isReconciliationInProgress &&
+                        opened.hasUnresolvedSubmission &&
+                        opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
+                } == true
+            }
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send while recovery is unavailable"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runRequests.isEmpty())
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun one_failed_reconnect_recovery_entry_keeps_the_session_fail_closed_when_another_succeeds() {
+        val session = session()
+        val failedEntry = RunRecoveryEntry(session.id, RunId("run-recovery-failed"))
+        val successfulRun = Run(RunId("run-recovery-success"), session.id, "succeeded")
+        val successfulEntry = RunRecoveryEntry(session.id, successfulRun.id)
+        val gateway =
+            FakeGateway(session).apply {
+                failStatusRunIds += failedEntry.runId
+                statuses.add(successfulRun)
+                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(
+                    SessionHistory(
+                        session.id,
+                        listOf(
+                            GatewayHistoryMessage(
+                                "recovery-result",
+                                "assistant",
+                                "Recovered result",
+                                successfulRun.id,
+                                "succeeded",
+                            ),
+                        ),
+                        null,
+                    ),
+                )
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway)
+            invokePersistedRecoveryEntry(holder, "https://gateway.example/profile", failedEntry)
+            invokePersistedRecoveryEntry(holder, "https://gateway.example/profile", successfulEntry)
+            awaitCondition { gateway.statusRequests.size == 2 }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { opened ->
+                    !opened.isRefreshing &&
+                        !opened.isReconciliationInProgress &&
+                        opened.hasUnresolvedSubmission &&
+                        opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
+                } == true
+            }
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun startup_and_late_recovery_claim_the_same_entry_only_once() {
+        val session = session()
+        val run = Run(RunId("run-recovery-claim"), session.id, "running")
+        val recoveryRegistry = BlockingRecoveryRegistry()
+        val gateway =
+            FakeGateway(session).apply {
+                runs.add(run)
+                statuses.add(run)
+                histories.add(SessionHistory(session.id, emptyList(), null))
+            }
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = recoveryRegistry)
+
+        try {
+            open(holder, gateway)
+            gateway.blockRunCreation = true
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("local request"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            recoveryRegistry.blockLoads = true
+            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+            holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
+            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+            assertTrue(recoveryRegistry.loadStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            gateway.blockNextStatus = true
+            gateway.releaseRun.countDown()
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            gateway.releaseStatus.countDown()
+            assertTrue(gateway.statusFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            recoveryRegistry.releaseLoad.countDown()
+            assertTrue(recoveryRegistry.loadFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            runBlocking {
+                withTimeout(TEST_TIMEOUT_MILLIS) {
+                    delay(100)
+                }
+            }
+            assertEquals(listOf(run.id), gateway.statusRequests)
+        } finally {
+            gateway.releaseRun.countDown()
+            gateway.releaseStatus.countDown()
+            recoveryRegistry.releaseLoad.countDown()
             holder.close()
         }
     }
@@ -1819,6 +2084,7 @@ class RunReconciliationStateHolderTest {
         gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         sendTimeoutMillis: Long = 30_000L,
+        recoveryRegistry: RunRecoveryRegistry? = null,
     ): EntryStateHolder {
         val repository: GatewayConnectionRepository =
             DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())
@@ -1831,6 +2097,9 @@ class RunReconciliationStateHolderTest {
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
+            runRecoveryRegistry = recoveryRegistry,
+            persistRunRecoveryEntry = recoveryRegistry?.let { registry -> { _, entry -> registry.save(entry) } },
+            removeRunRecoveryEntry = recoveryRegistry?.let { registry -> { _, entry -> registry.remove(entry) } },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
             onRunSubmissionCompleted = {
                 gateway.submissionCompleted.countDown()
@@ -1854,7 +2123,10 @@ class RunReconciliationStateHolderTest {
         holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
         awaitState(holder) { it.sessionList?.sessions == listOf(gateway.session.toSessionItemUiState()) }
         holder.onEvent(EntryUiEvent.SessionClicked(gateway.session.id))
-        awaitState(holder) { it.sessionList?.openedSession?.session?.id == gateway.session.id }
+        awaitState(holder) {
+            it.sessionList?.openedSession?.session?.id == gateway.session.id &&
+                !it.sessionList!!.openedSession!!.isReconciliationInProgress
+        }
     }
 
     private fun awaitState(
@@ -1872,6 +2144,14 @@ class RunReconciliationStateHolderTest {
         }
     }
 
+    private fun awaitCondition(predicate: () -> Boolean) {
+        runBlocking {
+            withTimeout(TEST_TIMEOUT_MILLIS) {
+                while (!predicate()) delay(10)
+            }
+        }
+    }
+
     private fun session(): Session =
         Session(
             id = SessionId("session-1"),
@@ -1881,6 +2161,20 @@ class RunReconciliationStateHolderTest {
             updatedAt = null,
         )
 
+    private fun invokePersistedRecoveryEntry(
+        holder: EntryStateHolder,
+        endpoint: String,
+        entry: RunRecoveryEntry,
+    ) {
+        EntryStateHolder::class.java
+            .getDeclaredMethod(
+                "reconcilePersistedRecoveryEntryIfConnected",
+                String::class.java,
+                RunRecoveryEntry::class.java,
+            ).apply { isAccessible = true }
+            .invoke(holder, endpoint, entry)
+    }
+
     private class FakeGateway(
         val session: Session,
     ) : SessionGatewayPort, RunGatewayPort {
@@ -1889,6 +2183,7 @@ class RunReconciliationStateHolderTest {
         val runs = ArrayDeque<Run>()
         val runRequests: MutableList<Pair<SessionId, String>> = CopyOnWriteArrayList()
         val statusRequests: MutableList<RunId> = CopyOnWriteArrayList()
+        val failStatusRunIds = mutableSetOf<RunId>()
         val observedRunIds: MutableList<RunId> = CopyOnWriteArrayList()
         val observations = ArrayDeque<RunEventObservation>()
         private val historyRequestCount = AtomicInteger(0)
@@ -1975,6 +2270,7 @@ class RunReconciliationStateHolderTest {
             val (shouldBlock, status) =
                 synchronized(this) {
                     statusRequests += runId
+                    if (failStatusRunIds.remove(runId)) error("status request failed")
                     val shouldBlock = blockNextStatus.also { blockNextStatus = false }
                     val status = if (statuses.isEmpty()) error("missing status") else statuses.removeFirst()
                     shouldBlock to status
@@ -2137,6 +2433,37 @@ class RunReconciliationStateHolderTest {
                 "Blocked map lookup was not released."
             }
             return delegate.containsKey(key)
+        }
+    }
+
+    private class BlockingRecoveryRegistry : RunRecoveryRegistry {
+        private val entries = mutableListOf<RunRecoveryEntry>()
+        val loadStarted = CountDownLatch(1)
+        val loadFinished = CountDownLatch(1)
+        val releaseLoad = CountDownLatch(1)
+        var blockLoads = false
+
+        override fun load(): List<RunRecoveryEntry> {
+            val shouldSignalCompletion = blockLoads
+            if (shouldSignalCompletion) {
+                loadStarted.countDown()
+                check(releaseLoad.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    "Recovery load was not released."
+                }
+            }
+            return synchronized(entries) { entries.toList() }.also {
+                if (shouldSignalCompletion) loadFinished.countDown()
+            }
+        }
+
+        override fun save(entry: RunRecoveryEntry) {
+            synchronized(entries) {
+                if (entry !in entries) entries += entry
+            }
+        }
+
+        override fun remove(entry: RunRecoveryEntry) {
+            synchronized(entries) { entries -= entry }
         }
     }
 

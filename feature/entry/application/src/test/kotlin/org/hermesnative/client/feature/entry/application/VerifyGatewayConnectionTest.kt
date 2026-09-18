@@ -23,12 +23,41 @@ class VerifyGatewayConnectionTest {
                 GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers + "future.capability")
             }
 
-        val capabilities = verifier.execute("  https://gateway.example/profile  ", "memory-only-token")
+        val capabilities = verifier.execute("  https://gateway.example/profile/  ", "memory-only-token")
 
         assertEquals("https://gateway.example/profile", receivedEndpoint)
         assertEquals("memory-only-token", receivedCredential)
         assertEquals(12, capabilities.identifiers.size)
         assertEquals(GatewayConnection("https://gateway.example/profile"), repository.saved)
+    }
+
+    @Test
+    fun canonicalizes_scheme_host_and_default_https_port_for_recovery_scoping() {
+        val repository = FakeGatewayConnectionRepository()
+        val verifier =
+            VerifyGatewayConnection(repository) { endpoint, _ ->
+                assertEquals("https://gateway.example/profile", endpoint)
+                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+            }
+
+        verifier.execute(" HTTPS://GATEWAY.EXAMPLE:0443/profile/ ", "token")
+
+        assertEquals(GatewayConnection("https://gateway.example/profile"), repository.saved)
+    }
+
+    @Test
+    fun canonicalizes_only_percent_encoded_unreserved_path_characters() {
+        assertEquals(
+            "https://gateway.example/profile/aA0-._~",
+            normalizeGatewayEndpoint("https://gateway.example/profile/%61%41%30%2d%2E%5f%7e"),
+        )
+    }
+
+    @Test
+    fun preserves_reserved_non_ascii_and_nested_percent_escapes() {
+        val endpoint = "https://gateway.example/profile/a%2Fb%3f%25%C3%A9%2561"
+
+        assertEquals(endpoint, normalizeGatewayEndpoint(endpoint))
     }
 
     @Test
