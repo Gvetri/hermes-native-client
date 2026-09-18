@@ -154,6 +154,70 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun close_cancels_cleanup_even_when_the_uncertainty_marker_write_fails() {
+        val session = session("session-1")
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val holder =
+            holder(
+                gateway = gateway,
+                dispatcher = Dispatchers.Default,
+                uncertaintyStore = FailingShutdownUncertaintyStore(),
+            )
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run once"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.close()
+            gateway.releaseRun.countDown()
+
+            assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun editing_a_draft_away_and_back_does_not_clear_the_new_draft_when_submission_completes() {
+        val session = session("session-1")
+        val run = Run(RunId("run-1"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Original draft"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Different draft"))
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Original draft"))
+            gateway.releaseRun.countDown()
+            awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
+
+            assertEquals(
+                "Original draft",
+                requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).composerText,
+            )
+        } finally {
+            gateway.releaseRun.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun reopening_a_pending_submission_preserves_a_changed_draft_and_blocks_duplicate_send() {
         val session = session("session-1")
         val run = Run(RunId("run-1"), session.id, "starting")
@@ -515,6 +579,7 @@ class MessageSubmissionStateHolderTest {
         gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         repository: GatewayConnectionRepository = DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
+        uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
     ): EntryStateHolder =
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
@@ -526,6 +591,7 @@ class MessageSubmissionStateHolderTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+            runSubmissionUncertaintyStore = uncertaintyStore,
             onRunSubmissionSettled = gateway.runFinished::countDown,
         )
 
@@ -638,5 +704,26 @@ class MessageSubmissionStateHolderTest {
         override fun getRunStatus(runId: RunId): Run = mutableRunStatuses[runId] ?: error("not used")
 
         override fun observeRun(runId: RunId) = error("not used")
+    }
+
+    private class FailingShutdownUncertaintyStore : RunSubmissionUncertaintyStore {
+        private var addCount = 0
+
+        override fun add(
+            key: PendingRunSubmissionKey,
+            knownRunIds: Set<RunId>,
+            attemptId: String?,
+        ): Boolean {
+            addCount += 1
+            if (addCount > 1) throw IllegalStateException("test persistence failure")
+            return true
+        }
+
+        override fun remove(
+            key: PendingRunSubmissionKey,
+            attemptId: String?,
+        ): Boolean = true
+
+        override fun contains(key: PendingRunSubmissionKey): Boolean = addCount > 0
     }
 }

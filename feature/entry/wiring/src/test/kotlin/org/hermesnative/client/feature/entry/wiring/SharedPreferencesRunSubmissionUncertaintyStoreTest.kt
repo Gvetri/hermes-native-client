@@ -39,4 +39,30 @@ class SharedPreferencesRunSubmissionUncertaintyStoreTest {
             store.remove(key)
         }
     }
+
+    @Test
+    fun an_older_attempt_cannot_bind_or_remove_a_newer_marker() {
+        val context = RuntimeEnvironment.getApplication()
+        val key = PendingRunSubmissionKey("https://gateway.example/profile", SessionId("session-1"))
+        val firstRunId = RunId("first-run")
+        val secondRunId = RunId("second-run")
+        val store = SharedPreferencesRunSubmissionUncertaintyStore(context)
+        store.remove(key)
+
+        try {
+            assertTrue(store.add(key, emptySet(), "attempt-1"))
+            assertTrue(store.remove(key, "attempt-1"))
+            assertTrue(store.add(key, setOf(firstRunId), "attempt-2"))
+            assertFalse(store.add(key, emptySet(), "attempt-1"))
+            assertFalse(store.bindRun(key, secondRunId, "attempt-1"))
+            assertEquals(null, store.boundRunId(key))
+            assertFalse(store.removeIfKnownRunIdsMatch(key, setOf(firstRunId), "attempt-1"))
+            assertTrue(store.contains(key))
+            assertTrue(store.bindRun(key, secondRunId, "attempt-2"))
+            assertTrue(store.removeIfKnownRunIdsMatch(key, setOf(firstRunId), "attempt-2"))
+            assertFalse(store.contains(key))
+        } finally {
+            store.remove(key)
+        }
+    }
 }
