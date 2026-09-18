@@ -307,6 +307,43 @@ class SessionMutationScreenTest {
         assertEquals(listOf(EntryUiEvent.PinSessionClicked(sessionId)), events)
     }
 
+    @Test
+    fun pin_retry_preserves_the_original_action_after_the_server_has_pinned_the_session() {
+        assertPinRetryAction(SessionMutationAction.PIN, pinned = true, EntryUiEvent.PinSessionClicked(SessionId("session-one")))
+    }
+
+    @Test
+    fun unpin_retry_preserves_the_original_action_after_the_server_has_unpinned_the_session() {
+        assertPinRetryAction(SessionMutationAction.UNPIN, pinned = false, EntryUiEvent.UnpinSessionClicked(SessionId("session-one")))
+    }
+
+    private fun assertPinRetryAction(
+        action: SessionMutationAction,
+        pinned: Boolean,
+        expectedEvent: EntryUiEvent,
+    ) {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        connectedState(
+                            session = session(SessionId("session-one"), "Retry Session", pinned),
+                            mutation =
+                                SessionMutationUiState(
+                                    errorCategory = SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED,
+                                    retryAction = action,
+                                ),
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Try again").assertHasClickAction().performClick()
+        assertEquals(listOf(expectedEvent), events)
+    }
+
     private fun connectedState(
         session: SessionItemUiState,
         mutation: SessionMutationUiState,

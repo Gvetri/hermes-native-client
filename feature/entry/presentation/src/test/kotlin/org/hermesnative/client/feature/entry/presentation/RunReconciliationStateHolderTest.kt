@@ -1374,6 +1374,8 @@ class RunReconciliationStateHolderTest {
                 histories.add(otherHistory)
                 histories.add(otherHistory)
                 histories.add(otherHistory)
+                histories.add(otherHistory)
+                statuses.add(otherRun)
                 statuses.add(otherRun)
                 blockRunCreation = true
             }
@@ -1435,14 +1437,21 @@ class RunReconciliationStateHolderTest {
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
                     it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
                     it.sessionList?.openedSession?.hasUnresolvedSubmission == true &&
+                    it.sessionList?.openedSession?.isReconciliationInProgress == false &&
                     it.sessionList?.openedSession?.composerText == "Edited after timeout"
             }
+            assertEquals(4, gateway.historyRequests)
             holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitCondition { gateway.historyRequests == 5 }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true
+            }
             assertEquals(1, gateway.runRequests.size)
             assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
-            assertEquals(listOf(otherRun.id), gateway.statusRequests)
+            assertEquals(listOf(otherRun.id, otherRun.id), gateway.statusRequests)
             assertTrue(gateway.observedRunIds.isEmpty())
-            assertEquals(4, gateway.historyRequests)
+            assertEquals(5, gateway.historyRequests)
         } finally {
             gateway.releaseRun.countDown()
             holder.close()
@@ -1642,9 +1651,14 @@ class RunReconciliationStateHolderTest {
                 histories.add(otherActiveHistory)
                 histories.add(otherTerminalHistory)
                 histories.add(otherTerminalHistory)
+                histories.add(otherTerminalHistory)
+                histories.add(otherTerminalHistory)
+                histories.add(otherTerminalHistory)
                 statuses.add(run.copy(status = "cancelled"))
                 statuses.add(run.copy(status = "cancelled"))
                 statuses.add(otherRun)
+                statuses.add(otherTerminalRun)
+                statuses.add(run.copy(status = "cancelled"))
                 statuses.add(otherTerminalRun)
                 runs.add(run)
                 observations.add(observation)
@@ -1681,14 +1695,20 @@ class RunReconciliationStateHolderTest {
                 it.sessionList?.openedSession?.isRefreshing == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
                     it.sessionList?.openedSession?.latestRun?.id == run.id &&
-                    gateway.statusRequests.size == 4
+                    gateway.statusRequests.size == 5
             }
             assertTrue(otherObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
+            assertEquals(9, gateway.historyRequests)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitCondition { gateway.historyRequests == 10 }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
+                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true
+            }
             assertEquals(1, gateway.runRequests.size)
-            assertEquals(5, gateway.statusRequests.size)
+            assertEquals(6, gateway.statusRequests.size)
             assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
         } finally {
             observation.release.countDown()

@@ -176,6 +176,57 @@ class SessionRenameStateHolderTest {
         }
     }
 
+    @Test
+    fun edited_restored_rename_draft_survives_refresh_and_reconnect() {
+        val sessionId = SessionId("session-one")
+        val gateway =
+            BlockingRenameGateway(
+                listed = session(sessionId, "Current title", "Preview"),
+                confirmed = session(sessionId, "Original request", "Preview"),
+            )
+        val holder =
+            EntryStateHolder(
+                initialState = EntryState(isGatewayConnectionConfigured = false),
+                verifyGatewayConnection =
+                    VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
+                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                    },
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                sessionGatewayFactory = { _, _ -> gateway },
+            )
+
+        try {
+            connect(holder)
+            awaitState(holder) { it.sessionList?.isLoading == false }
+            holder.onEvent(EntryUiEvent.RenameSessionClicked(sessionId))
+            holder.onEvent(EntryUiEvent.RenameSessionTitleChanged(sessionId, "Original request"))
+            holder.onEvent(EntryUiEvent.ConfirmRenameSessionClicked(sessionId))
+            assertTrue(gateway.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+            connect(holder)
+            awaitState(holder) { it.sessionList?.sessionMutations?.get(sessionId)?.retryAction == SessionMutationAction.RENAME }
+            holder.onEvent(EntryUiEvent.RenameSessionTitleChanged(sessionId, "Edited after reconnect"))
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            awaitState(holder) { it.sessionList?.isRefreshing == false }
+            assertEquals(
+                "Edited after reconnect",
+                holder.uiState.value.sessionList?.sessionMutations?.get(sessionId)?.rename?.titleDraft,
+            )
+
+            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+            connect(holder)
+            awaitState(holder) { it.sessionList?.isLoading == false }
+            assertEquals(
+                "Edited after reconnect",
+                holder.uiState.value.sessionList?.sessionMutations?.get(sessionId)?.rename?.titleDraft,
+            )
+        } finally {
+            gateway.release.countDown()
+            holder.close()
+        }
+    }
+
     private fun connectedHolder(gateway: SessionGatewayPort): EntryStateHolder {
         val holder =
             EntryStateHolder(

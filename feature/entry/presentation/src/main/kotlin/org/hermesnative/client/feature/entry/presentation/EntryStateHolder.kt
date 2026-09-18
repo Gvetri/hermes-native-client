@@ -2215,24 +2215,21 @@ class EntryStateHolder(
             val mutation = current.sessionMutations[sessionId] ?: return
             val rename = mutation.rename ?: return
             if (mutation.pendingAction != null || rename.isSubmitting) return
+            val updated =
+                mutation.copy(
+                    rename = rename.copy(titleDraft = value, errorCategory = null),
+                    errorCategory = null,
+                    retryAction = null,
+                )
+            val key = recoverySessionKey(sessionId)
+            if (key in unresolvedSessionMutations) {
+                unresolvedSessionMutations[key] = updated
+            }
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
                         current.copy(
-                            sessionMutations =
-                                current.sessionMutations +
-                                    (
-                                        sessionId to
-                                            mutation.copy(
-                                                rename =
-                                                    rename.copy(
-                                                        titleDraft = value,
-                                                        errorCategory = null,
-                                                    ),
-                                                errorCategory = null,
-                                                retryAction = null,
-                                            )
-                                    ),
+                            sessionMutations = current.sessionMutations + (sessionId to updated),
                         ),
                 )
         }
