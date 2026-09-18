@@ -17,9 +17,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -48,6 +51,7 @@ internal fun SessionListContent(
     state: SessionListUiState,
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier = Modifier,
+    runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
 ) {
     state.openedSession?.let { openedSession ->
         SessionDetailContent(
@@ -231,6 +235,47 @@ internal fun SessionListContent(
         ) {
             Text(text = if (state.isUnavailable) "Try again" else "Refresh")
         }
+
+        RunStatusNotificationSettingsContent(
+            state = runStatusNotifications,
+            onEvent = onEvent,
+        )
+    }
+}
+
+@Composable
+private fun RunStatusNotificationSettingsContent(
+    state: RunStatusNotificationsUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    Spacer(modifier = Modifier.height(16.dp))
+    HorizontalDivider()
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Run status notifications",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            state.explanation?.let { explanation ->
+                Text(
+                    text = explanation.safeMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        Switch(
+            checked = state.enabled,
+            onCheckedChange = { onEvent(EntryUiEvent.RunStatusNotificationsToggleClicked) },
+            modifier =
+                Modifier.semantics {
+                    contentDescription = "Run status notifications"
+                },
+        )
     }
 }
 

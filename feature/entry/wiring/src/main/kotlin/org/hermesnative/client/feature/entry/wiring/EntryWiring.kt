@@ -62,6 +62,10 @@ object EntryWiring {
             },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
             runSubmissionUncertaintyStore = SharedPreferencesRunSubmissionUncertaintyStore(context),
+            runStatusNotificationSettingsStore =
+                SharedPreferencesRunStatusNotificationSettingsStore(context),
+            runStatusNotificationPermission = AndroidRunStatusNotificationPermission(context),
+            runStatusNotifier = SystemRunStatusNotifier(context),
         )
     }
 }

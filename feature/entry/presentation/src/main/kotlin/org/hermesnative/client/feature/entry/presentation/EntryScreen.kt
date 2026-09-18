@@ -44,6 +44,7 @@ fun EntryScreen(
                 state = state.sessionList,
                 onEvent = onEvent,
                 modifier = Modifier.fillMaxSize().padding(24.dp),
+                runStatusNotifications = state.runStatusNotifications,
             )
         } else {
             Column(
