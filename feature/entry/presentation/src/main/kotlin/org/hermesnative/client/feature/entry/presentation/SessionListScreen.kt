@@ -21,7 +21,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -30,6 +35,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
 import java.time.ZoneId
@@ -752,6 +758,12 @@ private fun SessionDetailContent(
         }
         Spacer(modifier = Modifier.height(16.dp))
         val displayedMessages = state.messages + listOfNotNull(state.activeResponse)
+        val canSubmit =
+            RunSubmissionState(
+                latestRun = state.latestRun,
+                activeRuns = state.activeRuns,
+                isSubmissionPending = state.isSending || listRequestActive,
+            ).canSubmit
         if (displayedMessages.isEmpty()) {
             Text(text = "No messages in this Session.")
         } else {
@@ -763,18 +775,24 @@ private fun SessionDetailContent(
                     items = displayedMessages,
                     key = { message -> message.id },
                 ) { message ->
-                    SessionMessageContent(message)
+                    SessionMessageContent(
+                        message = message,
+                        retryEnabled =
+                            actionsEnabled &&
+                                canSubmit &&
+                                !state.isRefreshing &&
+                                mutation?.pendingAction == null &&
+                                !state.isSending &&
+                                !state.isReconciliationInProgress &&
+                                !state.hasUnresolvedSubmission &&
+                                !listRequestActive,
+                        onRetry = { runId -> onEvent(EntryUiEvent.RetryRunClicked(runId)) },
+                    )
                 }
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
         val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null
-        val canSubmit =
-            RunSubmissionState(
-                latestRun = state.latestRun,
-                activeRuns = state.activeRuns,
-                isSubmissionPending = state.isSending || listRequestActive,
-            ).canSubmit
         val sendEnabled =
             composerEnabled &&
                 !state.isReconciliationInProgress &&
@@ -834,14 +852,20 @@ private fun SessionDetailContent(
 }
 
 @Composable
-private fun SessionMessageContent(message: SessionMessageUiState) {
+private fun SessionMessageContent(
+    message: SessionMessageUiState,
+    retryEnabled: Boolean,
+    onRetry: (RunId) -> Unit,
+) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         message.role?.takeIf(String::isNotBlank)?.let { role ->
             Text(text = "Role: $role")
         }
-        message.content?.takeIf(String::isNotBlank)?.let { content ->
-            Text(text = content)
-        }
+        message.content
+            ?.takeIf { message.failureSafeMessage == null && it.isNotBlank() }
+            ?.let { content ->
+                Text(text = content)
+            }
         message.runId?.let { runId ->
             Text(text = "Run ID: ${runId.value}")
         }
@@ -866,8 +890,42 @@ private fun SessionMessageContent(message: SessionMessageUiState) {
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
             )
         }
-        message.runResult?.let { result ->
-            Text(text = "Run result: $result")
+        message.failureSafeMessage?.let { safeMessage ->
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = safeMessage,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+            )
+        }
+        var showTechnicalDetail by remember(message.id) { mutableStateOf(false) }
+        message.failureTechnicalDetail?.let { technicalDetail ->
+            TextButton(onClick = { showTechnicalDetail = !showTechnicalDetail }) {
+                Text(text = if (showTechnicalDetail) "Hide technical detail" else "Show technical detail")
+            }
+            if (showTechnicalDetail) {
+                Text(
+                    text = technicalDetail,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+        }
+        if (message.retryAvailable) {
+            message.runId?.let { runId ->
+                OutlinedButton(
+                    onClick = { onRetry(runId) },
+                    enabled = retryEnabled,
+                    modifier = Modifier.heightIn(min = 40.dp),
+                ) {
+                    Text(text = "Try again")
+                }
+            }
+        }
+        if (message.failureSafeMessage == null) {
+            message.runResult?.let { result ->
+                Text(text = "Run result: $result")
+            }
         }
         message.timestamp?.let { timestamp ->
             Text(text = "Timestamp: ${formatGatewayTimestamp(timestamp)}")

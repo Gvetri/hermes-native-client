@@ -13,6 +13,7 @@ import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -23,6 +24,8 @@ import java.security.cert.CertPathValidatorException
 import java.util.ArrayDeque
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLPeerUnverifiedException
+
+private const val RETRY_RUN_ID = "4c1d8e62-9a3f-4b7b-b5d2-8f6a7c1e9d04"
 
 class DefaultGatewayClientTest {
     private val repositoryRoot =
@@ -100,6 +103,31 @@ class DefaultGatewayClientTest {
         }
         assertFixtureRequest(transport.requests.last(), "runs/status-request.json", expectedPath = "/v1/runs/$RUN_ID/events")
         assertEquals("text/event-stream", transport.requests.last().headers["Accept"])
+    }
+
+    @Test
+    fun retry_run_creation_uses_the_same_create_contract_and_returns_a_distinct_authoritative_identity() {
+        val transport =
+            RecordingTransport(
+                responses =
+                    listOf(
+                        response("runs/create-response.json"),
+                        response("runs/create-response-retry.json"),
+                    ),
+            )
+        val client = DefaultGatewayClient("https://gateway.example", "test-token", transport)
+        val sessionId = SessionId(SESSION_ID)
+
+        val original = client.createRun(sessionId, "")
+        val retried = client.createRun(sessionId, "")
+
+        assertEquals(RUN_ID, original.id.value)
+        assertEquals(RETRY_RUN_ID, retried.id.value)
+        assertNotEquals(original.id, retried.id)
+        assertEquals(sessionId, original.sessionId)
+        assertEquals(sessionId, retried.sessionId)
+        assertEquals(2, transport.requests.size)
+        transport.requests.forEach { request -> assertFixtureRequest(request, "runs/create-request.json") }
     }
 
     @Test
