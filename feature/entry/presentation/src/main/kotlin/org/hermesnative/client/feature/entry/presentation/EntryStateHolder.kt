@@ -452,6 +452,8 @@ class EntryStateHolder(
     private var sessionRequestGeneration = 0L
     private var connectionGeneration = 0L
     private val mutationJobs = mutableMapOf<SessionId, Job>()
+    private var nextMutationAttemptId = 0L
+    private val mutationOwners = mutableMapOf<SessionId, SessionMutationRequest>()
     private val runJobs = mutableMapOf<SessionId, Job>()
     private val sessionDrafts = mutableMapOf<SessionId, String>()
     private val sessionDraftRevisions = mutableMapOf<SessionId, Long>()
@@ -460,7 +462,11 @@ class EntryStateHolder(
     private val pendingDisconnectedRecoveryEntries = mutableMapOf<String, MutableSet<RunRecoveryEntry>>()
     private val connectionRecoveryJobs = mutableSetOf<Job>()
     private val connectionRecoverySessionCounts = mutableMapOf<SessionId, Int>()
+    private val connectionRecoveryFailedSessions = mutableSetOf<SessionId>()
     private val recoverySessionCounts = mutableMapOf<SessionId, Int>()
+    private var nextRecoveryClaimId = 0L
+    private val recoveryClaims = mutableMapOf<RecoveryEntryKey, RecoveryClaim>()
+    private val recoveryHandledEntries = mutableSetOf<RecoveryEntryKey>()
     private var recoveryLoadPending = false
     private var recoveryLoadFailed = false
     private val pendingCreateSessions = mutableMapOf<RecoverySessionKey, PendingCreateState>()
@@ -480,6 +486,7 @@ class EntryStateHolder(
     private val unresolvedSubmissionSessions = mutableSetOf<SessionId>()
     private val ambiguousSubmissionSessions = mutableSetOf<SessionId>()
     private val recoveryUnavailableSessions = mutableSetOf<SessionId>()
+    private val unresolvedSessionMutations = mutableMapOf<RecoverySessionKey, SessionMutationUiState>()
     private val uncertainSendDrafts = mutableMapOf<SessionId, PendingDraft>()
     private val uncertainSubmissionRunIds = mutableMapOf<SessionId, RunId>()
     private val uncertainSubmissionAttemptIds = mutableMapOf<SessionId, String>()
@@ -538,6 +545,7 @@ class EntryStateHolder(
                         (mutationJobs.values + runJobs.values + runObservationJobs.values + connectionRecoveryJobs).toList()
                     observationsToClose = runObservations.values.toList()
                     mutationJobs.clear()
+                    mutationOwners.clear()
                     runJobs.clear()
                     runObservationJobs.clear()
                     runObservations.clear()
@@ -574,7 +582,10 @@ class EntryStateHolder(
                     reconcilingSessions.clear()
                     connectionRecoveryJobs.clear()
                     connectionRecoverySessionCounts.clear()
+                    connectionRecoveryFailedSessions.clear()
                     recoverySessionCounts.clear()
+                    recoveryClaims.clear()
+                    recoveryHandledEntries.clear()
                     recoveryLoadPending = false
                     recoveryLoadFailed = false
                     sessionDrafts.clear()
@@ -720,6 +731,7 @@ class EntryStateHolder(
             synchronized(connectionPersistenceLock) {
                 val jobsToCancelInside =
                     synchronized(sessionRequestLock) {
+                        rememberUnresolvedSessionMutations(_uiState.value.endpoint)
                         sessionRequestGeneration += 1
                         connectionGeneration += 1
                         val verificationJobToCancel = verificationJob
@@ -746,12 +758,16 @@ class EntryStateHolder(
                         pendingCreateSessions.clear()
                         sessionGateway = null
                         runGateway = null
+                        mutationOwners.clear()
                         val recoveryJobToCancel = recoveryJob
                         recoveryJob = null
                         val connectionRecoveryJobsToCancel = connectionRecoveryJobs.toList()
                         connectionRecoveryJobs.clear()
                         connectionRecoverySessionCounts.clear()
+                        connectionRecoveryFailedSessions.clear()
                         recoverySessionCounts.clear()
+                        recoveryClaims.clear()
+                        recoveryHandledEntries.clear()
                         sessionDrafts.clear()
                         sessionDraftRevisions.clear()
                         sessionSendErrors.clear()
@@ -980,6 +996,27 @@ class EntryStateHolder(
             )
     }
 
+    private fun claimRecoveryEntry(
+        endpoint: String,
+        entry: RunRecoveryEntry,
+        expectedConnectionGeneration: Long,
+    ): RecoveryClaim? {
+        if (connectionGeneration != expectedConnectionGeneration) return null
+        val key = RecoveryEntryKey(endpoint, entry.sessionId, entry.runId)
+        if (key in recoveryHandledEntries || key in recoveryClaims) return null
+        return RecoveryClaim(
+            key = key,
+            connectionGeneration = expectedConnectionGeneration,
+            claimId = ++nextRecoveryClaimId,
+        ).also { claim -> recoveryClaims[key] = claim }
+    }
+
+    private fun releaseRecoveryClaim(claim: RecoveryClaim): Boolean {
+        if (recoveryClaims[claim.key] != claim) return false
+        recoveryClaims.remove(claim.key)
+        return true
+    }
+
     private fun startRunRecovery(expectedConnectionGeneration: Long) {
         val registry = runRecoveryRegistry ?: return
         val recoveryContext =
@@ -992,12 +1029,14 @@ class EntryStateHolder(
                     if (sessionGateway == null || runGateway == null) {
                         null
                     } else {
-                        sessionGateway to runGateway
+                        RecoveryGatewayContext(
+                            endpoint = _uiState.value.endpoint,
+                            sessionGateway = sessionGateway,
+                            runGateway = runGateway,
+                        )
                     }
                 }
             } ?: return
-        val sessionGateway = recoveryContext.first
-        val runGateway = recoveryContext.second
         if (!beginRecoveryLoad(expectedConnectionGeneration)) return
         val entries =
             try {
@@ -1014,24 +1053,41 @@ class EntryStateHolder(
 
         lateinit var job: Job
         var jobToCancel: Job? = null
+        val workItems =
+            synchronized(sessionRequestLock) {
+                if (connectionGeneration != expectedConnectionGeneration) {
+                    null
+                } else {
+                    entries.mapNotNull { entry ->
+                        val claim =
+                            claimRecoveryEntry(recoveryContext.endpoint, entry, expectedConnectionGeneration)
+                                ?: return@mapNotNull null
+                        rememberRecoveredRun(
+                            entry = entry,
+                            run = Run(entry.runId, entry.sessionId, RECOVERY_PENDING_STATUS),
+                            updateVisibleState = false,
+                        )
+                        recoverySessionCounts[entry.sessionId] =
+                            (recoverySessionCounts[entry.sessionId] ?: 0) + 1
+                        RecoveryWorkItem(entry, claim)
+                    }
+                }
+            }
+        if (workItems == null) {
+            finishRecoveryLoad(expectedConnectionGeneration, emptyList(), failed = true)
+            return
+        }
+        if (workItems.isEmpty()) {
+            finishRecoveryLoad(expectedConnectionGeneration, entries, failed = false)
+            return
+        }
         synchronized(sessionRequestLock) {
-            if (connectionGeneration != expectedConnectionGeneration) {
-                return
-            }
-            entries.forEach { entry ->
-                rememberRecoveredRun(
-                    entry = entry,
-                    run = Run(entry.runId, entry.sessionId, RECOVERY_PENDING_STATUS),
-                    updateVisibleState = false,
-                )
-                recoverySessionCounts[entry.sessionId] =
-                    (recoverySessionCounts[entry.sessionId] ?: 0) + 1
-            }
             jobToCancel = recoveryJob
             job =
                 scope.launch(start = CoroutineStart.LAZY) {
                     try {
-                        entries.forEach { entry ->
+                        workItems.forEach { workItem ->
+                            val entry = workItem.entry
                             currentCoroutineContext().ensureActive()
                             val expectedHistoryGeneration =
                                 synchronized(sessionRequestLock) {
@@ -1040,11 +1096,17 @@ class EntryStateHolder(
                             val recoveredRun =
                                 recoverRun(
                                     entry = entry,
-                                    sessionGateway = sessionGateway,
-                                    runGateway = runGateway,
+                                    sessionGateway = recoveryContext.sessionGateway,
+                                    runGateway = recoveryContext.runGateway,
                                     expectedConnectionGeneration = expectedConnectionGeneration,
                                     expectedHistoryGeneration = expectedHistoryGeneration,
                                 )
+                            synchronized(sessionRequestLock) {
+                                if (connectionGeneration == expectedConnectionGeneration) {
+                                    recoveryHandledEntries +=
+                                        RecoveryEntryKey(recoveryContext.endpoint, entry.sessionId, entry.runId)
+                                }
+                            }
                             if (recoveredRun == null) {
                                 markRecoveryFailure(entry.sessionId)
                             } else {
@@ -1060,14 +1122,19 @@ class EntryStateHolder(
                         }
                     } finally {
                         synchronized(sessionRequestLock) {
-                            entries.forEach { entry ->
-                                val remaining = (recoverySessionCounts[entry.sessionId] ?: 1) - 1
-                                if (remaining > 0) {
-                                    recoverySessionCounts[entry.sessionId] = remaining
-                                } else {
-                                    recoverySessionCounts.remove(entry.sessionId)
+                            if (connectionGeneration == expectedConnectionGeneration) {
+                                workItems.forEach { workItem ->
+                                    if (releaseRecoveryClaim(workItem.claim)) {
+                                        val entry = workItem.entry
+                                        val remaining = (recoverySessionCounts[entry.sessionId] ?: 1) - 1
+                                        if (remaining > 0) {
+                                            recoverySessionCounts[entry.sessionId] = remaining
+                                        } else {
+                                            recoverySessionCounts.remove(entry.sessionId)
+                                        }
+                                        clearRecoveryUiIfIdle(entry.sessionId)
+                                    }
                                 }
-                                clearRecoveryUiIfIdle(entry.sessionId)
                             }
                             if (recoveryJob === job) recoveryJob = null
                         }
@@ -2177,6 +2244,7 @@ class EntryStateHolder(
             val mutation = current.sessionMutations[sessionId] ?: return
             if (mutation.pendingAction != null) return
             val remaining = mutation.copy(rename = null)
+            unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2198,6 +2266,7 @@ class EntryStateHolder(
             synchronized(sessionRequestLock) {
                 val current = _uiState.value.sessionList ?: return
                 if (!current.allowsSessionMutation()) return
+                if (sessionGateway !== gateway) return
                 val mutation = current.sessionMutations[sessionId] ?: return
                 val rename = mutation.rename ?: return
                 if (mutation.pendingAction != null || rename.isSubmitting) return
@@ -2241,22 +2310,26 @@ class EntryStateHolder(
                                         ),
                             ),
                     )
-                createMutationJob(sessionId) {
+                val request = beginSessionMutation(sessionId, gateway)
+                unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
+                createMutationJob(request) {
                     try {
                         val confirmed = RenameSession(gateway).execute(sessionId, title)
-                        applyConfirmedSession(confirmed)
+                        applyConfirmedSession(confirmed, request)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {
-                        showRenameFailure(sessionId)
+                        showRenameFailure(request)
                     }
                 }
             }
         job.start()
     }
 
-    private fun showRenameFailure(sessionId: SessionId) {
+    private fun showRenameFailure(request: SessionMutationRequest) {
         synchronized(sessionRequestLock) {
+            if (!isCurrentSessionMutation(request)) return
+            val sessionId = request.sessionId
             val current = _uiState.value.sessionList ?: return
             val mutation = current.sessionMutations[sessionId] ?: return
             val rename = mutation.rename ?: return
@@ -2305,8 +2378,30 @@ class EntryStateHolder(
         return visibleSessionRuns(sessionId)
     }
 
-    private fun createMutationJob(
+    private fun beginSessionMutation(
         sessionId: SessionId,
+        gateway: SessionGatewayPort,
+    ): SessionMutationRequest {
+        val request =
+            SessionMutationRequest(
+                sessionId = sessionId,
+                gateway = gateway,
+                connectionGeneration = connectionGeneration,
+                attemptId = ++nextMutationAttemptId,
+            )
+        mutationOwners[sessionId] = request
+        return request
+    }
+
+    private fun isCurrentSessionMutation(request: SessionMutationRequest): Boolean {
+        val current = mutationOwners[request.sessionId]
+        return current?.attemptId == request.attemptId &&
+            connectionGeneration == request.connectionGeneration &&
+            sessionGateway === request.gateway
+    }
+
+    private fun createMutationJob(
+        request: SessionMutationRequest,
         block: suspend CoroutineScope.() -> Unit,
     ): Job {
         lateinit var job: Job
@@ -2316,14 +2411,17 @@ class EntryStateHolder(
                     block()
                 } finally {
                     synchronized(sessionRequestLock) {
-                        if (mutationJobs[sessionId] === job) {
-                            mutationJobs.remove(sessionId)
+                        if (mutationJobs[request.sessionId] === job) {
+                            mutationJobs.remove(request.sessionId)
+                        }
+                        if (mutationOwners[request.sessionId]?.attemptId == request.attemptId) {
+                            mutationOwners.remove(request.sessionId)
                         }
                     }
                 }
             }
         synchronized(sessionRequestLock) {
-            mutationJobs[sessionId] = job
+            mutationJobs[request.sessionId] = job
         }
         return job
     }
@@ -2359,8 +2457,12 @@ class EntryStateHolder(
         return job
     }
 
-    private fun applyConfirmedSession(session: Session) {
+    private fun applyConfirmedSession(
+        session: Session,
+        request: SessionMutationRequest,
+    ) {
         synchronized(sessionRequestLock) {
+            if (!isCurrentSessionMutation(request)) return
             val current = _uiState.value.sessionList ?: return
             if (current.sessions.none { it.id == session.id }) return
             val updated = session.toSessionItemUiState()
@@ -2380,6 +2482,7 @@ class EntryStateHolder(
                             sessionMutations = current.sessionMutations - session.id,
                         ),
                 )
+            unresolvedSessionMutations.remove(recoverySessionKey(session.id))
         }
     }
 
@@ -2401,6 +2504,7 @@ class EntryStateHolder(
             synchronized(sessionRequestLock) {
                 val current = _uiState.value.sessionList ?: return
                 if (!current.allowsSessionMutation()) return
+                if (sessionGateway !== gateway) return
                 if (current.sessions.none { it.id == sessionId }) return
                 val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
                 if (mutation.pendingAction != null || mutation.rename != null || mutation.delete != null) return
@@ -2420,7 +2524,9 @@ class EntryStateHolder(
                                         ),
                             ),
                     )
-                createMutationJob(sessionId) {
+                val request = beginSessionMutation(sessionId, gateway)
+                unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
+                createMutationJob(request) {
                     try {
                         val result =
                             if (pinned) {
@@ -2428,11 +2534,11 @@ class EntryStateHolder(
                             } else {
                                 UnpinSession(gateway).execute(sessionId)
                             }
-                        applyConfirmedPin(result.sessionId, result.pinned)
+                        applyConfirmedPin(result.sessionId, result.pinned, request)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {
-                        showPinFailure(sessionId, action)
+                        showPinFailure(request, action)
                     }
                 }
             }
@@ -2442,9 +2548,11 @@ class EntryStateHolder(
     private fun applyConfirmedPin(
         sessionId: SessionId,
         pinned: Boolean,
+        request: SessionMutationRequest,
     ) {
         val refreshJob =
             synchronized(sessionRequestLock) {
+                if (!isCurrentSessionMutation(request)) return@synchronized null
                 val current = _uiState.value.sessionList ?: return@synchronized null
                 if (current.sessions.none { it.id == sessionId }) return@synchronized null
                 val mutation = current.sessionMutations[sessionId] ?: return@synchronized null
@@ -2474,6 +2582,7 @@ class EntryStateHolder(
                                 sessionMutations = mutationMapAfter(sessionId, remainingMutation, current.sessionMutations),
                             ),
                     )
+                unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
                 sessionGateway?.let { gateway ->
                     createFirstPageLoadJob(
                         gateway = gateway,
@@ -2488,10 +2597,12 @@ class EntryStateHolder(
     }
 
     private fun showPinFailure(
-        sessionId: SessionId,
+        request: SessionMutationRequest,
         action: SessionMutationAction,
     ) {
         synchronized(sessionRequestLock) {
+            if (!isCurrentSessionMutation(request)) return
+            val sessionId = request.sessionId
             val current = _uiState.value.sessionList ?: return
             val mutation = current.sessionMutations[sessionId] ?: return
             _uiState.value =
@@ -2545,6 +2656,7 @@ class EntryStateHolder(
             val mutation = current.sessionMutations[sessionId] ?: return
             if (mutation.pendingAction != null) return
             val remaining = mutation.copy(delete = null, errorCategory = null, retryAction = null)
+            unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2561,6 +2673,7 @@ class EntryStateHolder(
             synchronized(sessionRequestLock) {
                 val current = _uiState.value.sessionList ?: return
                 if (!current.allowsSessionMutation()) return
+                if (sessionGateway !== gateway) return
                 val mutation = current.sessionMutations[sessionId] ?: return
                 val delete = mutation.delete ?: return
                 if (mutation.pendingAction != null || delete.isSubmitting) return
@@ -2581,22 +2694,26 @@ class EntryStateHolder(
                                         ),
                             ),
                     )
-                createMutationJob(sessionId) {
+                val request = beginSessionMutation(sessionId, gateway)
+                unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
+                createMutationJob(request) {
                     try {
                         DeleteSession(gateway).execute(sessionId)
-                        removeConfirmedSession(sessionId)
+                        removeConfirmedSession(sessionId, request)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {
-                        showDeleteFailure(sessionId)
+                        showDeleteFailure(request)
                     }
                 }
             }
         job.start()
     }
 
-    private fun showDeleteFailure(sessionId: SessionId) {
+    private fun showDeleteFailure(request: SessionMutationRequest) {
         synchronized(sessionRequestLock) {
+            if (!isCurrentSessionMutation(request)) return
+            val sessionId = request.sessionId
             val current = _uiState.value.sessionList ?: return
             val mutation = current.sessionMutations[sessionId] ?: return
             val delete = mutation.delete ?: return
@@ -2620,11 +2737,15 @@ class EntryStateHolder(
         }
     }
 
-    private fun removeConfirmedSession(sessionId: SessionId) {
+    private fun removeConfirmedSession(
+        sessionId: SessionId,
+        request: SessionMutationRequest,
+    ) {
         var observationJobToCancel: Job? = null
         var observationToClose: RunEventObservation? = null
         val refreshJob =
             synchronized(sessionRequestLock) {
+                if (!isCurrentSessionMutation(request)) return@synchronized null
                 val current = _uiState.value.sessionList ?: return@synchronized null
                 val shouldRefresh = current.nextCursor != null
                 if (current.openedSession?.session?.id == sessionId) {
@@ -2642,6 +2763,7 @@ class EntryStateHolder(
                                 sessionMutations = current.sessionMutations - sessionId,
                             ),
                     )
+                unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
                 if (shouldRefresh) {
                     sessionGateway?.let { gateway ->
                         createFirstPageLoadJob(
@@ -2853,11 +2975,13 @@ class EntryStateHolder(
                             errorCategory = null,
                             nextCursor = if (preserveSessions) current.nextCursor else null,
                             sessionMutations =
-                                if (preserveSessions) {
-                                    unsentRenameDrafts(current.sessionMutations)
-                                } else {
-                                    emptyMap()
-                                },
+                                restoreUnresolvedSessionMutations(
+                                    if (preserveSessions) {
+                                        unsentRenameDrafts(current.sessionMutations)
+                                    } else {
+                                        emptyMap()
+                                    },
+                                ),
                         ),
                 )
             createSessionJob {
@@ -2880,9 +3004,11 @@ class EntryStateHolder(
                             page.sessions.map { it.toSessionItemUiState() },
                         ),
                     sessionMutations =
-                        retainRenameDrafts(
-                            latest.sessionMutations,
-                            page.sessions.map { it.id },
+                        restoreUnresolvedSessionMutations(
+                            retainRenameDrafts(
+                                latest.sessionMutations,
+                                page.sessions.map { it.id },
+                            ),
                         ),
                     nextCursor = page.nextCursor,
                     isLoading = false,
@@ -3033,7 +3159,7 @@ class EntryStateHolder(
                                                 if (item.id == sessionId) authoritativeSession else item
                                             }
                                             .orderedSessions(),
-                                    sessionMutations = retainRenameDraft(current.sessionMutations, sessionId),
+                                    sessionMutations = retainSessionMutation(current.sessionMutations, sessionId),
                                     openingSessionId = null,
                                     isStale = false,
                                     isUnavailable = false,
@@ -3895,10 +4021,22 @@ class EntryStateHolder(
                 }
             } ?: return
         lateinit var job: Job
+        val claim =
+            synchronized(sessionRequestLock) {
+                if (
+                    connectionGeneration != recoveryContext.connectionGeneration ||
+                    _uiState.value.endpoint != endpoint
+                ) {
+                    null
+                } else {
+                    claimRecoveryEntry(endpoint, entry, recoveryContext.connectionGeneration)
+                }
+            } ?: return
         synchronized(sessionRequestLock) {
             if (
                 connectionGeneration != recoveryContext.connectionGeneration ||
-                _uiState.value.endpoint != endpoint
+                _uiState.value.endpoint != endpoint ||
+                recoveryClaims[claim.key] != claim
             ) {
                 return
             }
@@ -3907,6 +4045,9 @@ class EntryStateHolder(
                 run = Run(entry.runId, entry.sessionId, RECOVERY_PENDING_STATUS),
                 updateVisibleState = false,
             )
+            if (connectionRecoverySessionCounts[entry.sessionId] == null) {
+                connectionRecoveryFailedSessions.remove(entry.sessionId)
+            }
             connectionRecoverySessionCounts[entry.sessionId] =
                 (connectionRecoverySessionCounts[entry.sessionId] ?: 0) + 1
             if (recoveryContext.updateVisibleUi) {
@@ -3928,6 +4069,7 @@ class EntryStateHolder(
             }
             job =
                 scope.launch(start = CoroutineStart.LAZY) {
+                    var recoveryFinished = false
                     var recoveryCompleted = false
                     try {
                         val recoveredRun =
@@ -3940,6 +4082,7 @@ class EntryStateHolder(
                                 requestSessionGeneration = recoveryContext.sessionGeneration,
                                 updateVisibleUi = recoveryContext.updateVisibleUi,
                             )
+                        recoveryFinished = true
                         recoveryCompleted = recoveredRun != null
                         recoveredRun?.takeIf(Run::isActive)?.let { run ->
                             startRunObservation(
@@ -3952,21 +4095,32 @@ class EntryStateHolder(
                         }
                     } finally {
                         synchronized(sessionRequestLock) {
-                            connectionRecoveryJobs.remove(job)
-                            val remaining = (connectionRecoverySessionCounts[entry.sessionId] ?: 1) - 1
-                            if (remaining > 0) {
-                                connectionRecoverySessionCounts[entry.sessionId] = remaining
-                            } else {
-                                connectionRecoverySessionCounts.remove(entry.sessionId)
-                                if (
-                                    recoveryContext.updateVisibleUi &&
-                                    connectionGeneration == recoveryContext.connectionGeneration &&
-                                    sessionRequestGeneration == recoveryContext.sessionGeneration
-                                ) {
-                                    if (recoveryCompleted) {
-                                        clearRecoveryUiIfIdle(entry.sessionId)
-                                    } else {
-                                        markRecoveryFailure(entry.sessionId)
+                            if (
+                                connectionGeneration == recoveryContext.connectionGeneration &&
+                                releaseRecoveryClaim(claim)
+                            ) {
+                                connectionRecoveryJobs.remove(job)
+                                if (recoveryFinished) {
+                                    recoveryHandledEntries += claim.key
+                                }
+                                if (!recoveryCompleted) {
+                                    connectionRecoveryFailedSessions += entry.sessionId
+                                }
+                                val remaining = (connectionRecoverySessionCounts[entry.sessionId] ?: 1) - 1
+                                if (remaining > 0) {
+                                    connectionRecoverySessionCounts[entry.sessionId] = remaining
+                                } else {
+                                    connectionRecoverySessionCounts.remove(entry.sessionId)
+                                    val recoveryFailed = connectionRecoveryFailedSessions.remove(entry.sessionId)
+                                    if (
+                                        recoveryContext.updateVisibleUi &&
+                                        sessionRequestGeneration == recoveryContext.sessionGeneration
+                                    ) {
+                                        if (recoveryFailed) {
+                                            markRecoveryFailure(entry.sessionId)
+                                        } else {
+                                            clearRecoveryUiIfIdle(entry.sessionId)
+                                        }
                                     }
                                 }
                             }
@@ -4637,6 +4791,45 @@ class EntryStateHolder(
         endpoint: String = _uiState.value.endpoint,
     ): RecoverySessionKey = RecoverySessionKey(endpoint, sessionId)
 
+    private fun rememberUnresolvedSessionMutations(endpoint: String) {
+        if (endpoint.isBlank()) return
+        _uiState.value.sessionList?.sessionMutations?.forEach { (sessionId, mutation) ->
+            val action = mutation.pendingAction ?: return@forEach
+            unresolvedSessionMutations[RecoverySessionKey(endpoint, sessionId)] =
+                mutation.copy(
+                    rename =
+                        mutation.rename?.copy(
+                            isSubmitting = false,
+                            errorCategory = SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED,
+                        ),
+                    delete = mutation.delete?.copy(isSubmitting = false),
+                    pendingAction = null,
+                    errorCategory = SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED,
+                    retryAction = action,
+                )
+        }
+    }
+
+    private fun restoreUnresolvedSessionMutations(
+        mutations: Map<SessionId, SessionMutationUiState>,
+    ): Map<SessionId, SessionMutationUiState> {
+        val endpoint = _uiState.value.endpoint
+        return mutations +
+            unresolvedSessionMutations
+                .filterKeys { it.endpoint == endpoint }
+                .mapKeys { (key, _) -> key.sessionId }
+    }
+
+    private fun retainSessionMutation(
+        mutations: Map<SessionId, SessionMutationUiState>,
+        sessionId: SessionId,
+    ): Map<SessionId, SessionMutationUiState> {
+        val retained = retainRenameDraft(mutations, sessionId)
+        return unresolvedSessionMutations[recoverySessionKey(sessionId)]?.let { mutation ->
+            retained + (sessionId to mutation)
+        } ?: retained
+    }
+
     private fun pendingRunSubmissionKey(
         sessionId: SessionId,
         endpoint: String = _uiState.value.endpoint,
@@ -4769,6 +4962,36 @@ private data class RecoveryRunContext(
     val historyGeneration: Long,
     val sessionGeneration: Long?,
     val updateVisibleUi: Boolean,
+)
+
+private data class RecoveryGatewayContext(
+    val endpoint: String,
+    val sessionGateway: SessionGatewayPort,
+    val runGateway: RunGatewayPort,
+)
+
+private data class SessionMutationRequest(
+    val sessionId: SessionId,
+    val gateway: SessionGatewayPort,
+    val connectionGeneration: Long,
+    val attemptId: Long,
+)
+
+private data class RecoveryEntryKey(
+    val endpoint: String,
+    val sessionId: SessionId,
+    val runId: RunId,
+)
+
+private data class RecoveryClaim(
+    val key: RecoveryEntryKey,
+    val connectionGeneration: Long,
+    val claimId: Long,
+)
+
+private data class RecoveryWorkItem(
+    val entry: RunRecoveryEntry,
+    val claim: RecoveryClaim,
 )
 
 private data class RecoverySessionKey(
