@@ -1,0 +1,62 @@
+{
+  "name": "terminal-success",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "client-manifest",
+    "session.list",
+    "session.create",
+    "session.open",
+    "session.history",
+    "session.rename",
+    "session.delete",
+    "session.pin",
+    "session.unpin",
+    "run.create",
+    "run.status",
+    "run.sse"
+  ],
+  "sessions": [
+    {
+      "id": "session-alpha",
+      "title": "Alpha Session",
+      "preview": "Synthetic preview",
+      "pinned": false
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run-success",
+      "session_id": "session-alpha",
+      "create_status": "starting",
+      "observation": [
+        {
+          "type": "run.started",
+          "status": "starting",
+          "id": "t1"
+        },
+        {
+          "type": "run.running",
+          "status": "running",
+          "id": "t2"
+        },
+        {
+          "type": "run.succeeded",
+          "status": "succeeded",
+          "id": "t3"
+        }
+      ],
+      "final_status": "succeeded",
+      "terminal_history": [
+        {
+          "id": "message-success",
+          "role": "assistant",
+          "content": "Stable result",
+          "run_id": "run-success",
+          "run_status": "succeeded"
+        }
+      ]
+    }
+  ]
+}

@@ -22,6 +22,11 @@ Thumbs.db
 .env.*
 secrets/
 
+# Deterministic journey test-only TLS assets (documented exceptions; see
+# fixtures/hermes/journey-tls/README.md). They never protect production traffic.
+!fixtures/hermes/journey-tls/*.p12
+!fixtures/hermes/journey-tls/*.pem
+
 # Private planning and local evidence
 .scratch/
 coverage/

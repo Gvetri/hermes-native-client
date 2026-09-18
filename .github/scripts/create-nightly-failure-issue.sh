@@ -45,6 +45,7 @@ job_names = {
     "unit_tests": "unit-tests",
     "compose_test": "compose-jvm-tests",
     "api24_instrumentation": "api24-instrumentation",  # gitleaks:allow -- public job name, not a credential
+    "maestro_journeys": "maestro-journeys",
 }
 if set(results) != set(job_names) or any(value not in {"success", "failure", "cancelled", "skipped"} for value in results.values()):
     raise SystemExit("Expected a terminal result for each required test job.")
@@ -64,6 +65,7 @@ expected_names = {
     f"jvm-test-reports-{run}-{attempt}",
     f"compose-test-reports-{run}-{attempt}",
     f"android-test-failure-evidence-{run}-{attempt}",
+    f"journey-evidence-{run}-{attempt}",
 }
 artifacts = [artifact for page in json.loads((root / "artifacts.json").read_text())
              for artifact in page["artifacts"]

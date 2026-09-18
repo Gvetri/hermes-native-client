@@ -1,0 +1,31 @@
+appId: org.hermesnative.client
+name: interrupted-sse-refetch
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- tapOn: "Alpha Session"
+- extendedWaitUntil:
+    visible: "Back to Sessions"
+    timeout: 30000
+- tapOn: "Write a message"
+- inputText: "Interrupt this"
+- hideKeyboard
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "Interrupted partial"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "This Run failed. Your conversation is preserved."
+    timeout: 30000
+- assertVisible: "Refetched failure"

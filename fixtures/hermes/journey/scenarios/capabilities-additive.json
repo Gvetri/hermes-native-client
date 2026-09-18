@@ -1,0 +1,29 @@
+{
+  "name": "capabilities-additive",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "client-manifest",
+    "session.list",
+    "session.create",
+    "session.open",
+    "session.history",
+    "session.rename",
+    "session.delete",
+    "session.pin",
+    "session.unpin",
+    "run.create",
+    "run.status",
+    "run.sse",
+    "future.additive"
+  ],
+  "sessions": [
+    {
+      "id": "session-alpha",
+      "title": "Alpha Session",
+      "preview": "Synthetic preview",
+      "pinned": false
+    }
+  ]
+}

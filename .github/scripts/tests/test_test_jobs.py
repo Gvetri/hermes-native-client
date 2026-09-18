@@ -16,11 +16,12 @@ class TestJobs(unittest.TestCase):
         workflow = WORKFLOW.read_text()
         issue_job = workflow.split("  create_nightly_failure_issue:", 1)[1].split("  quality-gate:", 1)[0]
         self.assertIn("github.event_name == 'schedule'", issue_job)
-        self.assertIn("needs: [unit_tests, compose_test, api24_instrumentation]", issue_job)
-        for job in ("unit_tests", "compose_test", "api24_instrumentation"):
+        self.assertIn("needs: [unit_tests, compose_test, api24_instrumentation, maestro_journeys]", issue_job)
+        for job in ("unit_tests", "compose_test", "api24_instrumentation", "maestro_journeys"):
             self.assertIn(f"needs.{job}.result != 'success'", issue_job)
         aggregate = workflow.split("  quality-gate:", 1)[1]
         self.assertIn("      - api24_instrumentation", aggregate)
+        self.assertIn("      - maestro_journeys", aggregate)
         for job in ("unit_tests", "compose_test"):
             block = workflow.split(f"  {job}:\n", 1)[1]
             block = block.split("\n  fixture_descriptor:" if job == "unit_tests" else "\n  api24_instrumentation:", 1)[0]
@@ -79,7 +80,8 @@ else:
                    "GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": "123",
                    "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40,
                    "TEST_JOB_RESULTS": json.dumps({"unit_tests": "failure", "compose_test": "success",
-                                                   "api24_instrumentation": "success"})}
+                                                   "api24_instrumentation": "success",
+                                                   "maestro_journeys": "success"})}
             command = ["bash", str(ROOT / ".github/scripts/create-nightly-failure-issue.sh")]
             for attempt in ("1", "2"):
                 env["GITHUB_RUN_ATTEMPT"] = attempt
@@ -91,14 +93,14 @@ else:
                 self.assertIn(f"Attempt: `{attempt}`", issue["body"])
             self.assertEqual(["POST", "PATCH"], (root / "writes").read_text().splitlines())
             env["TEST_JOB_RESULTS"] = json.dumps(dict.fromkeys(
-                ("unit_tests", "compose_test", "api24_instrumentation"), "success"))
+                ("unit_tests", "compose_test", "api24_instrumentation", "maestro_journeys"), "success"))
             result = subprocess.run(command, cwd=root, env=env, capture_output=True, timeout=30)
             self.assertNotEqual(0, result.returncode)
             self.assertEqual(["POST", "PATCH"], (root / "writes").read_text().splitlines())
-            for failed_job in ("unit_tests", "compose_test", "api24_instrumentation"):
+            for failed_job in ("unit_tests", "compose_test", "api24_instrumentation", "maestro_journeys"):
                 for outcome in ("failure", "cancelled", "skipped"):
                     with self.subTest(job=failed_job, outcome=outcome):
-                        results = dict.fromkeys(("unit_tests", "compose_test", "api24_instrumentation"), "success")
+                        results = dict.fromkeys(("unit_tests", "compose_test", "api24_instrumentation", "maestro_journeys"), "success")
                         results[failed_job] = outcome
                         env["TEST_JOB_RESULTS"] = json.dumps(results)
                         env["FIXTURE_ARTIFACTS"] = json.dumps([{"artifacts": [
@@ -173,18 +175,20 @@ redact_file "$runner_output" || status=$?
             "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
             "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
             "ARCHITECTURE_CHECK", "COMPOSE_TEST", "API24_INSTRUMENTATION",
+            "MAESTRO_JOURNEYS",
         ]
         for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
             env = {**os.environ, **{f"{job}_RESULT": "success" for job in required}}
             env["EVENT_NAME"] = event
             if event == "pull_request":
                 env["API24_INSTRUMENTATION_RESULT"] = "skipped"
+                env["MAESTRO_JOURNEYS_RESULT"] = "skipped"
             result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env,
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(0, result.returncode, result.stderr)
             for job in required:
                 for outcome in ("failure", "cancelled", "skipped", ""):
-                    if event == "pull_request" and job == "API24_INSTRUMENTATION" and outcome == "skipped":
+                    if event == "pull_request" and job in {"API24_INSTRUMENTATION", "MAESTRO_JOURNEYS"} and outcome == "skipped":
                         continue
                     with self.subTest(event=event, job=job, outcome=outcome):
                         failed_env = {**env, f"{job}_RESULT": outcome}

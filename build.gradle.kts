@@ -388,6 +388,18 @@ tasks.register("fixtureContractTests") {
     }
 }
 
+tasks.register("journeyScenarioTests") {
+    group = "verification"
+    description = "Runs deterministic journey scenario, Gateway, and verifier tests without a device."
+    dependsOn(":fixtures:hermes:runner:journeyScenarioTest")
+    doLast {
+        val scenarioTests = project(":fixtures:hermes:runner").tasks.named("journeyScenarioTest").get()
+        check(scenarioTests.state.didWork || scenarioTests.state.upToDate) {
+            "journeyScenarioTests requires the journey scenario tests to execute in this invocation."
+        }
+    }
+}
+
 tasks.register("verifyFixtureDescriptor") {
     group = "verification"
     description = "Validates the immutable Hermes fixture provenance and lifecycle contract."
@@ -408,6 +420,7 @@ tasks.register("qualityGate") {
         "fixtureDescriptorTests",
         "fixtureLifecycleTests",
         "fixtureContractTests",
+        "journeyScenarioTests",
         "verifyFixtureDescriptor",
         "verifyRequiredUnitTests",
         ":app:lintDebug",

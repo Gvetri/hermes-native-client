@@ -1,0 +1,48 @@
+appId: org.hermesnative.client
+name: session-lifecycle
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- assertVisible: "Alpha Session"
+- tapOn: "Create Session"
+- tapOn: "Session title (optional)"
+- inputText: "Lifecycle Session"
+- hideKeyboard
+- tapOn: "Confirm Create Session"
+- extendedWaitUntil:
+    visible: "Lifecycle Session"
+    timeout: 30000
+- tapOn: "Lifecycle Session"
+- assertVisible: "Back to Sessions"
+- assertVisible: "Message"
+- tapOn: "Back to Sessions"
+- tapOn: "Rename Session"
+- tapOn: "New Session title"
+- eraseText
+- inputText: "Renamed Session"
+- hideKeyboard
+- tapOn: "Confirm Rename Session"
+- extendedWaitUntil:
+    visible: "Renamed Session"
+    timeout: 30000
+- tapOn: "Pin Session"
+- extendedWaitUntil:
+    visible: "Pinned"
+    timeout: 30000
+- tapOn: "Unpin Session"
+- tapOn: "Delete Session"
+- tapOn: "Confirm Delete Session"
+- extendedWaitUntil:
+    notVisible: "Renamed Session"
+    timeout: 30000
