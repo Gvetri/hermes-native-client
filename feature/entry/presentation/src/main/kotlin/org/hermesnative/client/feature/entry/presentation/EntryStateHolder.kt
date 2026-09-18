@@ -56,6 +56,7 @@ import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionReconciliation
+import org.hermesnative.client.feature.entry.domain.decideRunReconciliation
 import org.hermesnative.client.feature.entry.domain.isActive
 import org.hermesnative.client.feature.entry.domain.isTerminal
 import org.hermesnative.client.feature.entry.domain.isValid
@@ -172,6 +173,14 @@ data class PendingRunSubmissionKey(
     val sessionId: SessionId,
 )
 
+data class RunSubmissionUncertaintySnapshot(
+    val attemptId: String,
+    val knownRunIds: Set<RunId>,
+    val boundRunId: RunId?,
+    val settled: Boolean,
+    val requiresRunMatch: Boolean,
+)
+
 interface RunSubmissionUncertaintyStore {
     fun add(
         key: PendingRunSubmissionKey,
@@ -189,6 +198,8 @@ interface RunSubmissionUncertaintyStore {
     fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = emptySet()
 
     fun attemptId(key: PendingRunSubmissionKey): String? = null
+
+    fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? = null
 
     fun bindRun(
         key: PendingRunSubmissionKey,
@@ -257,6 +268,19 @@ object ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
     }
 
     override fun attemptId(key: PendingRunSubmissionKey): String? = synchronized(lock) { keys[key]?.attemptId }
+
+    override fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? =
+        synchronized(lock) {
+            keys[key]?.let { record ->
+                RunSubmissionUncertaintySnapshot(
+                    attemptId = record.attemptId,
+                    knownRunIds = record.knownRunIds.toSet(),
+                    boundRunId = record.boundRunId,
+                    settled = record.settled,
+                    requiresRunMatch = record.requiresRunMatch,
+                )
+            }
+        }
 
     override fun bindRun(
         key: PendingRunSubmissionKey,
@@ -405,6 +429,8 @@ class EntryStateHolder(
     private val pendingRunDrafts = mutableMapOf<SessionId, PendingDraft>()
     private val pendingDisconnectedRecoveryEntries = mutableMapOf<String, MutableSet<RunRecoveryEntry>>()
     private val connectionRecoveryJobs = mutableSetOf<Job>()
+    private val connectionRecoverySessionCounts = mutableMapOf<SessionId, Int>()
+    private val recoverySessionCounts = mutableMapOf<SessionId, Int>()
     private val pendingCreateSessions = mutableMapOf<RecoverySessionKey, PendingCreateState>()
     private val pendingCreateStarted = mutableSetOf<RecoverySessionKey>()
 
@@ -513,6 +539,8 @@ class EntryStateHolder(
                     pendingTimedOutSends.clear()
                     reconcilingSessions.clear()
                     connectionRecoveryJobs.clear()
+                    connectionRecoverySessionCounts.clear()
+                    recoverySessionCounts.clear()
                     sessionDrafts.clear()
                     sessionDraftRevisions.clear()
                     sessionSendErrors.clear()
@@ -686,6 +714,8 @@ class EntryStateHolder(
                         recoveryJob = null
                         val connectionRecoveryJobsToCancel = connectionRecoveryJobs.toList()
                         connectionRecoveryJobs.clear()
+                        connectionRecoverySessionCounts.clear()
+                        recoverySessionCounts.clear()
                         sessionDrafts.clear()
                         sessionDraftRevisions.clear()
                         sessionSendErrors.clear()
@@ -834,6 +864,8 @@ class EntryStateHolder(
                     run = Run(entry.runId, entry.sessionId, RECOVERY_PENDING_STATUS),
                     updateVisibleState = false,
                 )
+                recoverySessionCounts[entry.sessionId] =
+                    (recoverySessionCounts[entry.sessionId] ?: 0) + 1
             }
             jobToCancel = recoveryJob
             job =
@@ -845,16 +877,32 @@ class EntryStateHolder(
                                 synchronized(sessionRequestLock) {
                                     authoritativeSessionHistoryGenerations[entry.sessionId] ?: 0L
                                 }
-                            recoverRun(
-                                entry = entry,
-                                sessionGateway = sessionGateway,
-                                runGateway = runGateway,
-                                expectedConnectionGeneration = expectedConnectionGeneration,
-                                expectedHistoryGeneration = expectedHistoryGeneration,
-                            )
+                            val recoveredRun =
+                                recoverRun(
+                                    entry = entry,
+                                    sessionGateway = sessionGateway,
+                                    runGateway = runGateway,
+                                    expectedConnectionGeneration = expectedConnectionGeneration,
+                                    expectedHistoryGeneration = expectedHistoryGeneration,
+                                )
+                            recoveredRun?.takeIf(Run::isActive)?.let { run ->
+                                startRunObservation(
+                                    sessionId = entry.sessionId,
+                                    run = run,
+                                    expectedConnectionGeneration = expectedConnectionGeneration,
+                                )
+                            }
                         }
                     } finally {
                         synchronized(sessionRequestLock) {
+                            entries.forEach { entry ->
+                                val remaining = (recoverySessionCounts[entry.sessionId] ?: 1) - 1
+                                if (remaining > 0) {
+                                    recoverySessionCounts[entry.sessionId] = remaining
+                                } else {
+                                    recoverySessionCounts.remove(entry.sessionId)
+                                }
+                            }
                             if (recoveryJob === job) recoveryJob = null
                         }
                     }
@@ -873,14 +921,14 @@ class EntryStateHolder(
         expectedHistoryGeneration: Long,
         requestSessionGeneration: Long? = null,
         updateVisibleUi: Boolean = false,
-    ) {
+    ): Run? {
         val reconciliation =
             try {
                 runInterruptible { ReconcileRun(runGateway, sessionGateway).execute(entry.runId, entry.sessionId) }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                return
+                return null
             }
         applyAuthoritativeRunReconciliation(
             sessionId = entry.sessionId,
@@ -890,6 +938,7 @@ class EntryStateHolder(
             reconciliation = reconciliation,
             updateVisibleUi = updateVisibleUi,
         )
+        return reconciliation.run
     }
 
     private fun rememberRecoveredRun(
@@ -898,23 +947,26 @@ class EntryStateHolder(
         updateVisibleState: Boolean = true,
     ) {
         val pendingKey = PendingRunSubmissionKey(_uiState.value.endpoint, entry.sessionId)
-        if (
-            runSubmissionUncertaintyStore.contains(pendingKey) &&
-            entry.runId !in runSubmissionUncertaintyStore.knownRunIds(pendingKey)
-        ) {
-            val boundRunId = uncertainSubmissionRunIds[entry.sessionId]
-            if (boundRunId == null || boundRunId == entry.runId) {
+        val uncertaintySnapshot = runSubmissionUncertaintyStore.snapshot(pendingKey)
+        if (uncertaintySnapshot != null && entry.runId !in uncertaintySnapshot.knownRunIds) {
+            val currentAttemptId = uncertainSubmissionAttemptIds[entry.sessionId] ?: uncertaintySnapshot.attemptId
+            if (
+                uncertaintySnapshot.attemptId == currentAttemptId &&
+                uncertaintySnapshot.boundRunId == entry.runId
+            ) {
                 uncertainSubmissionRunIds[entry.sessionId] = entry.runId
-                uncertainSubmissionAttemptIds[entry.sessionId] =
-                    runSubmissionUncertaintyStore.attemptId(pendingKey) ?: LEGACY_ATTEMPT_ID
+                uncertainSubmissionAttemptIds[entry.sessionId] = uncertaintySnapshot.attemptId
             } else {
-                uncertainSubmissionRunIds.remove(entry.sessionId)
+                if (uncertainSubmissionRunIds[entry.sessionId] == entry.runId) {
+                    uncertainSubmissionRunIds.remove(entry.sessionId)
+                    uncertainSubmissionAttemptIds.remove(entry.sessionId)
+                }
                 unresolvedSubmissionSessions += entry.sessionId
                 ambiguousSubmissionSessions += entry.sessionId
                 runCatching {
                     runSubmissionUncertaintyStore.markAmbiguous(
                         pendingKey,
-                        runSubmissionUncertaintyStore.attemptId(pendingKey) ?: LEGACY_ATTEMPT_ID,
+                        uncertaintySnapshot.attemptId,
                     )
                 }
             }
@@ -3016,6 +3068,8 @@ class EntryStateHolder(
                     opened.composerText.isBlank() ||
                     opened.isRefreshing ||
                     opened.isReconciliationInProgress ||
+                    sessionId in connectionRecoverySessionCounts ||
+                    sessionId in recoverySessionCounts ||
                     current.hasPendingMutation
                 ) {
                     return@synchronized null
@@ -3411,8 +3465,9 @@ class EntryStateHolder(
             val pendingRecovery = pendingTimedOutSends[sessionId]
             val recoveryDraft = pendingRecovery?.draft
             val pendingKey = pendingRunSubmissionKey(sessionId)
+            val uncertaintySnapshot = runSubmissionUncertaintyStore.snapshot(pendingKey)
             val attemptId =
-                pendingRecovery?.attemptId ?: runSubmissionUncertaintyStore.attemptId(pendingKey) ?: LEGACY_ATTEMPT_ID
+                pendingRecovery?.attemptId ?: uncertaintySnapshot?.attemptId ?: LEGACY_ATTEMPT_ID
             val authoritativeRuns =
                 mergeRuns(reconciliation.history.runs(), reconciliation.discoveredRuns)
             val authoritativeRunIds = authoritativeRuns.mapTo(mutableSetOf()) { it.id }
@@ -3420,58 +3475,67 @@ class EntryStateHolder(
                 authoritativeSessionRuns[sessionId]
                     .orEmpty()
                     .filter { existing -> existing.id !in authoritativeRunIds }
-            authoritativeSessionRuns[sessionId] =
-                mergeRuns(retainedAuthoritativeRuns, authoritativeRuns)
             val authoritativeMessages =
                 reconciliation.history.messages
                     .map { it.toSessionMessageUiState() }
                     .chronological()
             val uncertaintyBelongsToThisSubmission =
-                !runSubmissionUncertaintyStore.contains(pendingKey) ||
+                uncertaintySnapshot == null ||
                     (
-                        runSubmissionUncertaintyStore.attemptId(pendingKey) == attemptId &&
-                            runSubmissionUncertaintyStore.knownRunIds(pendingKey) ==
-                            pendingRecovery?.knownRunIds.orEmpty()
+                        uncertaintySnapshot.attemptId == attemptId &&
+                            uncertaintySnapshot.knownRunIds == pendingRecovery?.knownRunIds.orEmpty()
                     )
-            runSubmissionUncertaintyStore
-                .boundRunId(pendingKey)
-                ?.let { boundRunId -> uncertainSubmissionRunIds[sessionId] = boundRunId }
+            val durableBoundRunId =
+                uncertaintySnapshot
+                    ?.boundRunId
+                    ?.takeIf { uncertaintyBelongsToThisSubmission }
+            val localBoundRunId =
+                uncertainSubmissionRunIds[sessionId]
+                    ?.takeIf {
+                        uncertaintySnapshot == null &&
+                            uncertainSubmissionAttemptIds[sessionId] == attemptId
+                    }
             val existingBoundSubmissionRun =
-                uncertainSubmissionRunIds[sessionId]?.let { runId ->
+                (durableBoundRunId ?: localBoundRunId)?.let { runId ->
                     reconciliation.discoveredRuns.lastOrNull { it.id == runId }
                         ?: visibleSessionRuns(sessionId).lastOrNull { it.id == runId && it.isActive() }
                 }
             val discoveredLocalRun: Run? = null
-            if (
+            val discoveredUnattributedRun =
                 existingBoundSubmissionRun == null &&
-                reconciliation.discoveredRuns.isNotEmpty() &&
-                uncertaintyBelongsToThisSubmission
-            ) {
-                ambiguousSubmissionSessions += sessionId
-                runCatching { runSubmissionUncertaintyStore.markAmbiguous(pendingKey, attemptId) }
-            }
+                    reconciliation.discoveredRuns.isNotEmpty() &&
+                    uncertaintyBelongsToThisSubmission
             val submissionRun = existingBoundSubmissionRun ?: discoveredLocalRun
             val terminalRunIds =
                 reconciliation.discoveredRuns
-                    .filterNot(Run::isActive)
+                    .filter { run ->
+                        decideRunReconciliation(run, reconciliation.history) ==
+                            RunReconciliationDecision.CONFIRMED
+                    }
                     .map { it.id }
-                    .plus(submissionRun?.takeUnless(Run::isActive)?.id)
+                    .plus(
+                        submissionRun
+                            ?.takeIf { run -> decideRunReconciliation(run, reconciliation.history) == RunReconciliationDecision.CONFIRMED }
+                            ?.id,
+                    )
                     .filterNotNull()
                     .toSet()
-            terminalRunIds.forEach { runId -> forgetUnresolvedLocalRun(sessionId, runId) }
             val submissionConfirmed =
                 submissionRun != null &&
-                    !submissionRun.isActive() &&
+                    decideRunReconciliation(submissionRun, reconciliation.history) ==
+                    RunReconciliationDecision.CONFIRMED &&
                     uncertaintyBelongsToThisSubmission
             val recoveryStoreAllowsNoNewRun =
-                !runSubmissionUncertaintyStore.contains(pendingKey) ||
+                uncertaintySnapshot == null ||
                     (
-                        runSubmissionUncertaintyStore.isSettled(pendingKey) &&
-                            !runSubmissionUncertaintyStore.requiresRunMatch(pendingKey)
+                        uncertaintyBelongsToThisSubmission &&
+                            uncertaintySnapshot.settled &&
+                            !uncertaintySnapshot.requiresRunMatch
                     )
             val noNewRunConfirmsNoSubmission =
                 resolveWhenNoNewRun &&
                     sessionId !in ambiguousSubmissionSessions &&
+                    !discoveredUnattributedRun &&
                     recoveryStoreAllowsNoNewRun &&
                     uncertainSubmissionRunIds[sessionId] == null
             val canResolveUncertainty =
@@ -3488,10 +3552,38 @@ class EntryStateHolder(
                         )
                     }.getOrDefault(false)
             val canClearUncertainty = canResolveUncertainty && uncertaintyRemoved
+            val currentUncertaintySnapshot = runSubmissionUncertaintyStore.snapshot(pendingKey)
+            val uncertaintyIdentityIsStable =
+                uncertaintyBelongsToThisSubmission &&
+                    if (canClearUncertainty) {
+                        currentUncertaintySnapshot == null
+                    } else {
+                        if (uncertaintySnapshot == null) {
+                            currentUncertaintySnapshot == null
+                        } else {
+                            currentUncertaintySnapshot?.let { currentSnapshot ->
+                                currentSnapshot.attemptId == uncertaintySnapshot.attemptId &&
+                                    currentSnapshot.knownRunIds == uncertaintySnapshot.knownRunIds &&
+                                    currentSnapshot.boundRunId == uncertaintySnapshot.boundRunId
+                            } ?: false
+                        }
+                    }
+            if (!uncertaintyIdentityIsStable) {
+                return@synchronized TimedOutSendReconciliationOutcome(applied = false)
+            }
+            authoritativeSessionRuns[sessionId] =
+                mergeRuns(retainedAuthoritativeRuns, authoritativeRuns)
+            durableBoundRunId?.let { boundRunId -> uncertainSubmissionRunIds[sessionId] = boundRunId }
+            if (discoveredUnattributedRun) {
+                ambiguousSubmissionSessions += sessionId
+                runCatching { runSubmissionUncertaintyStore.markAmbiguous(pendingKey, attemptId) }
+            }
+            terminalRunIds.forEach { runId -> forgetUnresolvedLocalRun(sessionId, runId) }
             if (canClearUncertainty) {
                 unresolvedSubmissionSessions.remove(sessionId)
                 ambiguousSubmissionSessions.remove(sessionId)
                 uncertainSubmissionRunIds.remove(sessionId)
+                uncertainSubmissionAttemptIds.remove(sessionId)
                 if (submissionRun != null) {
                     forgetObservationState(sessionId, submissionRun.id)
                 }
@@ -3546,7 +3638,7 @@ class EntryStateHolder(
                         ?.let { RunRecoveryEntry(sessionId, it.id) },
                 runToRemove =
                     submissionRun
-                        ?.takeUnless(Run::isActive)
+                        ?.takeIf { canClearUncertainty && !it.isActive() }
                         ?.let { RunRecoveryEntry(sessionId, it.id) },
             )
         }
@@ -3624,20 +3716,86 @@ class EntryStateHolder(
             ) {
                 return
             }
+            rememberRecoveredRun(
+                entry = entry,
+                run = Run(entry.runId, entry.sessionId, RECOVERY_PENDING_STATUS),
+                updateVisibleState = false,
+            )
+            connectionRecoverySessionCounts[entry.sessionId] =
+                (connectionRecoverySessionCounts[entry.sessionId] ?: 0) + 1
+            if (recoveryContext.updateVisibleUi) {
+                val current = _uiState.value.sessionList
+                val opened = current?.openedSession?.takeIf { it.session.id == entry.sessionId }
+                if (current != null && opened != null) {
+                    _uiState.value =
+                        _uiState.value.copy(
+                            sessionList =
+                                current.copy(
+                                    openedSession =
+                                        opened.copy(
+                                            isRefreshing = true,
+                                            isReconciliationInProgress = true,
+                                        ),
+                                ),
+                        )
+                }
+            }
             job =
                 scope.launch(start = CoroutineStart.LAZY) {
+                    var recoveryCompleted = false
                     try {
-                        recoverRun(
-                            entry = entry,
-                            sessionGateway = recoveryContext.sessionGateway,
-                            runGateway = recoveryContext.runGateway,
-                            expectedConnectionGeneration = recoveryContext.connectionGeneration,
-                            expectedHistoryGeneration = recoveryContext.historyGeneration,
-                            requestSessionGeneration = recoveryContext.sessionGeneration,
-                            updateVisibleUi = recoveryContext.updateVisibleUi,
-                        )
+                        val recoveredRun =
+                            recoverRun(
+                                entry = entry,
+                                sessionGateway = recoveryContext.sessionGateway,
+                                runGateway = recoveryContext.runGateway,
+                                expectedConnectionGeneration = recoveryContext.connectionGeneration,
+                                expectedHistoryGeneration = recoveryContext.historyGeneration,
+                                requestSessionGeneration = recoveryContext.sessionGeneration,
+                                updateVisibleUi = recoveryContext.updateVisibleUi,
+                            )
+                        recoveryCompleted = recoveredRun != null
+                        recoveredRun?.takeIf(Run::isActive)?.let { run ->
+                            startRunObservation(
+                                sessionId = entry.sessionId,
+                                run = run,
+                                expectedConnectionGeneration = recoveryContext.connectionGeneration,
+                                expectedSessionGeneration = recoveryContext.sessionGeneration,
+                            )
+                        }
                     } finally {
-                        synchronized(sessionRequestLock) { connectionRecoveryJobs.remove(job) }
+                        synchronized(sessionRequestLock) {
+                            connectionRecoveryJobs.remove(job)
+                            val remaining = (connectionRecoverySessionCounts[entry.sessionId] ?: 1) - 1
+                            if (remaining > 0) {
+                                connectionRecoverySessionCounts[entry.sessionId] = remaining
+                            } else {
+                                connectionRecoverySessionCounts.remove(entry.sessionId)
+                                if (
+                                    recoveryCompleted &&
+                                    recoveryContext.updateVisibleUi &&
+                                    connectionGeneration == recoveryContext.connectionGeneration &&
+                                    sessionRequestGeneration == recoveryContext.sessionGeneration
+                                ) {
+                                    val current = _uiState.value.sessionList
+                                    val opened =
+                                        current?.openedSession?.takeIf { it.session.id == entry.sessionId }
+                                    if (current != null && opened != null) {
+                                        _uiState.value =
+                                            _uiState.value.copy(
+                                                sessionList =
+                                                    current.copy(
+                                                        openedSession =
+                                                            opened.copy(
+                                                                isRefreshing = false,
+                                                                isReconciliationInProgress = false,
+                                                            ),
+                                                    ),
+                                            )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             connectionRecoveryJobs += job
@@ -3701,11 +3859,21 @@ class EntryStateHolder(
                 if (recoveryPersistenceFailed) {
                     runCatching { runSubmissionUncertaintyStore.markAmbiguous(pendingKey, attemptId) }
                 }
-                uncertainSubmissionRunIds[sessionId] = run.id
-                uncertainSubmissionAttemptIds[sessionId] = attemptId
-                val submittedDraft = pendingRunDrafts.remove(sessionId)
-                if (recoveryPersistenceFailed) {
-                    submittedDraft?.let { uncertainSendDrafts[sessionId] = it }
+                if (submissionBindingFailed) {
+                    unresolvedLocalRunIds
+                        .getOrPut(recoverySessionKey(sessionId), ::mutableSetOf)
+                        .add(run.id)
+                    unresolvedSubmissionSessions += sessionId
+                } else {
+                    uncertainSubmissionRunIds[sessionId] = run.id
+                    uncertainSubmissionAttemptIds[sessionId] = attemptId
+                }
+                val submittedDraft =
+                    if (submissionBindingSucceeded) pendingRunDrafts.remove(sessionId) else null
+                if (submissionBindingFailed || recoveryPersistenceFailed) {
+                    if (submissionBindingSucceeded) {
+                        submittedDraft?.let { uncertainSendDrafts[sessionId] = it }
+                    }
                     sessionSendErrors[sessionId] = MessageSendErrorCategory.UNCERTAIN
                 } else if (
                     submittedDraft != null &&

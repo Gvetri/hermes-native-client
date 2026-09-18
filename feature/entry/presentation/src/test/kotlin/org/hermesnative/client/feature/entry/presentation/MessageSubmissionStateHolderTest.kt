@@ -453,6 +453,47 @@ class MessageSubmissionStateHolderTest {
     }
 
     @Test
+    fun a_late_completion_cannot_replace_a_newer_attempt_or_its_draft() {
+        val session = session("session-late-attempt")
+        val run = Run(RunId("run-late-attempt"), session.id, "starting")
+        val gateway =
+            FakeGateway(listOf(session)).apply {
+                enqueueRun(run)
+                blockRunCreation = true
+            }
+        val store = ProcessRunSubmissionUncertaintyStore
+        val key = PendingRunSubmissionKey("https://gateway.example/profile", session.id)
+        store.remove(key)
+        val holder = holder(gateway, Dispatchers.Default, uncertaintyStore = store)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Original attempt"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Newer draft"))
+            val oldAttemptId = requireNotNull(store.attemptId(key))
+            assertTrue(store.remove(key, oldAttemptId))
+            assertTrue(store.add(key, emptySet(), "new-attempt"))
+
+            gateway.releaseRun.countDown()
+            awaitState(holder) { it.sessionList?.openedSession?.isSending == false }
+
+            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertEquals("Newer draft", opened.composerText)
+            assertTrue(opened.hasUnresolvedSubmission)
+            assertEquals("new-attempt", store.attemptId(key))
+            assertNull(store.boundRunId(key))
+            assertEquals(1, gateway.runRequests.size)
+        } finally {
+            gateway.releaseRun.countDown()
+            store.remove(key)
+            holder.close()
+        }
+    }
+
+    @Test
     fun an_active_run_in_one_session_does_not_disable_a_different_session() {
         val first = session("session-1")
         val second = session("session-2")

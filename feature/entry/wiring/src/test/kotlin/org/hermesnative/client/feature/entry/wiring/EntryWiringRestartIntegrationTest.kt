@@ -90,6 +90,93 @@ class EntryWiringRestartIntegrationTest {
     }
 
     @Test
+    fun production_wiring_blocks_send_until_a_delayed_recovery_status_finishes() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        storage.clearForTest()
+        try {
+            val firstHolder = createHolder(context, gateway)
+            try {
+                connect(firstHolder, endpoint, hasSavedEndpoint = false)
+                openSession(firstHolder, gateway.session.id)
+                firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Persist before reconnect"))
+                firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
+            } finally {
+                firstHolder.close()
+            }
+
+            assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
+            gateway.blockStatus = true
+            val restartedHolder = createHolder(context, gateway)
+            try {
+                connect(restartedHolder, endpoint, hasSavedEndpoint = true)
+                openSession(restartedHolder, gateway.session.id)
+                assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                restartedHolder.onEvent(EntryUiEvent.ComposerTextChanged("Do not duplicate"))
+                restartedHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                val blocked = requireNotNull(requireNotNull(restartedHolder.uiState.value.sessionList).openedSession)
+                assertFalse(blocked.isSending)
+                assertEquals(1, gateway.runRequests.size)
+
+                gateway.releaseStatus.countDown()
+                awaitState(restartedHolder) {
+                    it.sessionList?.openedSession?.let { opened ->
+                        !opened.isReconciliationInProgress &&
+                            opened.activeRuns.any { run -> run.id == gateway.activeRun.id }
+                    } == true
+                }
+            } finally {
+                gateway.releaseStatus.countDown()
+                restartedHolder.close()
+            }
+        } finally {
+            gateway.releaseStatus.countDown()
+            storage.clearForTest()
+        }
+    }
+
+    @Test
+    fun production_wiring_keeps_recovery_when_status_is_terminal_without_terminal_history() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        storage.clearForTest()
+        try {
+            val firstHolder = createHolder(context, gateway)
+            try {
+                connect(firstHolder, endpoint, hasSavedEndpoint = false)
+                openSession(firstHolder, gateway.session.id)
+                firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Keep recovery"))
+                firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
+                awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
+            } finally {
+                firstHolder.close()
+            }
+
+            assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
+            gateway.statusByRun[gateway.activeRun.id] = gateway.activeRun.copy(status = "succeeded")
+            val restartedHolder = createHolder(context, gateway)
+            try {
+                connect(restartedHolder, endpoint, hasSavedEndpoint = true)
+                openSession(restartedHolder, gateway.session.id)
+                awaitState(restartedHolder) {
+                    it.sessionList?.openedSession?.let { opened -> !opened.isReconciliationInProgress } == true
+                }
+                assertTrue(gateway.statusRequests.contains(gateway.activeRun.id))
+                assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
+            } finally {
+                restartedHolder.close()
+            }
+        } finally {
+            storage.clearForTest()
+        }
+    }
+
+    @Test
     fun production_wiring_keeps_a_response_loss_uncertain_after_holder_recreation() {
         val context = RuntimeEnvironment.getApplication()
         val gateway = RestartGateway()
@@ -398,9 +485,12 @@ class EntryWiringRestartIntegrationTest {
         var failCreateAfterAcceptance = false
         var acceptedRunVisible = false
         var blockCreate = false
+        var blockStatus = false
         val runStarted = CountDownLatch(1)
         val runFinished = CountDownLatch(1)
         val releaseCreate = CountDownLatch(1)
+        val statusStarted = CountDownLatch(1)
+        val releaseStatus = CountDownLatch(1)
 
         override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
 
@@ -486,6 +576,12 @@ class EntryWiringRestartIntegrationTest {
 
         override fun getRunStatus(runId: RunId): Run {
             statusRequests += runId
+            if (blockStatus) {
+                statusStarted.countDown()
+                check(releaseStatus.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    "Run status was not released."
+                }
+            }
             return statusByRun[runId] ?: if (terminal) activeRun.copy(status = "succeeded") else activeRun
         }
 

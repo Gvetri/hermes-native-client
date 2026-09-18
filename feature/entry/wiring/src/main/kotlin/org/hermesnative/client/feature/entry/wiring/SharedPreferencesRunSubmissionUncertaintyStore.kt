@@ -5,6 +5,7 @@ import android.util.Base64
 import org.hermesnative.client.feature.entry.application.normalizeGatewayEndpoint
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.presentation.PendingRunSubmissionKey
+import org.hermesnative.client.feature.entry.presentation.RunSubmissionUncertaintySnapshot
 import org.hermesnative.client.feature.entry.presentation.RunSubmissionUncertaintyStore
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -54,6 +55,19 @@ class SharedPreferencesRunSubmissionUncertaintyStore(
     override fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = synchronized(lock) { read(key)?.knownRunIds.orEmpty() }
 
     override fun attemptId(key: PendingRunSubmissionKey): String? = synchronized(lock) { read(key)?.attemptId }
+
+    override fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? =
+        synchronized(lock) {
+            read(key)?.let { record ->
+                RunSubmissionUncertaintySnapshot(
+                    attemptId = record.attemptId,
+                    knownRunIds = record.knownRunIds,
+                    boundRunId = record.boundRunId,
+                    settled = record.settled,
+                    requiresRunMatch = record.requiresRunMatch,
+                )
+            }
+        }
 
     override fun bindRun(
         key: PendingRunSubmissionKey,
