@@ -56,7 +56,9 @@ internal fun fetchTelemetry(
                 SSLContext.getInstance("TLS").apply {
                     init(null, trustManagerFactory.trustManagers, null)
                 }
-            telemetryUrl.toURL().openConnection() as HttpsURLConnection
+            (telemetryUrl.toURL().openConnection() as HttpsURLConnection).apply {
+                sslSocketFactory = sslContext.socketFactory
+            }
         } else {
             telemetryUrl.toURL().openConnection() as HttpURLConnection
         }

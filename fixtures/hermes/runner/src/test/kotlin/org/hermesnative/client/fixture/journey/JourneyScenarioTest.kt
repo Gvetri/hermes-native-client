@@ -232,6 +232,22 @@ class JourneyScenarioTest {
     }
 
     @Test
+    fun verifier_trusts_the_committed_ca_when_fetching_https_telemetry() {
+        val keystoreFile = File(repositoryRoot, "fixtures/hermes/journey-tls/journey-gateway.p12")
+        val scenarioFile = File(scenariosDir, "terminal-success.json")
+        val scenario =
+            JourneyScenarioParser.parse(scenarioFile, pinnedDescriptor.provenance.value)
+                .copy(port = freePort(), tls = true)
+        val process = JourneyGatewayProcess.start(scenario, keystoreFile)
+        try {
+            val telemetry = fetchTelemetry(process.endpoint.resolve("/__fixture/telemetry"), keystoreFile)
+            assertTrue(telemetry.toString().contains("terminal-success"))
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
     fun teardown_stops_the_process() {
         val process = startGateway("session-list-first", tls = false)
         process.stop()
