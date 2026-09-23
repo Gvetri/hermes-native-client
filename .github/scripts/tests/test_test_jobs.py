@@ -1,6 +1,7 @@
 """Execute the checked-in CI shell with controlled job outcomes."""
 import os
 import json
+import signal
 from pathlib import Path
 import subprocess
 import textwrap
@@ -40,6 +41,94 @@ class TestJobs(unittest.TestCase):
         self.assertIn("        continue-on-error: true", job)
         self.assertIn("if: ${{ always() && steps.journeys.outcome != 'success' }}", upload)
         self.assertIn("uses: actions/upload-artifact@v4", upload)
+
+    def test_journey_runner_reaps_gateway_after_health_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            gateway_pid_file = workspace / "gateway.pid"
+            classpath_file = workspace / "fixtures/hermes/runner/build/journey-classpath.txt"
+            classpath_file.parent.mkdir(parents=True)
+            classpath_file.write_text("fixture-classpath")
+
+            def add_executable(name, body):
+                executable = workspace / name
+                executable.write_text(textwrap.dedent(body))
+                executable.chmod(0o755)
+
+            add_executable("gradlew", """
+                #!/usr/bin/env bash
+                exit 0
+            """)
+            add_executable("adb", """
+                #!/usr/bin/env bash
+                if [[ "$*" == *"getprop sys.boot_completed"* ]]; then
+                    printf '1\\n'
+                fi
+            """)
+            add_executable("openssl", """
+                #!/usr/bin/env bash
+                printf 'fixture-hash\\n'
+            """)
+            add_executable("curl", """
+                #!/usr/bin/env bash
+                if [[ "$*" == *"/health"* ]]; then
+                    count=0
+                    [[ -f "$HEALTH_COUNT_FILE" ]] && read -r count < "$HEALTH_COUNT_FILE"
+                    count=$((count + 1))
+                    printf '%s\\n' "$count" > "$HEALTH_COUNT_FILE"
+                    [[ "$count" -eq 2 ]] && exit 22
+                    exit 0
+                fi
+                printf 'fixture-archive\\n' > maestro.zip
+            """)
+            add_executable("unzip", """
+                #!/usr/bin/env bash
+                mkdir -p maestro-cli/maestro/bin
+                printf '#!/usr/bin/env bash\\nexit 0\\n' > maestro-cli/maestro/bin/maestro
+                chmod +x maestro-cli/maestro/bin/maestro
+            """)
+            add_executable("java", """
+                #!/usr/bin/env bash
+                if [[ "$*" == *"JourneyVerifierKt"* ]]; then
+                    exit 0
+                fi
+                printf '%s\\n' "$$" >> "$GATEWAY_PID_FILE"
+                printf '%s\\n' 'journey-gateway-endpoint=https://127.0.0.1:18443'
+                exec sleep 300
+            """)
+
+            environment = {
+                "PATH": f"{workspace}{os.pathsep}{os.environ['PATH']}",
+                "GITHUB_WORKSPACE": str(workspace),
+                "GATEWAY_PID_FILE": str(gateway_pid_file),
+                "HEALTH_COUNT_FILE": str(workspace / "health.count"),
+                "HOME": str(workspace),
+                "MAESTRO_CLI_VERSION": "test",
+            }
+            result = subprocess.run(
+                ["bash", str(ROOT / ".github/scripts/journey-run.sh")],
+                cwd=workspace,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Journey: session-list-first", result.stdout)
+            self.assertIn("health check failed for session-list-first", result.stdout)
+            self.assertEqual(2, result.stdout.count("stopped and reaped"))
+            gateway_pids = [int(pid) for pid in gateway_pid_file.read_text().splitlines()]
+            self.assertEqual(2, len(gateway_pids))
+            try:
+                for gateway_pid in gateway_pids:
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(gateway_pid, 0)
+            finally:
+                for gateway_pid in gateway_pids:
+                    try:
+                        os.kill(gateway_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_shared_report_redaction_preserves_errors_and_rejects_binary_input(self):
         with tempfile.TemporaryDirectory() as directory:

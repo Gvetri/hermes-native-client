@@ -17,6 +17,41 @@ flow_dir="$workspace/fixtures/hermes/journey/flows"
 
 log() { printf '%s\n' "$*"; }
 
+gateway_pid=""
+stop_gateway() {
+    if [[ -z "$gateway_pid" ]]; then
+        return 0
+    fi
+
+    local pid="$gateway_pid"
+    if kill -0 "$pid" 2>/dev/null && ! kill "$pid" 2>/dev/null; then
+        if kill -0 "$pid" 2>/dev/null; then
+            log "Failed to stop Journey Gateway process $pid."
+            return 1
+        fi
+    fi
+
+    local wait_status=0
+    wait "$pid" 2>/dev/null || wait_status=$?
+    gateway_pid=""
+    if [[ "$wait_status" -ne 0 && "$wait_status" -ne 143 ]]; then
+        log "Journey Gateway process $pid exited with unexpected status $wait_status."
+        return 1
+    fi
+    log "Journey Gateway process $pid stopped and reaped."
+}
+
+finish_gateway() {
+    local exit_status=$?
+    trap - EXIT
+    if ! stop_gateway; then
+        exit_status=1
+    fi
+    exit "$exit_status"
+}
+
+trap finish_gateway EXIT
+
 log "Installing the journey test CA into the emulator system trust store."
 adb root >/dev/null
 adb wait-for-device
@@ -117,8 +152,7 @@ for journey in "${journeys[@]}"; do
             exit 1
         }
 
-    kill "$gateway_pid" 2>/dev/null || true
-    wait "$gateway_pid" 2>/dev/null || true
+    stop_gateway
     sleep 1
 done
 
