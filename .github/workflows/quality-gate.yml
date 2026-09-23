@@ -411,7 +411,7 @@ jobs:
             chmod +x .github/scripts/journey-run.sh
             .github/scripts/journey-run.sh
       - name: Upload journey failure evidence
-        if: ${{ failure() }}
+        if: ${{ always() && steps.journeys.outcome != 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: journey-evidence-${{ github.run_id }}-${{ github.run_attempt }}

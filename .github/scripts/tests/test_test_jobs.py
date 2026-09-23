@@ -32,6 +32,15 @@ class TestJobs(unittest.TestCase):
             self.assertIn("redact-test-reports.py", block)
         self.assertIn("--tests org.hermesnative.client.buildlogic.QualityGateConfigurationTest", workflow)
 
+    def test_maestro_failure_artifact_upload_runs_for_continue_on_error_step(self):
+        workflow = WORKFLOW.read_text()
+        job = workflow.split("  maestro_journeys:\n", 1)[1].split("\n  create_nightly_failure_issue:", 1)[0]
+        upload = job.split("      - name: Upload journey failure evidence\n", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("        id: journeys", job)
+        self.assertIn("        continue-on-error: true", job)
+        self.assertIn("if: ${{ always() && steps.journeys.outcome != 'success' }}", upload)
+        self.assertIn("uses: actions/upload-artifact@v4", upload)
+
     def test_shared_report_redaction_preserves_errors_and_rejects_binary_input(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
