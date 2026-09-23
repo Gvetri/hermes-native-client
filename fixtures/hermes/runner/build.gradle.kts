@@ -74,8 +74,10 @@ tasks.register<JavaExec>("runJourneyVerifier") {
 tasks.register("journeyGatewayClasspath") {
     group = "verification"
     description = "Writes the journey Gateway runtime classpath so CI can launch the JVM directly."
+    dependsOn("classes")
     doLast {
-        File(layout.buildDirectory.get().asFile, "journey-classpath.txt")
-            .writeText(sourceSets["main"].runtimeClasspath.asPath)
+        val classpathFile = File(layout.buildDirectory.get().asFile, "journey-classpath.txt")
+        classpathFile.parentFile.mkdirs()
+        classpathFile.writeText(sourceSets["main"].runtimeClasspath.asPath)
     }
 }
