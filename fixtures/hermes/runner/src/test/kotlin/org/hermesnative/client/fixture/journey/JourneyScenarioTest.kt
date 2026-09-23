@@ -34,6 +34,16 @@ class JourneyScenarioTest {
     }
 
     @Test
+    fun connection_recovery_flow_uses_the_visible_verification_action() {
+        val flow = File(repositoryRoot, "fixtures/hermes/journey/flows/connection.yaml").readText()
+        val correctedCredential = "synthetic-token"
+        assertTrue(flow.contains(correctedCredential))
+        val recoverySteps = flow.substringAfter(correctedCredential)
+        assertTrue(recoverySteps.contains("Verify Gateway Connection"))
+        assertFalse(recoverySteps.contains("Try again"))
+    }
+
+    @Test
     fun provenance_mismatch_is_rejected() {
         val mismatched = File(repositoryRoot, "fixtures/hermes/journey/scenarios/connection.json")
         val error =
