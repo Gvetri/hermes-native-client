@@ -85,8 +85,8 @@ class QualityGateConfigurationTest {
         assertTrue("The workflow must define a fixture lifecycle job.", workflow.contains("  fixture_lifecycle:"))
         assertTrue("The fixture lifecycle job must be named explicitly.", workflow.contains("    name: fixture-lifecycle"))
         assertTrue(
-            "The required job must run only the local fixture lifecycle tests.",
-            workflow.contains("      - run: ./gradlew fixtureLifecycleTests --no-daemon"),
+            "The required job must run the local fixture lifecycle and journey scenario tests.",
+            workflow.contains("      - run: ./gradlew fixtureLifecycleTests journeyScenarioTests --no-daemon"),
         )
         assertTrue("The aggregate declaration must include fixture_lifecycle.", requiredChecks.contains("fixture_lifecycle"))
     }
@@ -753,7 +753,7 @@ class QualityGateConfigurationTest {
         }
         val immutableReference = Regex("[0-9a-fA-F]{40}")
 
-        assertEquals("The workflow must keep all twelve checkout steps explicit.", 12, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all thirteen checkout steps explicit.", 13, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
             val reference = lines[index].trim().substringAfter("actions/checkout@")
             assertTrue(
@@ -772,6 +772,40 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun maestro_journeys_is_a_deterministic_scheduled_check() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val requiredChecks = repositoryRoot.resolve(".github/quality-gate/required-checks.txt").readLines()
+
+        assertTrue("The workflow must define a Maestro journey job.", workflow.contains("  maestro_journeys:"))
+        assertTrue("The Maestro journey job must be named explicitly.", workflow.contains("    name: maestro-journeys"))
+        assertTrue(
+            "The Maestro journey job must run only outside pull requests.",
+            workflow.contains(
+                "github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+            ),
+        )
+        assertTrue(
+            "The Maestro journey job must run the pinned runner script.",
+            workflow.contains(".github/scripts/journey-run.sh"),
+        )
+        assertTrue("The Maestro journey job must pin the CLI version.", workflow.contains("MAESTRO_CLI_VERSION: '2.10.0'"))
+        assertTrue(
+            "The Maestro journey job must cache the pinned CLI archive.",
+            workflow.contains("key: maestro-cli-\${{ env.MAESTRO_CLI_VERSION }}"),
+        )
+        assertTrue(
+            "Journey failure evidence must be uploaded only after redaction.",
+            workflow.contains("steps.journeys.outcome != 'success' && steps.redact_journey_evidence.outcome == 'success'"),
+        )
+        assertTrue(
+            "The aggregate gate must expect the journey lane to skip on pull requests and pass otherwise.",
+            workflow.contains("test \"\$MAESTRO_JOURNEYS_RESULT\" = skipped") &&
+                workflow.contains("test \"\$MAESTRO_JOURNEYS_RESULT\" = success"),
+        )
+        assertTrue("The aggregate declaration must include maestro_journeys.", requiredChecks.contains("maestro_journeys"))
+    }
+
+    @Test
     fun nightly_failures_create_one_labeled_issue_with_verified_sanitized_artifact() {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val issueScript = repositoryRoot.resolve(".github/scripts/create-nightly-failure-issue.sh")
@@ -786,8 +820,8 @@ class QualityGateConfigurationTest {
             "Issue creation must require a non-successful API 24 result.",
             issueJob.contains("needs.api24_instrumentation.result != 'success'"),
         )
-        assertTrue("Issue publication must wait for every required test job.", issueJob.contains("needs: [unit_tests, compose_test, api24_instrumentation]"))
-        listOf("unit_tests", "compose_test", "api24_instrumentation").forEach { job ->
+        assertTrue("Issue publication must wait for every required test job.", issueJob.contains("needs: [unit_tests, compose_test, api24_instrumentation, maestro_journeys]"))
+        listOf("unit_tests", "compose_test", "api24_instrumentation", "maestro_journeys").forEach { job ->
             assertTrue("Issue creation must include failures in $job.", issueJob.contains("needs.$job.result != 'success'"))
         }
         assertTrue("Issue publication must serialize reruns for one workflow run.", issueJob.contains("nightly-failure-issue-${'$'}{{ github.repository }}-${'$'}{{ github.run_id }}"))
