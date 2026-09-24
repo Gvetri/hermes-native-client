@@ -13,8 +13,13 @@ def redact_file(path, repository_root):
         raise SystemExit(2)
     content = raw_content.decode("utf-8", errors="replace")
 
-    sensitive_key = r"(?:authorization|token|password|secret|api[_-]?key|access[_-]?token|client[_-]?secret|private[_-]?key)"
+    sensitive_key = r"(?:authorization|token|password|secret|api[_-]?key|access[_-]?token|client[_-]?secret|private[_-]?key|input[_-]?text)"
     patterns = (
+        (
+            re.compile(r'(?i)("inputTextCommand"\s*:\s*\{[^{}]*"text"\s*:\s*)"(?:\\.|[^"\\])*"'),
+            r'\1"[REDACTED]"',
+        ),
+        (re.compile(r"(?i)(\binput\s+text\b\s*:?\s*)[^\r\n]+"), r"\1[REDACTED]"),
         (re.compile(r"(?i)(authorization\s*[:=]\s*)[^\r\n]+"), r"\1<redacted>"),
         (re.compile(r"(?i)\b((?:bearer|basic)\s+)[^\s,;\"']+"), r"\1<redacted>"),
         (

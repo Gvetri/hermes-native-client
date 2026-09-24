@@ -37,12 +37,69 @@ class TestJobs(unittest.TestCase):
         workflow = WORKFLOW.read_text()
         job = workflow.split("  maestro_journeys:\n", 1)[1].split("\n  create_nightly_failure_issue:", 1)[0]
         upload = job.split("      - name: Upload journey failure evidence\n", 1)[1].split("\n      - name:", 1)[0]
+        redaction = job.split("      - name: Redact journey failure evidence\n", 1)[1].split("\n      - name:", 1)[0]
         self.assertIn("        id: journeys", job)
         self.assertIn("        continue-on-error: true", job)
-        self.assertIn("if: ${{ always() && steps.journeys.outcome != 'success' }}", upload)
+        self.assertIn("        id: redact_journey_evidence", redaction)
+        self.assertIn("if: ${{ always() && steps.journeys.outcome != 'success' }}", redaction)
+        self.assertIn("redact-test-reports.py", redaction)
+        self.assertIn("steps.redact_journey_evidence.outcome == 'success'", upload)
         self.assertIn("uses: actions/upload-artifact@v4", upload)
 
-    def test_journey_runner_reaps_gateway_after_health_failure(self):
+    def test_maestro_journey_emulator_uses_writable_system_for_test_ca(self):
+        workflow = WORKFLOW.read_text()
+        journey_step = workflow.split("      - name: Run deterministic Maestro journeys\n", 1)[1]
+        journey_step = journey_step.split("\n      - name: Upload journey failure evidence", 1)[0]
+        self.assertIn("emulator-options: -no-window -no-audio -no-boot-anim -writable-system", journey_step)
+
+    def test_journey_runner_preinstalls_the_pinned_driver_and_skips_the_dadb_reinstall(self):
+        runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
+        extract = runner.index('"maestro-app.apk" "maestro-server.apk"')
+        self.assertIn('"$workspace/maestro-cli/maestro/lib/maestro-client.jar"', runner)
+        guard_app = runner.index("adb shell pm path dev.mobile.maestro >/dev/null")
+        guard_server = runner.index("adb shell pm path dev.mobile.maestro.test >/dev/null")
+        install_app = runner.index('timeout 180 adb install --no-streaming -r "$driver_dir/maestro-app.apk"')
+        install_server = runner.index('timeout 180 adb install --no-streaming -r "$driver_dir/maestro-server.apk"')
+        maestro_call = runner.index('test --no-reinstall-driver "$flow_dir/$journey.yaml"')
+        self.assertLess(extract, install_app, "driver APKs must be extracted before installation")
+        self.assertLess(guard_app, install_app, "the driver install must be guarded by a presence check")
+        self.assertLess(guard_server, install_app, "both driver packages must be checked before installing")
+        self.assertLess(install_app, install_server, "both driver APKs must be installed")
+        self.assertLess(install_server, maestro_call, "driver APKs must be installed before Maestro runs")
+        self.assertIn("Failed to install the Maestro driver APKs", runner)
+
+    def test_maestro_journey_timeout_preserves_failure_evidence(self):
+        runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
+        timeout_call = runner.index("timeout --signal=TERM --kill-after=15s 300s")
+        artifact_copy = runner.index('cp -r "$HOME/.maestro/tests"', timeout_call)
+        self.assertLess(timeout_call, artifact_copy)
+        self.assertIn('log "Maestro journey timed out after 300 seconds: $journey"', runner)
+
+    def test_journey_runner_checks_ca_persistence_after_reboot(self):
+        runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
+        ca_check = runner.index('if ! adb shell test -f "$ca_device_path"; then')
+        self.assertLess(runner.rindex("sys.boot_completed"), ca_check)
+        self.assertLess(ca_check, runner.index('timeout 180 adb install --no-streaming -r "$apk"'))
+
+    def test_journey_runner_remounts_before_ca_install_and_reboots_afterward(self):
+        runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
+        prepare_reboot = runner.index("adb reboot")
+        prepare_boot = runner.index("sys.boot_completed")
+        remount = runner.index("adb remount")
+        install = runner.index('adb push "$ca_file"')
+        chmod = runner.index("adb shell chmod 644")
+        trust_reboot = runner.rindex("adb reboot")
+        trust_boot = runner.rindex("sys.boot_completed")
+        apk_install = runner.index('timeout 180 adb install --no-streaming -r "$apk"')
+        self.assertLess(prepare_reboot, prepare_boot)
+        self.assertLess(prepare_boot, remount)
+        self.assertLess(remount, install)
+        self.assertLess(install, chmod)
+        self.assertLess(chmod, trust_reboot)
+        self.assertLess(trust_reboot, trust_boot)
+        self.assertLess(trust_boot, apk_install)
+
+    def test_journey_runner_captures_telemetry_before_reaping_gateway_after_health_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             gateway_pid_file = workspace / "gateway.pid"
@@ -71,6 +128,12 @@ class TestJobs(unittest.TestCase):
             """)
             add_executable("curl", """
                 #!/usr/bin/env bash
+                printf '%s\\n' "$*" >> "$CURL_CALLS_FILE"
+                if [[ "$*" == *"/__fixture/telemetry"* ]]; then
+                    active_pid=""
+                    while IFS= read -r candidate; do active_pid="$candidate"; done < "$GATEWAY_PID_FILE"
+                    kill -0 "$active_pid" 2>/dev/null && printf '%s\\n' "$active_pid" >> "$TELEMETRY_PID_FILE"
+                fi
                 if [[ "$*" == *"/health"* ]]; then
                     count=0
                     [[ -f "$HEALTH_COUNT_FILE" ]] && read -r count < "$HEALTH_COUNT_FILE"
@@ -102,6 +165,8 @@ class TestJobs(unittest.TestCase):
                 "GITHUB_WORKSPACE": str(workspace),
                 "GATEWAY_PID_FILE": str(gateway_pid_file),
                 "HEALTH_COUNT_FILE": str(workspace / "health.count"),
+                "CURL_CALLS_FILE": str(workspace / "curl.calls"),
+                "TELEMETRY_PID_FILE": str(workspace / "telemetry.pids"),
                 "HOME": str(workspace),
                 "MAESTRO_CLI_VERSION": "test",
             }
@@ -119,6 +184,14 @@ class TestJobs(unittest.TestCase):
             self.assertEqual(2, result.stdout.count("stopped and reaped"))
             gateway_pids = [int(pid) for pid in gateway_pid_file.read_text().splitlines()]
             self.assertEqual(2, len(gateway_pids))
+            curl_calls = (workspace / "curl.calls").read_text().splitlines()
+            telemetry_calls = [call for call in curl_calls if "/__fixture/telemetry" in call]
+            self.assertEqual(2, len(telemetry_calls))
+            self.assertTrue(all("--cacert" in call and "--max-time 5" in call for call in telemetry_calls))
+            self.assertEqual(gateway_pids, [int(pid) for pid in (workspace / "telemetry.pids").read_text().splitlines()])
+            evidence_dir = workspace / "artifacts/journey-evidence"
+            self.assertTrue((evidence_dir / "connection-telemetry.json").is_file())
+            self.assertTrue((evidence_dir / "session-list-first-telemetry.json").is_file())
             try:
                 for gateway_pid in gateway_pids:
                     with self.assertRaises(ProcessLookupError):
@@ -135,13 +208,20 @@ class TestJobs(unittest.TestCase):
             root = Path(directory)
             report = root / "test.xml"
             report.write_text('<failure>Expected 1 but was 2. token=fixture-sensitive-value https://fixture.invalid/path</failure>')
-            command = ["python3", str(ROOT / ".github/scripts/redact-test-reports.py"), directory, "*.xml"]
+            maestro_log = root / "maestro.log"
+            maestro_log.write_text("Input text: hidden-value-to-redact ... COMPLETED\n")
+            commands = root / "commands.json"
+            commands.write_text(json.dumps([{"command": {"inputTextCommand": {"text": "hidden-value-to-redact"}}}]))
+            command = ["python3", str(ROOT / ".github/scripts/redact-test-reports.py"), directory, "*.xml", "*.log", "*.json"]
             result = subprocess.run(command, capture_output=True, timeout=10)
             self.assertEqual(0, result.returncode, result.stderr)
             content = report.read_text()
             self.assertIn("Expected 1 but was 2", content)
             self.assertNotIn("fixture-sensitive-value", content)
             self.assertNotIn("fixture.invalid", content)
+            self.assertIn("Input text: [REDACTED]", maestro_log.read_text())
+            self.assertFalse("hidden-value-to-redact" in maestro_log.read_text(), "Maestro input remains in the log.")
+            self.assertFalse("hidden-value-to-redact" in commands.read_text(), "Maestro input remains in commands.json.")
             report.write_bytes(b"unsafe\x00report")
             result = subprocess.run(command, capture_output=True, timeout=10)
             self.assertNotEqual(0, result.returncode)

@@ -32,3 +32,12 @@ secrets/
 coverage/
 reports/
 *.log
+__pycache__/
+
+# Deterministic journey local runs (downloaded and extracted by the runner)
+maestro-cli/
+maestro.zip
+maestro-driver/
+
+# Journey evidence collected by local and CI runs
+artifacts/

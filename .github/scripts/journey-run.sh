@@ -18,12 +18,24 @@ flow_dir="$workspace/fixtures/hermes/journey/flows"
 log() { printf '%s\n' "$*"; }
 
 gateway_pid=""
+active_journey=""
 stop_gateway() {
     if [[ -z "$gateway_pid" ]]; then
         return 0
     fi
 
     local pid="$gateway_pid"
+    if [[ -n "$active_journey" ]]; then
+        local telemetry_log="$evidence_dir/${active_journey}-telemetry.json"
+        if ! curl --cacert "$ca_file" --connect-timeout 2 --max-time 5 -fsS \
+            "https://127.0.0.1:18443/__fixture/telemetry" > "$telemetry_log"; then
+            log "Failed to capture Journey Gateway telemetry for $active_journey."
+        else
+            log "Captured Journey Gateway telemetry for $active_journey."
+        fi
+        active_journey=""
+    fi
+
     if kill -0 "$pid" 2>/dev/null && ! kill "$pid" 2>/dev/null; then
         if kill -0 "$pid" 2>/dev/null; then
             log "Failed to stop Journey Gateway process $pid."
@@ -55,11 +67,6 @@ trap finish_gateway EXIT
 log "Installing the journey test CA into the emulator system trust store."
 adb root >/dev/null
 adb wait-for-device
-sleep 2
-adb remount >/dev/null
-ca_hash="$(openssl x509 -inform PEM -subject_hash_old -in "$ca_file" | head -1)"
-adb push "$ca_file" "/system/etc/security/cacerts/${ca_hash}.0" >/dev/null
-adb shell chmod 644 "/system/etc/security/cacerts/${ca_hash}.0"
 adb reboot >/dev/null || true
 adb wait-for-device
 for _ in $(seq 1 120); do
@@ -69,20 +76,54 @@ for _ in $(seq 1 120); do
     sleep 2
 done
 if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then
-    log "Emulator did not boot after CA installation."
+    log "Emulator did not boot before installing the TLS CA."
     exit 1
 fi
 adb root >/dev/null || true
 adb wait-for-device
+adb remount >/dev/null
+ca_hash="$(openssl x509 -inform PEM -subject_hash_old -in "$ca_file" | head -1)"
+ca_device_path="/system/etc/security/cacerts/${ca_hash}.0"
+adb push "$ca_file" "$ca_device_path" >/dev/null
+adb shell chmod 644 "$ca_device_path"
+adb reboot >/dev/null || true
+adb wait-for-device
+for _ in $(seq 1 120); do
+    if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+        break
+    fi
+    sleep 2
+done
+if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; then
+    log "Emulator did not boot after installing the TLS trust store."
+    exit 1
+fi
+adb root >/dev/null || true
+adb wait-for-device
+if ! adb shell test -f "$ca_device_path"; then
+    log "Journey test CA was not retained after emulator reboot."
+    exit 1
+fi
 
 log "Installing the exact candidate APK."
-adb install -r "$apk" >/dev/null
+# --no-streaming avoids the streamed-install protocol, which was observed
+# stalling against the API 24 emulator's adbd; the call is bounded anyway.
+if ! timeout 180 adb install --no-streaming -r "$apk" >/dev/null; then
+    log "Failed to install the candidate APK."
+    exit 1
+fi
 
 log "Installing pinned Maestro CLI ${MAESTRO_CLI_VERSION}."
 curl -fsSL -o maestro.zip "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_CLI_VERSION}/maestro.zip"
 unzip -q -o maestro.zip -d maestro-cli
 maestro_cli="$workspace/maestro-cli/maestro/bin/maestro"
 "$maestro_cli" --version
+
+log "Extracting the pinned Maestro Android driver APKs."
+driver_dir="$workspace/maestro-driver"
+mkdir -p "$driver_dir"
+unzip -j -o "$workspace/maestro-cli/maestro/lib/maestro-client.jar" \
+    "maestro-app.apk" "maestro-server.apk" -d "$driver_dir" >/dev/null
 
 log "Preparing the journey Gateway classpath."
 ( cd "$workspace" && ./gradlew :fixtures:hermes:runner:journeyGatewayClasspath --console=plain -q )
@@ -116,6 +157,7 @@ for journey in "${journeys[@]}"; do
         org.hermesnative.client.fixture.journey.JourneyGatewayMainKt \
         "$scenario_dir/$journey.json" "$keystore" >"$gateway_log" 2>&1 &
     gateway_pid=$!
+    active_journey="$journey"
     started=false
     for _ in $(seq 1 60); do
         if grep -q "journey-gateway-endpoint=" "$gateway_log" 2>/dev/null; then
@@ -137,10 +179,31 @@ for journey in "${journeys[@]}"; do
     fi
 
     maestro_log="$evidence_dir/${journey}-maestro.log"
-    if ! "$maestro_cli" test "$flow_dir/$journey.yaml" >"$maestro_log" 2>&1; then
+    # Install the pinned driver APKs directly and skip Maestro's own
+    # reinstall path: Maestro streams the driver apps through dadb, which has
+    # no read timeout and was observed hanging a journey's driver install on
+    # the API 24 emulator. The driver packages persist, so install them once
+    # per device; bound every adb call because adb install can itself stall.
+    if ! timeout 60 adb shell pm path dev.mobile.maestro >/dev/null 2>&1 ||
+        ! timeout 60 adb shell pm path dev.mobile.maestro.test >/dev/null 2>&1; then
+        log "Installing the pinned Maestro driver APKs."
+        if ! timeout 180 adb install --no-streaming -r "$driver_dir/maestro-app.apk" >/dev/null ||
+            ! timeout 180 adb install --no-streaming -r "$driver_dir/maestro-server.apk" >/dev/null; then
+            log "Failed to install the Maestro driver APKs for $journey."
+            exit 1
+        fi
+    fi
+    set +e
+    timeout --signal=TERM --kill-after=15s 300s "$maestro_cli" test --no-reinstall-driver "$flow_dir/$journey.yaml" >"$maestro_log" 2>&1
+    maestro_status=$?
+    set -e
+    if [ "$maestro_status" -ne 0 ]; then
         cp -r "$HOME/.maestro/tests" "$evidence_dir/${journey}-maestro-tests" 2>/dev/null || true
+        if [ "$maestro_status" -eq 124 ] || [ "$maestro_status" -eq 137 ]; then
+            log "Maestro journey timed out after 300 seconds: $journey"
+        fi
         log "Maestro journey failed: $journey"
-        exit 1
+        exit "$maestro_status"
     fi
 
     java -Dfixture.repositoryRoot="$workspace" \
