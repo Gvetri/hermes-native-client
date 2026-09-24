@@ -134,6 +134,16 @@ object JourneyScenarioParser {
             runCatching { scenarioFile.readText() }.getOrElse { error ->
                 throw JourneyScenarioFormatException("Journey scenario could not be read: ${error.message}")
             }
+        // kotlinx.serialization collapses duplicate JSON keys before the object
+        // model is built, so "exactly one provenance field" must be checked on
+        // the raw document; otherwise a duplicate hermes_revision key would be
+        // silently accepted.
+        val provenanceFieldCount = Regex("\"hermes_revision\"\\s*:").findAll(text).count()
+        if (provenanceFieldCount != 1) {
+            throw JourneyScenarioFormatException(
+                "Journey scenario must declare exactly one hermes_revision provenance field.",
+            )
+        }
         val root =
             runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
                 ?: throw JourneyScenarioFormatException("Journey scenario is not a JSON object.")

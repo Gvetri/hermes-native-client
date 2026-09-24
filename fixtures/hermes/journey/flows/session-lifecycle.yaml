@@ -26,6 +26,7 @@ name: session-lifecycle
 - tapOn: "Lifecycle Session"
 - assertVisible: "Back to Sessions"
 - assertVisible: "Message"
+- assertNotVisible: "Role: assistant"
 - tapOn: "Back to Sessions"
 - tapOn: "Rename Session"
 - tapOn: "New Session title"

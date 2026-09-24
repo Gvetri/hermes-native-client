@@ -33,6 +33,11 @@
           "id": "message-markdown-2",
           "role": "assistant",
           "content": "Visit the safe HTTPS link https://example.com/secure"
+        },
+        {
+          "id": "message-markdown-3",
+          "role": "assistant",
+          "content": "Unsafe scheme javascript:alert(1) stays plain text"
         }
       ]
     }

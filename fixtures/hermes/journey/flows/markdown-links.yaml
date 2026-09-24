@@ -20,4 +20,11 @@ name: markdown-links
     timeout: 30000
 - assertVisible: "Safe **Markdown** text"
 - assertVisible: "Visit the safe HTTPS link https://example.com/secure"
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- extendedWaitUntil:
+    visible: "Unsafe scheme javascript:alert(1) stays plain text"
+    timeout: 30000
 - assertVisible: "Message"

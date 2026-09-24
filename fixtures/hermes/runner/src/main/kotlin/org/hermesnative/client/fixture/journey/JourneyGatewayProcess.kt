@@ -13,7 +13,6 @@ import java.net.URI
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -221,14 +220,7 @@ class JourneyGatewayProcess private constructor(
                             title = parseTitle(body),
                             preview = null,
                             pinned = false,
-                            history =
-                                listOf(
-                                    JourneyMessage(
-                                        id = "message-${behavior.createdSessionId()}",
-                                        role = "assistant",
-                                        content = "Created history",
-                                    ),
-                                ),
+                            history = emptyList(),
                         )
                     behavior.sessions.removeIf { it.id == created.id }
                     behavior.sessions += created
@@ -503,7 +495,6 @@ internal class JourneyGatewayBehavior(
     val runStatusRequests = AtomicInteger(0)
     val interruptedRunIds = CopyOnWriteArrayList<String>()
     private val createdRunCounters = ConcurrentHashMap<String, AtomicInteger>()
-    private val servedRunIds = ConcurrentHashMap<String, MutableSet<String>>()
     private val createdSessionCounter = AtomicInteger(0)
     internal val observationDelivered = ConcurrentHashMap<String, Boolean>()
 
@@ -525,12 +516,7 @@ internal class JourneyGatewayBehavior(
 
     fun nextRunScript(sessionId: String): JourneyRunScript? {
         val index = createdRunCounters.getOrPut(sessionId, ::AtomicInteger).getAndIncrement()
-        val scripts = scenario.runs.filter { it.sessionId == sessionId }
-        val script = scripts.getOrNull(index) ?: scripts.lastOrNull()
-        if (script != null) {
-            servedRunIds.getOrPut(sessionId) { CopyOnWriteArraySet() }.add(script.runId)
-        }
-        return script
+        return scenario.runs.filter { it.sessionId == sessionId }.getOrNull(index)
     }
 
     fun runStatus(runId: String): String? {
@@ -566,7 +552,7 @@ internal class JourneyGatewayBehavior(
             append(""","run_creates":{""")
             append(
                 scenario.sessions.joinToString(",") { session ->
-                    """${session.id.jsonValue()}:${servedRunIds[session.id]?.size ?: 0}"""
+                    """${session.id.jsonValue()}:${createdRunCounters[session.id]?.get() ?: 0}"""
                 },
             )
             append('}')

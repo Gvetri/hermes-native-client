@@ -31,15 +31,20 @@ public-network dependency, real provider credentials, or live model execution.
   synthetic fixture content). Model-generated prose is never asserted.
 - The gateway telemetry proves duplicate SSE observation is prevented during
   refresh (`sse_connections.<run>.opened == 2` across observe → refresh →
-  re-observe) and that Session switching does not cancel a remote Run
-  (`closed == 1`, no cancel route).
+  re-observe) and that Session switching does not cancel a remote Run:
+  `closed == 1` plus an explicit verifier assertion that no recorded request
+  path targets a Run-cancel route.
+- Every terminal, streaming, and interrupted journey additionally asserts the
+  exact Run-submission count (`run_creates`), so a duplicate retry submission
+  can never pass unnoticed.
 - The layer is secret-free: the synthetic bearer credential, the loopback
   endpoint, and the test-only TLS key pair are repository-owned test fixtures,
   never real credentials, and the TLS key pair is never used outside the
   emulator test boundary.
 - Unsupported capability surfaces are exercised: an additive unknown
-  capability keeps the supported contract usable, and a missing required
-  capability produces the fixed explanation
+  capability keeps the supported contract usable (the journey opens a Session
+  and reaches the conversation screen), and a missing required capability
+  produces the fixed explanation
   `Required feature unavailable. This Gateway does not support the client contract.`
   The client currently defines no optional capabilities, so the disabled-
   with-explanation surface is the required-capability explanation plus
@@ -55,10 +60,13 @@ an emulator or device, and the pinned Maestro CLI (`cli-2.10.0`).
 ./gradlew :app:assembleDebug
 sha256sum app/build/outputs/apk/debug/app-debug.apk
 
-# 2. Start the fake Gateway for one journey (foreground, port 18443).
+# 2. Generate the Journey Gateway classpath used by steps 3 and 6.
+./gradlew :fixtures:hermes:runner:journeyGatewayClasspath
+
+# 3. Start the fake Gateway for one journey (foreground, port 18443).
 ./gradlew :fixtures:hermes:runner:runJourneyGateway -Pscenario=terminal-success
 
-# 3. In a second terminal, install the test CA into an API 24 AOSP emulator.
+# 4. In a second terminal, install the test CA into an API 24 AOSP emulator.
 adb root && adb remount
 CA_HASH=$(openssl x509 -inform PEM -subject_hash_old \
   -in fixtures/hermes/journey-tls/journey-ca.pem | head -1)
@@ -66,11 +74,11 @@ adb push fixtures/hermes/journey-tls/journey-ca.pem \
   "/system/etc/security/cacerts/${CA_HASH}.0"
 adb reboot   # then wait for boot
 
-# 4. Install the APK and run the journey flow.
+# 5. Install the APK and run the journey flow.
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 maestro test fixtures/hermes/journey/flows/terminal-success.yaml
 
-# 5. Assert the gateway-side invariants.
+# 6. Assert the gateway-side invariants.
 java -Dfixture.repositoryRoot="$(pwd)" \
   -cp "$(cat fixtures/hermes/runner/build/journey-classpath.txt)" \
   org.hermesnative.client.fixture.journey.JourneyVerifierKt \
@@ -113,3 +121,8 @@ the JVM and instrumentation lanes.
   [`docs/gateway-contract-fixtures.md`](gateway-contract-fixtures.md). New
   routes or fields require contract fixtures, catalog updates, and contract
   tests first.
+- New or changed journey scenarios additionally require updated scenario and
+  fixture tests in `JourneyScenarioTest`, because every checked-in scenario is
+  parsed and validated against the pinned revision by those tests, and the
+  runner refuses to start a journey whose Gateway cannot pass its health and
+  capability readiness checks.

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.hermesnative.client.fixture.PinnedFixtureDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -161,22 +162,40 @@ class JourneyScenarioTest {
     }
 
     @Test
-    fun resubmitting_an_unresolved_run_resumes_the_most_recent_run() {
+    fun run_submissions_beyond_the_scripted_runs_are_refused_and_counted() {
         val process = startGateway("terminal-success", tls = false)
         try {
             val endpoint = process.endpoint
             post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
             streamEvents(endpoint, "run-success")
             val resubmit = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
-            assertEquals(202, resubmit.status)
-            assertTrue(resubmit.body.contains("run-success"))
+            assertEquals(404, resubmit.status)
+            assertFalse(resubmit.body.contains("run-success"))
             val telemetry = Json.parseToJsonElement(getBody(endpoint, "/__fixture/telemetry")).jsonObject
             assertEquals(
-                1,
+                2,
                 telemetry.getValue("run_creates").jsonObject.getValue("session-alpha").jsonPrimitive.int,
             )
         } finally {
             process.stop()
+        }
+    }
+
+    @Test
+    fun duplicate_provenance_keys_are_rejected() {
+        val file = File.createTempFile("journey-scenario", ".json")
+        try {
+            val pinned = pinnedDescriptor.provenance.value
+            file.writeText(
+                """{"name":"duplicate-provenance","hermes_revision":"$pinned","hermes_revision":"$pinned"}""",
+            )
+            val error =
+                assertThrows(JourneyScenarioFormatException::class.java) {
+                    JourneyScenarioParser.parse(file, pinned)
+                }
+            assertTrue(error.message.orEmpty().contains("exactly one hermes_revision"))
+        } finally {
+            file.delete()
         }
     }
 
@@ -265,6 +284,8 @@ class JourneyScenarioTest {
         try {
             val endpoint = process.endpoint
             get(endpoint, "/health")
+            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            streamEvents(endpoint, "run-success")
             get(endpoint, "/v1/runs/run-success")
             val telemetry = fetchTelemetry(endpoint.resolve("/__fixture/telemetry"))
             JourneyInvariants.verify("terminal-success", telemetry)
@@ -381,7 +402,8 @@ class JourneyScenarioTest {
         connection.doOutput = true
         connection.setRequestProperty("Content-Type", "application/json")
         connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-        val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+        val stream = if (connection.responseCode >= 400) connection.errorStream else connection.inputStream
+        val responseBody = stream.bufferedReader().use { it.readText() }
         return HttpResponse(connection.responseCode, responseBody)
     }
 

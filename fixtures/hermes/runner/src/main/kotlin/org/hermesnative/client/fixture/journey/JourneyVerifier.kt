@@ -65,6 +65,9 @@ internal fun fetchTelemetry(
     connection.connectTimeout = 5_000
     connection.readTimeout = 5_000
     connection.requestMethod = "GET"
+    // Telemetry reads are infrastructure probes; the fixture serves them
+    // without recording them as application traffic.
+    connection.setRequestProperty("X-Journey-Probe", "verifier")
     if (connection is HttpsURLConnection) {
         // The journey certificate is fixed to 127.0.0.1/10.0.2.2 loopback SANs.
         connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
@@ -131,8 +134,17 @@ internal object JourneyInvariants {
 
     private fun requireConnectionAttempted(telemetry: JsonObject) {
         val requests = telemetry["requests"]?.jsonArray.orEmpty()
-        check(requests.isNotEmpty()) { "The journey Gateway recorded no requests." }
+        check(requests.isNotEmpty()) { "The journey Gateway recorded no application requests." }
+        val paths = recordedRequestPaths(telemetry)
+        check(paths.any { it.startsWith("/v1/") }) {
+            "The application never issued a Gateway API request."
+        }
     }
+
+    private fun recordedRequestPaths(telemetry: JsonObject): List<String> =
+        telemetry["requests"]?.jsonArray.orEmpty().mapNotNull { request ->
+            request.jsonObject["path"]?.jsonPrimitive?.content
+        }
 
     private fun verifyConnection(telemetry: JsonObject) {
         requireConnectionAttempted(telemetry)
@@ -162,11 +174,20 @@ internal object JourneyInvariants {
         }
         check(sse.closed == 1) { "Active Run observation closed ${sse.closed} times; expected exactly 1 (Session switch)." }
         check(runStatusRequests(telemetry) >= 1) { "The client did not re-check the active Run status." }
+        check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
+            "The client submitted the active Run more than once."
+        }
+        check(recordedRequestPaths(telemetry).none { it.contains("cancel", ignoreCase = true) }) {
+            "The client attempted to cancel the active Run while switching Sessions."
+        }
     }
 
     private fun verifyStreaming(telemetry: JsonObject) {
         val sse = sseFor(telemetry, STREAMING_RUN_ID)
         check(sse.opened == 1) { "Streaming Run was observed ${sse.opened} times; expected exactly 1." }
+        check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
+            "The client submitted the streaming Run more than once."
+        }
     }
 
     private fun verifyInterruptedSseRefetch(telemetry: JsonObject) {
@@ -174,16 +195,23 @@ internal object JourneyInvariants {
         check(sse.opened == 1) { "Interrupted Run was observed ${sse.opened} times; expected exactly 1." }
         check(INTERRUPTED_RUN_ID in interruptedRunIds(telemetry)) { "The Gateway did not record the interrupted Run." }
         check(runStatusRequests(telemetry) >= 1) { "The client did not refetch authoritative Run status." }
+        check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
+            "The client re-submitted the interrupted Run."
+        }
     }
 
     private fun verifyTerminal(telemetry: JsonObject) {
         requireConnectionAttempted(telemetry)
         check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile the terminal Run." }
+        val submissions = runCreatesFor(telemetry, ACTIVE_SESSION_ID)
+        check(submissions == 1) {
+            "The client submitted the terminal Run $submissions times; expected exactly 1 (no duplicate retry submissions)."
+        }
     }
 
     private fun verifyExplicitRetry(telemetry: JsonObject) {
         check(runCreatesFor(telemetry, RETRY_SESSION_ID) == 2) {
-            "The client did not create exactly one distinct retry Run."
+            "The client did not submit exactly two Run creations (initial run plus one retry)."
         }
         check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile Run status." }
     }
@@ -205,6 +233,7 @@ internal object JourneyInvariants {
     }
 
     const val ACTIVE_RUN_ID = "active-run"
+    const val ACTIVE_SESSION_ID = "session-alpha"
     const val STREAMING_RUN_ID = "streaming-run"
     const val INTERRUPTED_RUN_ID = "interrupted-run"
     const val RETRY_SESSION_ID = "session-retry"

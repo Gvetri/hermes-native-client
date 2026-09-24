@@ -7,6 +7,15 @@ import java.net.URLDecoder
 
 /** Small HTTP helpers shared by the deterministic fixture Gateway implementations. */
 internal object GatewayHttpSupport {
+    /**
+     * Requests carrying this header are infrastructure probes (readiness checks
+     * and telemetry reads by the runner or by the verifier), not application
+     * traffic. They are served normally but never recorded, so the recorded
+     * request list and every verifier assertion derived from it describes only
+     * what the application under test did.
+     */
+    const val PROBE_HEADER = "X-Journey-Probe"
+
     fun respond(
         exchange: HttpExchange,
         status: Int,
@@ -43,14 +52,16 @@ internal object GatewayHttpSupport {
         requests: MutableList<SyntheticGatewayRequest>,
     ): String? {
         val body = exchange.requestBody.bufferedReader().use { it.readText().takeIf(String::isNotEmpty) }
-        requests +=
-            SyntheticGatewayRequest(
-                method = exchange.requestMethod,
-                path = exchange.requestURI.path,
-                query = exchange.requestURI.rawQuery,
-                hasAuthorizationHeader = exchange.requestHeaders.getFirst("Authorization") != null,
-                body = body,
-            )
+        if (exchange.requestHeaders.getFirst(PROBE_HEADER) == null) {
+            requests +=
+                SyntheticGatewayRequest(
+                    method = exchange.requestMethod,
+                    path = exchange.requestURI.path,
+                    query = exchange.requestURI.rawQuery,
+                    hasAuthorizationHeader = exchange.requestHeaders.getFirst("Authorization") != null,
+                    body = body,
+                )
+        }
         return body
     }
 }
