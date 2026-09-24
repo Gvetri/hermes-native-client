@@ -152,7 +152,7 @@ class TestJobs(unittest.TestCase):
                 #!/usr/bin/env bash
                 printf '%s\\n' "$*" >> "$CURL_CALLS_FILE"
                 if [[ "$*" == *"/v1/capabilities"* ]]; then
-                    printf '{"capabilities":["session.list"]}\\n'
+                    printf '{"capabilities":["session.list","session.create","session.open","session.history","session.rename","session.delete","session.pin","session.unpin","run.create","run.status","run.sse"]}\\n'
                     exit 0
                 fi
                 if [[ "$*" == *"/__fixture/telemetry"* ]]; then

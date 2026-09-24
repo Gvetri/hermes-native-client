@@ -185,16 +185,43 @@ for journey in "${journeys[@]}"; do
     # Capability readiness check before any flow starts. The probe is not
     # recorded as application traffic. The served set is scenario-specific
     # (the capabilities-missing-required scenario intentionally omits a
-    # required capability), so this checks the endpoint contract only.
+    # required capability), so the required set is checked for every other
+    # journey and the endpoint contract is checked everywhere.
     capability_credential="$(grep -oE '"require_bearer_credential"[[:space:]]*:[[:space:]]*"[^"]*"' \
         "$scenario_dir/$journey.json" | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' || true)"
     capability_probe=(curl -kfsS -H "X-Journey-Probe: readiness")
     if [[ -n "$capability_credential" ]]; then
         capability_probe+=(-H "Authorization: Bearer $capability_credential")
     fi
-    if ! "${capability_probe[@]}" "https://127.0.0.1:18443/v1/capabilities" | grep -q '"capabilities":\['; then
+    capabilities_body="$("${capability_probe[@]}" "https://127.0.0.1:18443/v1/capabilities")" || {
         log "Journey Gateway capability check failed for $journey."
         exit 1
+    }
+    if ! printf '%s' "$capabilities_body" | python3 -c '
+import json, sys
+try:
+    served = json.load(sys.stdin)["capabilities"]
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(served, list) and served else 1)
+'; then
+        log "Journey Gateway capability check failed for $journey."
+        exit 1
+    fi
+    if [[ "$journey" != "capabilities-missing-required" ]]; then
+        if ! printf '%s' "$capabilities_body" | python3 -c '
+import json, sys
+served = set(json.load(sys.stdin)["capabilities"])
+required = {
+    "session.list", "session.create", "session.open", "session.history",
+    "session.rename", "session.delete", "session.pin", "session.unpin",
+    "run.create", "run.status", "run.sse",
+}
+sys.exit(1 if required - served else 0)
+'; then
+            log "Journey Gateway is missing required capabilities for $journey."
+            exit 1
+        fi
     fi
 
     maestro_log="$evidence_dir/${journey}-maestro.log"
@@ -230,6 +257,7 @@ for journey in "${journeys[@]}"; do
         org.hermesnative.client.fixture.journey.JourneyVerifierKt \
         "https://127.0.0.1:18443/__fixture/telemetry" "$journey" "$keystore" ||
         {
+            cp -r "$HOME/.maestro/tests" "$evidence_dir/${journey}-maestro-tests" 2>/dev/null || true
             log "Journey verifier failed for $journey."
             exit 1
         }

@@ -32,8 +32,9 @@ public-network dependency, real provider credentials, or live model execution.
 - The gateway telemetry proves duplicate SSE observation is prevented during
   refresh (`sse_connections.<run>.opened == 2` across observe → refresh →
   re-observe) and that Session switching does not cancel a remote Run:
-  `closed == 1` plus an explicit verifier assertion that no recorded request
-  path targets a Run-cancel route.
+  `closed == 1`, an explicit verifier assertion that no recorded request
+  targets a Run-cancel route (by path or by `DELETE` method), and a live check
+  that the Run still reports `running` after the switch.
 - Every terminal, streaming, and interrupted journey additionally asserts the
   exact Run-submission count (`run_creates`), so a duplicate retry submission
   can never pass unnoticed.
@@ -42,13 +43,17 @@ public-network dependency, real provider credentials, or live model execution.
   never real credentials, and the TLS key pair is never used outside the
   emulator test boundary.
 - Unsupported capability surfaces are exercised: an additive unknown
-  capability keeps the supported contract usable (the journey opens a Session
-  and reaches the conversation screen), and a missing required capability
-  produces the fixed explanation
+  capability keeps the supported contract usable (the journey opens a Session,
+  sends a message, and reaches a succeeded terminal state), and a missing
+  required capability produces the fixed explanation
   `Required feature unavailable. This Gateway does not support the client contract.`
   The client currently defines no optional capabilities, so the disabled-
   with-explanation surface is the required-capability explanation plus
   unknown-additive tolerance.
+- Markdown and link safety are pinned as literal, inert text: the journey
+  shows a benign HTTPS link and a `javascript:` scheme rendered exactly as
+  authored, because the client renders message content as plain text (no
+  Markdown execution, no automatic linkification).
 
 ## Running locally
 
@@ -87,7 +92,9 @@ java -Dfixture.repositoryRoot="$(pwd)" \
 ```
 
 CI runs the same steps via `.github/scripts/journey-run.sh` for every journey
-in order.
+in order. The pinned Maestro archive is restored from the GitHub Actions
+cache; the pinned download runs only on a cache miss, so the layer adds no
+steady-state public-network dependency beyond CI itself.
 
 ## Failure evidence
 
@@ -98,7 +105,7 @@ When a journey fails, CI preserves non-sensitive evidence as the
 - the fake Gateway log for the failing journey (`<journey>-gateway.log`);
 - the Maestro command log (`<journey>-maestro.log`);
 - Maestro screenshots and hierarchy captures
-  (`<journey>-maestro-tests/`).
+  (`<journey>-maestro-tests/`), copied on Maestro or verifier failure.
 
 All evidence contains only synthetic data: synthetic Sessions, Runs, and
 messages, the synthetic credential, and the loopback endpoint. The journey
@@ -126,3 +133,8 @@ the JVM and instrumentation lanes.
   parsed and validated against the pinned revision by those tests, and the
   runner refuses to start a journey whose Gateway cannot pass its health and
   capability readiness checks.
+- Adding a journey scenario is an additive change: it keeps the same pinned
+  `hermes_revision`, adds no routes or fields to the fake Gateway, and leaves
+  the contract fixtures and catalog unchanged, so no contract-test change is
+  required; contract-test changes accompany any change to the served contract
+  itself.
