@@ -1,0 +1,86 @@
+appId: org.hermesnative.client
+name: session-lifecycle
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- assertVisible: "Alpha Session"
+- tapOn: "Create Session"
+- tapOn: "Session title (optional)"
+- inputText: "Lifecycle Session"
+- hideKeyboard
+- tapOn: "Confirm Create Session"
+- extendedWaitUntil:
+    visible: "Lifecycle Session"
+    timeout: 30000
+- tapOn: "Lifecycle Session"
+- assertVisible: "Back to Sessions"
+- assertVisible: "Message"
+- assertVisible: "No messages in this Session."
+- assertNotVisible: "Role: assistant"
+- tapOn: "Back to Sessions"
+- tapOn: "Rename Session"
+- tapOn: "New Session title"
+- longPressOn:
+    text: "Alpha Session"
+    below: "Current title: Alpha Session"
+- tapOn: "Select All"
+- inputText: "Renamed Session"
+- assertVisible: "Renamed Session"
+- hideKeyboard
+- swipe:
+    start: "93%, 50%"
+    end: "93%, 35%"
+    duration: 600
+- assertVisible: "Confirm Rename Session"
+- tapOn: "Confirm Rename Session"
+- extendedWaitUntil:
+    notVisible: "Confirm Rename Session"
+    timeout: 30000
+- tapOn: "Search Sessions"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      text: "Renamed Session"
+    direction: UP
+    timeout: 30000
+- assertVisible: "Renamed Session"
+- assertVisible:
+    text: "Pin Session"
+    below: "Renamed Session"
+- tapOn:
+    text: "Pin Session"
+    below: "Renamed Session"
+- extendedWaitUntil:
+    visible: "Pinned"
+    timeout: 30000
+- assertVisible:
+    text: "Pinned"
+    below: "Renamed Session"
+- tapOn:
+    text: "Unpin Session"
+    below: "Renamed Session"
+- swipe:
+    start: "93%, 69%"
+    end: "93%, 57%"
+    duration: 500
+- assertVisible:
+    text: "Delete Session"
+    below: "Rename Session"
+- tapOn:
+    text: "Delete Session"
+    below: "Rename Session"
+- tapOn: "Confirm Delete Session"
+- extendedWaitUntil:
+    notVisible: "Renamed Session"
+    timeout: 30000

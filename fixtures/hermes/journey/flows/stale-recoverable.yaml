@@ -1,0 +1,23 @@
+appId: org.hermesnative.client
+name: stale-recoverable
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
+    timeout: 30000
+- tapOn: "Try again"
+- extendedWaitUntil:
+    visible: "Alpha Session"
+    timeout: 30000

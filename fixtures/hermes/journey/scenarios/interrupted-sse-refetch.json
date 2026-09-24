@@ -1,0 +1,63 @@
+{
+  "name": "interrupted-sse-refetch",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "client-manifest",
+    "session.list",
+    "session.create",
+    "session.open",
+    "session.history",
+    "session.rename",
+    "session.delete",
+    "session.pin",
+    "session.unpin",
+    "run.create",
+    "run.status",
+    "run.sse"
+  ],
+  "sessions": [
+    {
+      "id": "session-alpha",
+      "title": "Alpha Session",
+      "preview": "Synthetic preview",
+      "pinned": false
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "interrupted-run",
+      "session_id": "session-alpha",
+      "create_status": "running",
+      "observation": [
+        {
+          "type": "run.started",
+          "status": "starting",
+          "id": "i1"
+        },
+        {
+          "type": "run.running",
+          "status": "running",
+          "id": "i2"
+        },
+        {
+          "type": "message.delta",
+          "delta": "Interrupted partial",
+          "id": "i3"
+        }
+      ],
+      "final_status": "failed",
+      "terminal_history": [
+        {
+          "id": "message-interrupted",
+          "role": "assistant",
+          "content": "Refetched failure",
+          "run_id": "interrupted-run",
+          "run_status": "failed"
+        }
+      ],
+      "interrupt_after_events": 3
+    }
+  ]
+}

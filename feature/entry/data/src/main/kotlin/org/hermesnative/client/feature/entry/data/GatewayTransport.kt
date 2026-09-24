@@ -66,10 +66,11 @@ class OkHttpGatewayTransport(
     }
 
     override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream {
-        val response = client.newCall(request(request)).execute()
+        val call = client.newCall(request(request))
+        val response = call.execute()
         val source = response.body?.source()
         if (source == null) {
-            return GatewayEventStream(response.code, emptySequence(), response::close)
+            return GatewayEventStream(response.code, emptySequence()) { call.cancel() }
         }
 
         val lines =
@@ -83,7 +84,11 @@ class OkHttpGatewayTransport(
                     response.close()
                 }
             }
-        return GatewayEventStream(response.code, lines, response::close)
+        // Closing must never read the socket: draining the open body from the
+        // closing thread races the reader and corrupts okio timeout accounting
+        // (IllegalStateException "Unbalanced enter/exit"). cancel() aborts any
+        // in-flight read; the reader thread owns the response close in `finally`.
+        return GatewayEventStream(response.code, lines) { call.cancel() }
     }
 
     private fun request(request: GatewayHttpRequest): Request {

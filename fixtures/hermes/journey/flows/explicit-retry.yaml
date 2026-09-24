@@ -1,0 +1,54 @@
+appId: org.hermesnative.client
+name: explicit-retry
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- tapOn: "Retry Session"
+- extendedWaitUntil:
+    visible: "Back to Sessions"
+    timeout: 30000
+- tapOn: "Message"
+- inputText: "Retry this"
+- hideKeyboard
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "Run state: Failed"
+    timeout: 30000
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- extendedWaitUntil:
+    visible: "Try again"
+    timeout: 30000
+- tapOn: "Try again"
+- extendedWaitUntil:
+    visible: "Run state: Succeeded"
+    timeout: 30000
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- extendedWaitUntil:
+    visible: "Stable retry success"
+    timeout: 30000
+- assertVisible: "Stable retry success"

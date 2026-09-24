@@ -1,0 +1,30 @@
+appId: org.hermesnative.client
+name: markdown-links
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- tapOn: "Markdown Session"
+- extendedWaitUntil:
+    visible: "Back to Sessions"
+    timeout: 30000
+- assertVisible: "Safe **Markdown** text"
+- assertVisible: "Visit the safe HTTPS link https://example.com/secure"
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- extendedWaitUntil:
+    visible: "Unsafe scheme javascript:alert(1) stays plain text"
+    timeout: 30000
+- assertVisible: "Message"

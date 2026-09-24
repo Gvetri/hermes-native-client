@@ -1,0 +1,56 @@
+appId: org.hermesnative.client
+name: pagination-search
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- assertVisible: "Search Alpha One"
+- repeat:
+    times: 2
+    commands:
+      - swipe:
+          start: "93%, 69%"
+          end: "93%, 57%"
+          duration: 500
+- assertVisible: "Search Beta Two"
+- assertNotVisible: "Search Gamma Three"
+- repeat:
+    times: 2
+    commands:
+      - swipe:
+          start: "93%, 69%"
+          end: "93%, 57%"
+          duration: 500
+- assertVisible: "Load more Sessions"
+- tapOn: "Load more Sessions"
+- extendedWaitUntil:
+    visible: "Search Gamma Three"
+    timeout: 30000
+- tapOn: "Search Sessions"
+- inputText: "Gamma"
+- hideKeyboard
+- repeat:
+    times: 2
+    commands:
+      - swipe:
+          start: "93%, 57%"
+          end: "93%, 69%"
+          duration: 500
+- extendedWaitUntil:
+    visible: "Search Gamma Three"
+    timeout: 30000
+- assertNotVisible: "Search Alpha One"
+- tapOn: "Clear search"
+- extendedWaitUntil:
+    visible: "Search Alpha One"
+    timeout: 30000

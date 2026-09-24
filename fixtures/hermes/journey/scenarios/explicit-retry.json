@@ -1,0 +1,84 @@
+{
+  "name": "explicit-retry",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "client-manifest",
+    "session.list",
+    "session.create",
+    "session.open",
+    "session.history",
+    "session.rename",
+    "session.delete",
+    "session.pin",
+    "session.unpin",
+    "run.create",
+    "run.status",
+    "run.sse"
+  ],
+  "sessions": [
+    {
+      "id": "session-retry",
+      "title": "Retry Session",
+      "preview": "Synthetic preview",
+      "pinned": false
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run-retry-1",
+      "session_id": "session-retry",
+      "create_status": "starting",
+      "observation": [
+        {
+          "type": "run.started",
+          "status": "starting",
+          "id": "r1"
+        },
+        {
+          "type": "run.failed",
+          "status": "failed",
+          "id": "r2"
+        }
+      ],
+      "final_status": "failed",
+      "terminal_history": [
+        {
+          "id": "message-retry-failed",
+          "role": "assistant",
+          "content": "Stable retry failure",
+          "run_id": "run-retry-1",
+          "run_status": "failed"
+        }
+      ]
+    },
+    {
+      "run_id": "run-retry-2",
+      "session_id": "session-retry",
+      "create_status": "starting",
+      "observation": [
+        {
+          "type": "run.started",
+          "status": "starting",
+          "id": "r3"
+        },
+        {
+          "type": "run.succeeded",
+          "status": "succeeded",
+          "id": "r4"
+        }
+      ],
+      "final_status": "succeeded",
+      "terminal_history": [
+        {
+          "id": "message-retry-succeeded",
+          "role": "assistant",
+          "content": "Stable retry success",
+          "run_id": "run-retry-2",
+          "run_status": "succeeded"
+        }
+      ]
+    }
+  ]
+}

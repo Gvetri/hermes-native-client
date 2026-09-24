@@ -1,0 +1,45 @@
+{
+  "name": "markdown-links",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "client-manifest",
+    "session.list",
+    "session.create",
+    "session.open",
+    "session.history",
+    "session.rename",
+    "session.delete",
+    "session.pin",
+    "session.unpin",
+    "run.create",
+    "run.status",
+    "run.sse"
+  ],
+  "sessions": [
+    {
+      "id": "session-markdown",
+      "title": "Markdown Session",
+      "preview": "Synthetic preview",
+      "pinned": false,
+      "history": [
+        {
+          "id": "message-markdown-1",
+          "role": "assistant",
+          "content": "Safe **Markdown** text"
+        },
+        {
+          "id": "message-markdown-2",
+          "role": "assistant",
+          "content": "Visit the safe HTTPS link https://example.com/secure"
+        },
+        {
+          "id": "message-markdown-3",
+          "role": "assistant",
+          "content": "Unsafe scheme javascript:alert(1) stays plain text"
+        }
+      ]
+    }
+  ]
+}

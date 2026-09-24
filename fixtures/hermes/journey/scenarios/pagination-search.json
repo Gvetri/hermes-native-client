@@ -1,0 +1,47 @@
+{
+  "name": "pagination-search",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "client-manifest",
+    "session.list",
+    "session.create",
+    "session.open",
+    "session.history",
+    "session.rename",
+    "session.delete",
+    "session.pin",
+    "session.unpin",
+    "run.create",
+    "run.status",
+    "run.sse"
+  ],
+  "session_page_size": 2,
+  "sessions": [
+    {
+      "id": "session-search-1",
+      "title": "Search Alpha One",
+      "preview": "Synthetic preview",
+      "pinned": false
+    },
+    {
+      "id": "session-search-2",
+      "title": "Search Beta Two",
+      "preview": "Synthetic preview",
+      "pinned": false
+    },
+    {
+      "id": "session-search-3",
+      "title": "Search Gamma Three",
+      "preview": "Synthetic preview",
+      "pinned": false
+    },
+    {
+      "id": "session-search-4",
+      "title": "Search Delta Four",
+      "preview": "Synthetic preview",
+      "pinned": false
+    }
+  ]
+}

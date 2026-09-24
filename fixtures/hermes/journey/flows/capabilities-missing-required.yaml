@@ -1,0 +1,16 @@
+appId: org.hermesnative.client
+name: capabilities-missing-required
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Required feature unavailable. This Gateway does not support the client contract."
+    timeout: 30000

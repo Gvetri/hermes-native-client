@@ -45,6 +45,8 @@ The local validation command is:
 
 The hosted `fixture-lifecycle` quality check runs this same command. It is deterministic lifecycle validation, not a live-provider smoke test.
 
+The deterministic emulator journeys ([`docs/deterministic-emulator-journeys.md`](deterministic-emulator-journeys.md)) reuse this pinned provenance as the identity for every journey scenario and for the fake Gateway that serves the emulator layer.
+
 ## Compatibility changes
 
 Changing `hermes_revision` or `image_digest` is a compatibility change. Every such change requires all of the following:

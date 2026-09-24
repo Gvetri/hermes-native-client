@@ -1,0 +1,28 @@
+appId: org.hermesnative.client
+name: empty-sessions
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "No Sessions on this Gateway"
+    timeout: 30000
+- assertVisible: "The Gateway returned no Sessions. Create one to get started."
+- tapOn: "Create Session"
+- tapOn: "Session title (optional)"
+- inputText: "Created Journey Session"
+- hideKeyboard
+- tapOn: "Confirm Create Session"
+- extendedWaitUntil:
+    visible: "Created Journey Session"
+    timeout: 30000

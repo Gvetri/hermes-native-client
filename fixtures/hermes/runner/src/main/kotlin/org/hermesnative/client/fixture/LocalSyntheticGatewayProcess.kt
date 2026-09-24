@@ -8,7 +8,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.InetSocketAddress
 import java.net.URI
-import java.net.URLDecoder
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -366,24 +365,11 @@ class LocalSyntheticGatewayProcess private constructor(
                 append('}')
             }
 
-        private fun String?.jsonValue(): String = this?.let(::quote) ?: "null"
+        private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)
 
-        private fun queryParameters(uri: URI): Map<String, String> =
-            uri.rawQuery.orEmpty()
-                .split('&')
-                .filter(String::isNotEmpty)
-                .mapNotNull { parameter ->
-                    val separator = parameter.indexOf('=')
-                    if (separator < 0) {
-                        null
-                    } else {
-                        URLDecoder.decode(parameter.substring(0, separator), Charsets.UTF_8.name()) to
-                            URLDecoder.decode(parameter.substring(separator + 1), Charsets.UTF_8.name())
-                    }
-                }
-                .toMap()
+        private fun queryParameters(uri: URI): Map<String, String> = GatewayHttpSupport.queryParameters(uri)
 
-        private fun quote(value: String): String = JsonPrimitive(value).toString()
+        private fun quote(value: String): String = GatewayHttpSupport.quote(value)
 
         private fun parseCreateTitle(body: String?): String? {
             val text = body?.takeIf(String::isNotBlank) ?: return null
@@ -396,29 +382,14 @@ class LocalSyntheticGatewayProcess private constructor(
         private fun recordRequest(
             exchange: HttpExchange,
             behavior: SyntheticGatewayBehavior,
-        ): String? {
-            val body = exchange.requestBody.bufferedReader().use { it.readText().takeIf(String::isNotEmpty) }
-            behavior.requests +=
-                SyntheticGatewayRequest(
-                    method = exchange.requestMethod,
-                    path = exchange.requestURI.path,
-                    query = exchange.requestURI.rawQuery,
-                    hasAuthorizationHeader = exchange.requestHeaders.getFirst("Authorization") != null,
-                    body = body,
-                )
-            return body
-        }
+        ): String? = GatewayHttpSupport.recordRequest(exchange, behavior.requests)
 
         private fun respond(
             exchange: HttpExchange,
             status: Int,
             body: String,
         ) {
-            val bytes = body.toByteArray(Charsets.UTF_8)
-            exchange.responseHeaders.add("Content-Type", "application/json")
-            exchange.sendResponseHeaders(status, bytes.size.toLong())
-            exchange.responseBody.use { it.write(bytes) }
-            exchange.close()
+            GatewayHttpSupport.respond(exchange, status, body)
         }
     }
 }
