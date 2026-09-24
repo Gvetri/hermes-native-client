@@ -133,8 +133,8 @@ the JVM and instrumentation lanes.
   parsed and validated against the pinned revision by those tests, and the
   runner refuses to start a journey whose Gateway cannot pass its health and
   capability readiness checks.
-- Adding a journey scenario is an additive change: it keeps the same pinned
-  `hermes_revision`, adds no routes or fields to the fake Gateway, and leaves
-  the contract fixtures and catalog unchanged, so no contract-test change is
-  required; contract-test changes accompany any change to the served contract
-  itself.
+- Adding or changing a journey scenario is covered by the scenario
+  parsing/validation tests in `JourneyScenarioTest` and by the journey run
+  itself; it keeps the same pinned `hermes_revision` and changes no routes or
+  fields of the fake Gateway, so contract-test changes are only required when
+  the served contract itself changes.

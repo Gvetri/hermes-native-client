@@ -232,13 +232,15 @@ class JourneyScenarioTest {
     }
 
     @Test
-    fun run_creation_requires_an_input() {
+    fun run_creation_requires_an_input_field() {
         val process = startGateway("terminal-success", tls = false)
         try {
             val endpoint = process.endpoint
-            val response = post(endpoint, "/v1/sessions/session-alpha/runs", """{"nope":true}""")
-            assertEquals(400, response.status)
-            assertTrue(response.body.contains("invalid-run-input"))
+            val missing = post(endpoint, "/v1/sessions/session-alpha/runs", """{"nope":true}""")
+            assertEquals(400, missing.status)
+            assertTrue(missing.body.contains("invalid-run-input"))
+            val empty = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":""}""")
+            assertEquals(202, empty.status)
         } finally {
             process.stop()
         }

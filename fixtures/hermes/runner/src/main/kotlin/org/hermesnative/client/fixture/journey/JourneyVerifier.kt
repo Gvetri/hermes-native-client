@@ -113,7 +113,7 @@ internal object JourneyInvariants {
             "explicit-retry" -> verifyExplicitRetry(telemetry)
             "stale-recoverable" -> verifyStaleRecoverable(telemetry)
             "markdown-links" -> verifyMarkdownLinks(telemetry)
-            "capabilities-additive" -> verifyCapabilitiesBoundary(telemetry)
+            "capabilities-additive" -> verifyCapabilitiesAdditive(telemetry)
             "capabilities-missing-required" -> verifyCapabilitiesBoundary(telemetry)
             "accessibility-controls" -> verifyAccessibilityControls(telemetry)
             else -> error("No journey invariants declared for scenario '$scenarioName'.")
@@ -247,6 +247,15 @@ internal object JourneyInvariants {
 
     private fun verifyCapabilitiesBoundary(telemetry: JsonObject) {
         requireConnectionAttempted(telemetry)
+    }
+
+    private fun verifyCapabilitiesAdditive(telemetry: JsonObject) {
+        // The additive journey reaches a succeeded terminal state, so its Run
+        // submission is counted exactly like every other terminal journey.
+        requireConnectionAttempted(telemetry)
+        check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
+            "The client submitted the additive Run more than once."
+        }
     }
 
     private fun verifyAccessibilityControls(telemetry: JsonObject) {

@@ -488,8 +488,10 @@ class JourneyGatewayProcess private constructor(
                 runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
                     as? kotlinx.serialization.json.JsonObject
                     ?: return null
+            // The documented contract requires an input field; its value may be
+            // an empty string (see fixtures/hermes/contracts/runs/create-request.json).
             val input = root["input"] as? kotlinx.serialization.json.JsonPrimitive ?: return null
-            return input.content.takeIf(String::isNotBlank)
+            return input.takeIf { it.isString }?.content
         }
 
         private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)
