@@ -94,9 +94,11 @@ When a journey fails, CI preserves non-sensitive evidence as the
 
 All evidence contains only synthetic data: synthetic Sessions, Runs, and
 messages, the synthetic credential, and the loopback endpoint. The journey
-layer never touches real Gateway endpoints or provider credentials, so no
-additional redaction is required; the existing redaction gates continue to
-apply to the JVM and instrumentation lanes.
+layer never touches real Gateway endpoints or provider credentials. Failure
+evidence under `artifacts/journey-evidence` still passes through the
+repository-wide redaction script (`.github/scripts/redact-test-reports.py`)
+before it is uploaded, and the existing redaction gates continue to apply to
+the JVM and instrumentation lanes.
 
 ## Compatibility and change rules
 

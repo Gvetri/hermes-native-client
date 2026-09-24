@@ -15,8 +15,23 @@ name: pagination-search
     visible: "Sessions"
     timeout: 30000
 - assertVisible: "Search Alpha One"
+- repeat:
+    times: 2
+    commands:
+      - swipe:
+          start: "93%, 69%"
+          end: "93%, 57%"
+          duration: 500
 - assertVisible: "Search Beta Two"
 - assertNotVisible: "Search Gamma Three"
+- repeat:
+    times: 2
+    commands:
+      - swipe:
+          start: "93%, 69%"
+          end: "93%, 57%"
+          duration: 500
+- assertVisible: "Load more Sessions"
 - tapOn: "Load more Sessions"
 - extendedWaitUntil:
     visible: "Search Gamma Three"
@@ -24,6 +39,13 @@ name: pagination-search
 - tapOn: "Search Sessions"
 - inputText: "Gamma"
 - hideKeyboard
+- repeat:
+    times: 2
+    commands:
+      - swipe:
+          start: "93%, 57%"
+          end: "93%, 69%"
+          duration: 500
 - extendedWaitUntil:
     visible: "Search Gamma Three"
     timeout: 30000

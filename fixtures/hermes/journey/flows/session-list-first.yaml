@@ -16,7 +16,15 @@ name: session-list-first
     timeout: 30000
 - assertVisible: "Sessions"
 - assertVisible: "Alpha Session"
-- assertVisible: "Beta Session"
 - assertVisible: "Pinned"
+- swipe:
+    from:
+      text: "Alpha Session"
+    direction: UP
+- swipe:
+    start: "50%, 52%"
+    end: "50%, 56%"
+    duration: 600
+- assertVisible: "Beta Session"
 - assertVisible: "Search Sessions"
 - assertVisible: "Create Session"

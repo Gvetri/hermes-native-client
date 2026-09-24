@@ -14,7 +14,9 @@ name: connection
 - extendedWaitUntil:
     visible: "Authentication failed. Check the Gateway credential."
     timeout: 30000
-- tapOn: "Bearer credential"
+- tapOn:
+    text: "•+"
+    point: "90%,50%"
 - eraseText
 - inputText: "synthetic-token"
 - hideKeyboard

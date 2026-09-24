@@ -18,7 +18,7 @@ name: streaming
 - extendedWaitUntil:
     visible: "Back to Sessions"
     timeout: 30000
-- tapOn: "Write a message"
+- tapOn: "Message"
 - inputText: "Stream this"
 - hideKeyboard
 - tapOn: "Send"

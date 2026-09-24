@@ -18,12 +18,23 @@ name: terminal-failure
 - extendedWaitUntil:
     visible: "Back to Sessions"
     timeout: 30000
-- tapOn: "Write a message"
+- tapOn: "Message"
 - inputText: "Fail this"
 - hideKeyboard
 - tapOn: "Send"
 - extendedWaitUntil:
+    visible: "Run state: Failed"
+    timeout: 30000
+- assertVisible: "Run ID: run-failure"
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- swipe:
+    start: "50%, 71%"
+    end: "50%, 62%"
+    duration: 400
+- extendedWaitUntil:
     visible: "This Run failed. Your conversation is preserved."
     timeout: 30000
-- assertVisible: "Failed"
-- assertVisible: "Stable failure result"
+- assertVisible: "Try again"
