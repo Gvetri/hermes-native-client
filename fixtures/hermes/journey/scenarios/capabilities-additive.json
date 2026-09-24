@@ -25,5 +25,39 @@
       "preview": "Synthetic preview",
       "pinned": false
     }
+  ],
+  "runs": [
+    {
+      "run_id": "additive-run",
+      "session_id": "session-alpha",
+      "create_status": "starting",
+      "observation": [
+        {
+          "type": "run.started",
+          "status": "starting",
+          "id": "a1"
+        },
+        {
+          "type": "run.running",
+          "status": "running",
+          "id": "a2"
+        },
+        {
+          "type": "run.succeeded",
+          "status": "succeeded",
+          "id": "a3"
+        }
+      ],
+      "final_status": "succeeded",
+      "terminal_history": [
+        {
+          "id": "message-additive",
+          "role": "assistant",
+          "content": "Additive result",
+          "run_id": "additive-run",
+          "run_status": "succeeded"
+        }
+      ]
+    }
   ]
 }
