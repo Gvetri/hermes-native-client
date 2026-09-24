@@ -381,6 +381,13 @@ class JourneyGatewayProcess private constructor(
                 val interruptAfter = script.interruptAfterEvents
                 val events = script.observation
                 events.forEachIndexed { index, event ->
+                    if (!script.holdOpen && script.finalStatus != null && index == events.lastIndex) {
+                        // Mark the Run terminal before the terminal event
+                        // reaches the client, so a status or history request
+                        // issued right after the event observes the terminal
+                        // state.
+                        behavior.observationDelivered[runId] = true
+                    }
                     exchange.responseBody.write(renderEvent(script, event))
                     exchange.responseBody.flush()
                     if (interruptAfter != null && index + 1 >= interruptAfter) {
@@ -402,8 +409,6 @@ class JourneyGatewayProcess private constructor(
                     } catch (_: Exception) {
                         // The client closed the observation.
                     }
-                } else if (script.finalStatus != null) {
-                    behavior.observationDelivered[runId] = true
                 }
             } catch (_: Exception) {
                 // The client closed the observation; a closed stream never

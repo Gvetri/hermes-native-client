@@ -72,6 +72,8 @@ sha256sum app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :fixtures:hermes:runner:runJourneyGateway -Pscenario=terminal-success
 
 # 4. In a second terminal, install the test CA into an API 24 AOSP emulator.
+# The emulator must be started with the -writable-system option or the
+# remount below will not make /system writable.
 adb root && adb remount
 CA_HASH=$(openssl x509 -inform PEM -subject_hash_old \
   -in fixtures/hermes/journey-tls/journey-ca.pem | head -1)

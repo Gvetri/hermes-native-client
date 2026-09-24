@@ -94,21 +94,28 @@ class GatewayTransportTest {
                         headers = emptyMap(),
                     ),
                 )
-            val firstLineRead = CountDownLatch(1)
+            val firstLinesRead = CountDownLatch(1)
             val reader =
                 Thread {
                     runCatching {
                         val lines = stream.lines.iterator()
-                        if (lines.hasNext()) {
-                            lines.next()
-                            firstLineRead.countDown()
-                            lines.next()
-                        }
+                        lines.next()
+                        lines.next()
+                        firstLinesRead.countDown()
+                        lines.next()
                     }
                 }
             reader.isDaemon = true
             reader.start()
-            assertTrue("reader must consume the first event line", firstLineRead.await(5, TimeUnit.SECONDS))
+            assertTrue(
+                "reader must consume the buffered event lines",
+                firstLinesRead.await(5, TimeUnit.SECONDS),
+            )
+            Thread.sleep(200)
+            assertTrue(
+                "the reader must be blocked waiting for more bytes before close()",
+                reader.isAlive,
+            )
 
             val closeStartedAt = System.nanoTime()
             stream.close()

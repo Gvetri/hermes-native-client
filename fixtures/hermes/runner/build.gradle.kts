@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.testing.Test
 
 plugins {
@@ -43,6 +44,18 @@ tasks.register<Test>("fixtureContractTest") {
 
 tasks.register<Test>("journeyScenarioTest") {
     configureFocusedFixtureTest("org.hermesnative.client.fixture.journey.JourneyScenarioTest")
+    // The scenario test reads the checked-in journey fixtures from disk, so
+    // they are declared as inputs; otherwise a scenario-only edit could be
+    // reported UP-TO-DATE and the changed scenario would never be parsed.
+    inputs.dir(rootProject.file("fixtures/hermes/journey"))
+        .withPropertyName("journeyFixtures")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(rootProject.file("fixtures/hermes/journey-tls"))
+        .withPropertyName("journeyTls")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("fixtures/hermes/pinned-fixture.properties"))
+        .withPropertyName("pinnedDescriptor")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 tasks.register<JavaExec>("runJourneyGateway") {
@@ -64,10 +77,13 @@ tasks.register<JavaExec>("runJourneyVerifier") {
     description = "Asserts repository-owned gateway invariants for one completed journey."
     val telemetryUrl = providers.gradleProperty("telemetryUrl")
     val scenarioName = providers.gradleProperty("scenario")
+    val keystorePath =
+        providers.gradleProperty("journeyKeystore")
+            .orElse(rootProject.file("fixtures/hermes/journey-tls/journey-gateway.p12").absolutePath)
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("org.hermesnative.client.fixture.journey.JourneyVerifierKt")
     doFirst {
-        args(telemetryUrl.get(), scenarioName.get())
+        args(telemetryUrl.get(), scenarioName.get(), keystorePath.get())
     }
 }
 
