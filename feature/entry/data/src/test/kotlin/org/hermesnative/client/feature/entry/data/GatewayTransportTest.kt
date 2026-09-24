@@ -2,8 +2,12 @@ package org.hermesnative.client.feature.entry.data
 
 import com.sun.net.httpserver.HttpServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.InetSocketAddress
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class GatewayTransportTest {
@@ -62,6 +66,62 @@ class GatewayTransportTest {
             assertEquals(204, response.statusCode)
             assertEquals(0, requestBodyBytes.get())
         } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun closing_an_open_event_stream_cancels_without_draining_the_body() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val releaseBody = CountDownLatch(1)
+        server.createContext("/events") { exchange ->
+            exchange.responseHeaders.add("Content-Type", "text/event-stream")
+            exchange.sendResponseHeaders(200, 0)
+            val body = exchange.responseBody
+            body.write("data: first\n\n".toByteArray())
+            body.flush()
+            releaseBody.await(10, TimeUnit.SECONDS)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val transport = OkHttpGatewayTransport()
+            val stream =
+                transport.openEventStream(
+                    GatewayHttpRequest(
+                        method = "GET",
+                        url = "http://127.0.0.1:${server.address.port}/events",
+                        headers = emptyMap(),
+                    ),
+                )
+            val firstLineRead = CountDownLatch(1)
+            val reader =
+                Thread {
+                    runCatching {
+                        val lines = stream.lines.iterator()
+                        if (lines.hasNext()) {
+                            lines.next()
+                            firstLineRead.countDown()
+                            lines.next()
+                        }
+                    }
+                }
+            reader.isDaemon = true
+            reader.start()
+            assertTrue("reader must consume the first event line", firstLineRead.await(5, TimeUnit.SECONDS))
+
+            val closeStartedAt = System.nanoTime()
+            stream.close()
+            val closeMillis = (System.nanoTime() - closeStartedAt) / 1_000_000
+            reader.join(5_000)
+
+            assertTrue(
+                "close() must return without draining the open body (took ${closeMillis}ms)",
+                closeMillis < 2_000,
+            )
+            assertFalse("the blocked reader must unblock after close()", reader.isAlive)
+        } finally {
+            releaseBody.countDown()
             server.stop(0)
         }
     }
