@@ -1,6 +1,11 @@
 package org.hermesnative.client.fixture.journey
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.hermesnative.client.fixture.PinnedFixtureDescriptor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,6 +35,32 @@ class JourneyScenarioTest {
         scenarioFiles.forEach { file ->
             val scenario = JourneyScenarioParser.parse(file, pinnedDescriptor.provenance.value)
             assertEquals(file.nameWithoutExtension, scenario.name)
+        }
+    }
+
+    @Test
+    fun session_list_response_includes_all_fixture_sessions_and_nullable_updated_at() {
+        val process = startGateway("session-list-first", tls = false)
+        try {
+            val page = Json.parseToJsonElement(getBody(process.endpoint, "/v1/sessions")).jsonObject
+            val sessions = page.getValue("sessions").jsonArray
+            assertEquals(2, sessions.size)
+            sessions.forEach { session -> assertEquals(JsonNull, session.jsonObject["updated_at"]) }
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
+    fun empty_session_list_returns_a_successful_empty_page() {
+        val process = startGateway("empty-sessions", tls = false)
+        try {
+            assertEquals(
+                """status=200 body={"sessions":[],"next_cursor":null}""",
+                get(process.endpoint, "/v1/sessions"),
+            )
+        } finally {
+            process.stop()
         }
     }
 
@@ -108,6 +139,42 @@ class JourneyScenarioTest {
             val telemetry = Json.parseToJsonElement(getBody(endpoint, "/__fixture/telemetry")).toString()
             assertTrue(telemetry.contains("run-success"))
             assertTrue(telemetry.contains("run_status_requests"))
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
+    fun terminal_history_is_served_after_the_stream_completes() {
+        val process = startGateway("terminal-success", tls = false)
+        try {
+            val endpoint = process.endpoint
+            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            val events = streamEvents(endpoint, "run-success")
+            assertEquals(3, events.size)
+            val history = getBody(endpoint, "/v1/sessions/session-alpha/history")
+            assertTrue(history.contains("message-success"))
+            assertTrue(history.contains("Stable result"))
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
+    fun resubmitting_an_unresolved_run_resumes_the_most_recent_run() {
+        val process = startGateway("terminal-success", tls = false)
+        try {
+            val endpoint = process.endpoint
+            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            streamEvents(endpoint, "run-success")
+            val resubmit = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            assertEquals(202, resubmit.status)
+            assertTrue(resubmit.body.contains("run-success"))
+            val telemetry = Json.parseToJsonElement(getBody(endpoint, "/__fixture/telemetry")).jsonObject
+            assertEquals(
+                1,
+                telemetry.getValue("run_creates").jsonObject.getValue("session-alpha").jsonPrimitive.int,
+            )
         } finally {
             process.stop()
         }

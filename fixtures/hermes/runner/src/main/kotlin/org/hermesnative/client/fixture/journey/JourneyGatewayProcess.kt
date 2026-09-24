@@ -13,6 +13,7 @@ import java.net.URI
 import java.security.KeyStore
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -198,7 +199,7 @@ class JourneyGatewayProcess private constructor(
                         return
                     }
                     val offset = parsedOffset ?: 0
-                    val pageSize = behavior.scenario.sessionPageSize ?: matchingSessions.size
+                    val pageSize = behavior.scenario.sessionPageSize ?: matchingSessions.size.coerceAtLeast(1)
                     if (pageSize <= 0 || offset !in 0..matchingSessions.size) {
                         respond(exchange, 400, """{"error":"invalid-pagination"}""")
                         return
@@ -437,7 +438,7 @@ class JourneyGatewayProcess private constructor(
                 append(
                     """{"id":${session.id.jsonValue()},"title":${session.title.jsonValue()},""",
                 )
-                append(""""preview":${session.preview.jsonValue()},"pinned":${session.pinned}""")
+                append(""""preview":${session.preview.jsonValue()},"pinned":${session.pinned},"updated_at":null""")
                 append('}')
             }
 
@@ -502,6 +503,7 @@ internal class JourneyGatewayBehavior(
     val runStatusRequests = AtomicInteger(0)
     val interruptedRunIds = CopyOnWriteArrayList<String>()
     private val createdRunCounters = ConcurrentHashMap<String, AtomicInteger>()
+    private val servedRunIds = ConcurrentHashMap<String, MutableSet<String>>()
     private val createdSessionCounter = AtomicInteger(0)
     internal val observationDelivered = ConcurrentHashMap<String, Boolean>()
 
@@ -523,7 +525,12 @@ internal class JourneyGatewayBehavior(
 
     fun nextRunScript(sessionId: String): JourneyRunScript? {
         val index = createdRunCounters.getOrPut(sessionId, ::AtomicInteger).getAndIncrement()
-        return scenario.runs.filter { it.sessionId == sessionId }.getOrNull(index)
+        val scripts = scenario.runs.filter { it.sessionId == sessionId }
+        val script = scripts.getOrNull(index) ?: scripts.lastOrNull()
+        if (script != null) {
+            servedRunIds.getOrPut(sessionId) { CopyOnWriteArraySet() }.add(script.runId)
+        }
+        return script
     }
 
     fun runStatus(runId: String): String? {
@@ -559,7 +566,7 @@ internal class JourneyGatewayBehavior(
             append(""","run_creates":{""")
             append(
                 scenario.sessions.joinToString(",") { session ->
-                    """${session.id.jsonValue()}:${createdRunCounters[session.id]?.get() ?: 0}"""
+                    """${session.id.jsonValue()}:${servedRunIds[session.id]?.size ?: 0}"""
                 },
             )
             append('}')

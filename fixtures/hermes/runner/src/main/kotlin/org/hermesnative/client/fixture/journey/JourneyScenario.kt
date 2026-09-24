@@ -179,15 +179,16 @@ object JourneyScenarioParser {
                 title = optionalString(session, "title"),
                 preview = optionalString(session, "preview"),
                 pinned = optionalBoolean(session, "pinned", default = false),
-                history = parseMessages(session, "session[$index].history"),
+                history = parseMessages(session, "history", "session[$index].history"),
             )
         }
 
     private fun parseMessages(
         container: JsonObject,
+        key: String,
         context: String,
     ): List<JourneyMessage> =
-        container["history"]?.jsonArray.orEmpty().mapIndexed { index, element ->
+        container[key]?.jsonArray.orEmpty().mapIndexed { index, element ->
             val message = element.jsonObject
             rejectUnknownKeys(message, allowedMessageKeys, "$context[$index]")
             JourneyMessage(
@@ -213,7 +214,7 @@ object JourneyScenarioParser {
                 interruptAfterEvents = optionalInt(run, "interrupt_after_events"),
                 holdOpen = optionalBoolean(run, "hold_open", default = false),
                 finalStatus = optionalString(run, "final_status"),
-                terminalHistory = parseMessages(run, "run[$index].terminal_history"),
+                terminalHistory = parseMessages(run, "terminal_history", "run[$index].terminal_history"),
             )
         }
 
