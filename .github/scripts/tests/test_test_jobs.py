@@ -68,6 +68,28 @@ class TestJobs(unittest.TestCase):
         self.assertLess(install_server, maestro_call, "driver APKs must be installed before Maestro runs")
         self.assertIn("Failed to install the Maestro driver APKs", runner)
 
+    def test_journey_runner_checks_health_and_capabilities_before_each_journey(self):
+        runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
+        health = runner.index('curl -kfsS -H "X-Journey-Probe: readiness" "https://127.0.0.1:18443/health"')
+        capabilities = runner.index('"${capability_probe[@]}"')
+        maestro_call = runner.index('test --no-reinstall-driver "$flow_dir/$journey.yaml"')
+        self.assertLess(health, capabilities, "the health check must precede the capability check")
+        self.assertLess(capabilities, maestro_call, "the capability check must precede the journey flow")
+        self.assertIn("Journey Gateway capability check failed", runner)
+        self.assertIn('"require_bearer_credential"', runner)
+
+    def test_journey_runner_reuses_a_restored_maestro_archive_and_ci_caches_it(self):
+        runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
+        guard = runner.index('if [[ ! -f maestro.zip ]]')
+        download = runner.index('curl -fsSL -o maestro.zip')
+        unzip = runner.index("unzip -q -o maestro.zip -d maestro-cli")
+        self.assertLess(guard, download, "the archive download must be guarded by a cache-friendly presence check")
+        self.assertLess(download, unzip)
+        workflow = WORKFLOW.read_text()
+        job = workflow.split("  maestro_journeys:\n", 1)[1].split("\n  create_nightly_failure_issue:", 1)[0]
+        self.assertIn("uses: actions/cache@v4", job)
+        self.assertIn("key: maestro-cli-${{ env.MAESTRO_CLI_VERSION }}", job)
+
     def test_maestro_journey_timeout_preserves_failure_evidence(self):
         runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
         timeout_call = runner.index("timeout --signal=TERM --kill-after=15s 300s")
@@ -129,6 +151,10 @@ class TestJobs(unittest.TestCase):
             add_executable("curl", """
                 #!/usr/bin/env bash
                 printf '%s\\n' "$*" >> "$CURL_CALLS_FILE"
+                if [[ "$*" == *"/v1/capabilities"* ]]; then
+                    printf '{"capabilities":["session.list"]}\\n'
+                    exit 0
+                fi
                 if [[ "$*" == *"/__fixture/telemetry"* ]]; then
                     active_pid=""
                     while IFS= read -r candidate; do active_pid="$candidate"; done < "$GATEWAY_PID_FILE"

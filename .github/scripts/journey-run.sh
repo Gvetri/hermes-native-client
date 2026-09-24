@@ -28,6 +28,7 @@ stop_gateway() {
     if [[ -n "$active_journey" ]]; then
         local telemetry_log="$evidence_dir/${active_journey}-telemetry.json"
         if ! curl --cacert "$ca_file" --connect-timeout 2 --max-time 5 -fsS \
+            -H "X-Journey-Probe: evidence" \
             "https://127.0.0.1:18443/__fixture/telemetry" > "$telemetry_log"; then
             log "Failed to capture Journey Gateway telemetry for $active_journey."
         else
@@ -114,7 +115,11 @@ if ! timeout 180 adb install --no-streaming -r "$apk" >/dev/null; then
 fi
 
 log "Installing pinned Maestro CLI ${MAESTRO_CLI_VERSION}."
-curl -fsSL -o maestro.zip "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_CLI_VERSION}/maestro.zip"
+# Reuse a restored archive when the CI cache provided one, so a GitHub
+# outage cannot block the acceptance layer before any flow starts.
+if [[ ! -f maestro.zip ]]; then
+    curl -fsSL -o maestro.zip "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_CLI_VERSION}/maestro.zip"
+fi
 unzip -q -o maestro.zip -d maestro-cli
 maestro_cli="$workspace/maestro-cli/maestro/bin/maestro"
 "$maestro_cli" --version
@@ -173,8 +178,22 @@ for journey in "${journeys[@]}"; do
         log "Journey Gateway failed to start for $journey."
         exit 1
     fi
-    if ! curl -kfsS "https://127.0.0.1:18443/health" >/dev/null; then
+    if ! curl -kfsS -H "X-Journey-Probe: readiness" "https://127.0.0.1:18443/health" >/dev/null; then
         log "Journey Gateway health check failed for $journey."
+        exit 1
+    fi
+    # Capability readiness check before any flow starts. The probe is not
+    # recorded as application traffic. The served set is scenario-specific
+    # (the capabilities-missing-required scenario intentionally omits a
+    # required capability), so this checks the endpoint contract only.
+    capability_credential="$(grep -oE '"require_bearer_credential"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        "$scenario_dir/$journey.json" | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' || true)"
+    capability_probe=(curl -kfsS -H "X-Journey-Probe: readiness")
+    if [[ -n "$capability_credential" ]]; then
+        capability_probe+=(-H "Authorization: Bearer $capability_credential")
+    fi
+    if ! "${capability_probe[@]}" "https://127.0.0.1:18443/v1/capabilities" | grep -q '"capabilities":\['; then
+        log "Journey Gateway capability check failed for $journey."
         exit 1
     fi
 
