@@ -198,7 +198,13 @@ class JourneyGatewayProcess private constructor(
                         return
                     }
                     val offset = parsedOffset ?: 0
-                    val pageSize = behavior.scenario.sessionPageSize ?: matchingSessions.size.coerceAtLeast(1)
+                    val requestedLimit = query["limit"]?.toIntOrNull() ?: Int.MAX_VALUE
+                    if (requestedLimit <= 0) {
+                        respond(exchange, 400, """{"error":"invalid-limit"}""")
+                        return
+                    }
+                    val serverPageSize = behavior.scenario.sessionPageSize ?: matchingSessions.size.coerceAtLeast(1)
+                    val pageSize = minOf(requestedLimit, serverPageSize)
                     if (pageSize <= 0 || offset !in 0..matchingSessions.size) {
                         respond(exchange, 400, """{"error":"invalid-pagination"}""")
                         return
@@ -299,6 +305,10 @@ class JourneyGatewayProcess private constructor(
             sessionId: String,
             body: String?,
         ) {
+            if (parseRunInput(body) == null) {
+                respond(exchange, 400, """{"error":"invalid-run-input"}""")
+                return
+            }
             val script =
                 behavior.nextRunScript(sessionId)
                     ?: run {
@@ -470,6 +480,16 @@ class JourneyGatewayProcess private constructor(
             } else {
                 (title as? kotlinx.serialization.json.JsonPrimitive)?.content
             }
+        }
+
+        private fun parseRunInput(body: String?): String? {
+            val text = body?.takeIf(String::isNotBlank) ?: return null
+            val root =
+                runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
+                    as? kotlinx.serialization.json.JsonObject
+                    ?: return null
+            val input = root["input"] as? kotlinx.serialization.json.JsonPrimitive ?: return null
+            return input.content.takeIf(String::isNotBlank)
         }
 
         private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)

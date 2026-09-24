@@ -31,6 +31,19 @@ fun main(args: Array<String>) {
     val keystorePassword = args.getOrNull(3) ?: DEFAULT_KEYSTORE_PASSWORD
     val telemetry = fetchTelemetry(telemetryUrl, keystoreFile, keystorePassword)
     JourneyInvariants.verify(scenarioName, telemetry)
+    if (scenarioName == "active-run-isolation") {
+        // The remote Run must still be running after the switch away and back;
+        // the live status is read from the still-running fake Gateway.
+        val run =
+            fetchTelemetry(
+                telemetryUrl.resolve("/v1/runs/${JourneyInvariants.ACTIVE_RUN_ID}"),
+                keystoreFile,
+                keystorePassword,
+            )
+        check(run["status"]?.jsonPrimitive?.content == "running") {
+            "The active Run did not remain running after the Session switch."
+        }
+    }
     println("journey-verifier=pass")
 }
 
@@ -146,6 +159,11 @@ internal object JourneyInvariants {
             request.jsonObject["path"]?.jsonPrimitive?.content
         }
 
+    private fun recordedRequestMethods(telemetry: JsonObject): List<String> =
+        telemetry["requests"]?.jsonArray.orEmpty().mapNotNull { request ->
+            request.jsonObject["method"]?.jsonPrimitive?.content
+        }
+
     private fun verifyConnection(telemetry: JsonObject) {
         requireConnectionAttempted(telemetry)
     }
@@ -179,6 +197,9 @@ internal object JourneyInvariants {
         }
         check(recordedRequestPaths(telemetry).none { it.contains("cancel", ignoreCase = true) }) {
             "The client attempted to cancel the active Run while switching Sessions."
+        }
+        check(recordedRequestMethods(telemetry).none { it.equals("DELETE", ignoreCase = true) }) {
+            "The client issued a DELETE request while switching Sessions."
         }
     }
 

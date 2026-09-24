@@ -125,6 +125,7 @@ object JourneyScenarioParser {
             "terminal_history",
         )
     private val allowedEventKeys = setOf("type", "status", "delta", "id")
+    private val UNICODE_ESCAPE = Regex("\\\\u([0-9a-fA-F]{4})")
 
     fun parse(
         scenarioFile: File,
@@ -137,8 +138,18 @@ object JourneyScenarioParser {
         // kotlinx.serialization collapses duplicate JSON keys before the object
         // model is built, so "exactly one provenance field" must be checked on
         // the raw document; otherwise a duplicate hermes_revision key would be
-        // silently accepted.
-        val provenanceFieldCount = Regex("\"hermes_revision\"\\s*:").findAll(text).count()
+        // silently accepted. JSON permits \uXXXX escapes inside object keys, so
+        // the raw check decodes those escapes before counting.
+        val normalizedText =
+            UNICODE_ESCAPE.replace(text) { match ->
+                val codePoint = match.groupValues[1].toInt(16)
+                if (codePoint in 0..0xD7FF || codePoint in 0xE000..0xFFFF) {
+                    codePoint.toChar().toString()
+                } else {
+                    match.value
+                }
+            }
+        val provenanceFieldCount = Regex("\"hermes_revision\"\\s*:").findAll(normalizedText).count()
         if (provenanceFieldCount != 1) {
             throw JourneyScenarioFormatException(
                 "Journey scenario must declare exactly one hermes_revision provenance field.",

@@ -200,6 +200,51 @@ class JourneyScenarioTest {
     }
 
     @Test
+    fun duplicate_provenance_keys_with_unicode_escapes_are_rejected() {
+        val file = File.createTempFile("journey-scenario", ".json")
+        try {
+            val pinned = pinnedDescriptor.provenance.value
+            val escapedRevision = "hermes_revision".replaceFirst("h", "\\u0068")
+            file.writeText(
+                """{"name":"duplicate-provenance","hermes_revision":"$pinned","$escapedRevision":"$pinned"}""",
+            )
+            val error =
+                assertThrows(JourneyScenarioFormatException::class.java) {
+                    JourneyScenarioParser.parse(file, pinned)
+                }
+            assertTrue(error.message.orEmpty().contains("exactly one hermes_revision"))
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun session_list_honors_the_requested_limit() {
+        val process = startGateway("session-list-first", tls = false)
+        try {
+            val endpoint = process.endpoint
+            val page = Json.parseToJsonElement(getBody(endpoint, "/v1/sessions?limit=1")).jsonObject
+            assertEquals(1, page.getValue("sessions").jsonArray.size)
+            assertEquals("offset:1", page.getValue("next_cursor").jsonPrimitive.content)
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
+    fun run_creation_requires_an_input() {
+        val process = startGateway("terminal-success", tls = false)
+        try {
+            val endpoint = process.endpoint
+            val response = post(endpoint, "/v1/sessions/session-alpha/runs", """{"nope":true}""")
+            assertEquals(400, response.status)
+            assertTrue(response.body.contains("invalid-run-input"))
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
     fun interrupted_stream_aborts_without_terminal_and_status_reports_final_state() {
         val process = startGateway("interrupted-sse-refetch", tls = false)
         try {
