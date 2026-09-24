@@ -247,6 +247,60 @@ class JourneyScenarioTest {
     }
 
     @Test
+    fun empty_observation_with_a_final_status_reports_the_terminal_state() {
+        val file = File.createTempFile("journey-scenario", ".json")
+        try {
+            val revision = pinnedDescriptor.provenance.value
+            file.writeText(
+                """
+                {
+                  "name": "empty-observation",
+                  "hermes_revision": "$revision",
+                  "port": 18443,
+                  "tls": false,
+                  "capabilities": ["client-manifest", "session.list", "session.create", "session.open", "session.history", "session.rename", "session.delete", "session.pin", "session.unpin", "run.create", "run.status", "run.sse"],
+                  "sessions": [
+                    {"id": "session-alpha", "title": "Alpha Session", "preview": "Synthetic preview", "pinned": false}
+                  ],
+                  "runs": [
+                    {
+                      "run_id": "empty-run",
+                      "session_id": "session-alpha",
+                      "create_status": "starting",
+                      "observation": [],
+                      "final_status": "succeeded",
+                      "terminal_history": [
+                        {"id": "message-empty", "role": "assistant", "content": "Empty result", "run_id": "empty-run", "run_status": "succeeded"}
+                      ]
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+            val scenario = JourneyScenarioParser.parse(file, revision)
+            val process = JourneyGatewayProcess.start(scenario.copy(port = freePort(), tls = false))
+            try {
+                val endpoint = process.endpoint
+                val create = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+                assertEquals(202, create.status)
+                assertEquals(emptyList<SseEvent>(), streamEvents(endpoint, "empty-run"))
+                val status = Json.parseToJsonElement(getBody(endpoint, "/v1/runs/empty-run")).jsonObject
+                assertEquals("succeeded", status.getValue("status").jsonPrimitive.content)
+                val history = Json.parseToJsonElement(getBody(endpoint, "/v1/sessions/session-alpha/history")).jsonObject
+                val contents =
+                    history.getValue("messages").jsonArray.map { message ->
+                        message.jsonObject.getValue("content").jsonPrimitive.content
+                    }
+                assertTrue(contents.contains("Empty result"))
+            } finally {
+                process.stop()
+            }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun interrupted_stream_aborts_without_terminal_and_status_reports_final_state() {
         val process = startGateway("interrupted-sse-refetch", tls = false)
         try {

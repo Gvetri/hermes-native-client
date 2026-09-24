@@ -409,6 +409,10 @@ class JourneyGatewayProcess private constructor(
                     } catch (_: Exception) {
                         // The client closed the observation.
                     }
+                } else if (script.finalStatus != null && events.isEmpty()) {
+                    // An empty observation still completes; the Run is terminal
+                    // as soon as the client has consumed the (empty) stream.
+                    behavior.observationDelivered[runId] = true
                 }
             } catch (_: Exception) {
                 // The client closed the observation; a closed stream never

@@ -5,10 +5,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 class GatewayTransportTest {
     @Test
@@ -95,15 +97,19 @@ class GatewayTransportTest {
                     ),
                 )
             val firstLinesRead = CountDownLatch(1)
+            val readerResult = AtomicReference<Result<Unit>>()
             val reader =
                 Thread {
-                    runCatching {
-                        val lines = stream.lines.iterator()
-                        lines.next()
-                        lines.next()
-                        firstLinesRead.countDown()
-                        lines.next()
-                    }
+                    readerResult.set(
+                        runCatching {
+                            val lines = stream.lines.iterator()
+                            lines.next()
+                            lines.next()
+                            firstLinesRead.countDown()
+                            lines.next()
+                            Unit
+                        },
+                    )
                 }
             reader.isDaemon = true
             reader.start()
@@ -127,6 +133,11 @@ class GatewayTransportTest {
                 closeMillis < 2_000,
             )
             assertFalse("the blocked reader must unblock after close()", reader.isAlive)
+            val failure = readerResult.get().exceptionOrNull()
+            assertTrue(
+                "the blocked read must end with the transport cancellation error, not EOF or a stray failure: $failure",
+                failure is IOException,
+            )
         } finally {
             releaseBody.countDown()
             server.stop(0)
