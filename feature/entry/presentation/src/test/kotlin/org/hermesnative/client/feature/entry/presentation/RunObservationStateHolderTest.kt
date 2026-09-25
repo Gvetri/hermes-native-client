@@ -538,6 +538,61 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun a_failed_switch_keeps_the_still_visible_sessions_observer() {
+        val first = session("session-1")
+        val second = session("session-2")
+        val firstObservation = BlockingObservation()
+        val gateway =
+            ScriptedGateway(first, additionalSessions = listOf(second)).apply {
+                observation = firstObservation
+                enqueueRun(Run(RunId("run-failed-switch"), first.id, "running"))
+                failOpenFor = second.id
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+            holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
+            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+            awaitState(holder) {
+                it.sessionList?.sessions == listOf(first, second).map { session -> session.toSessionItemUiState() }
+            }
+
+            holder.onEvent(EntryUiEvent.SessionClicked(first.id))
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(second.id))
+            awaitState(holder) { it.sessionList?.openingSessionId == null && it.sessionList?.isStale == true }
+
+            // The pane never left the first Session, so its observation has to keep running; the
+            // failed Open only marks the list stale, and a later retry must find it still alive.
+            assertFalse(
+                "the still-visible Session keeps its observer when the switch fails",
+                firstObservation.closed.await(400, TimeUnit.MILLISECONDS),
+            )
+
+            gateway.failOpenFor = null
+            holder.onEvent(EntryUiEvent.RefreshSessionListClicked)
+            awaitState(holder) { it.sessionList?.isStale == false && it.sessionList?.isUnavailable == false }
+            holder.onEvent(EntryUiEvent.SessionClicked(second.id))
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
+
+            assertTrue(
+                "the replaced Session's observer closes once the switch finally succeeds",
+                firstObservation.closed.await(1_000, TimeUnit.MILLISECONDS),
+            )
+        } finally {
+            firstObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun terminal_reconciliation_of_another_run_keeps_the_current_run_observer_open() {
         val session = session("session-multiple-runs")
         val observedRun = Run(RunId("run-observed"), session.id, "running")
@@ -863,6 +918,7 @@ class RunObservationStateHolderTest {
         var blockOpenFor: SessionId? = null
         val openStarted = CountDownLatch(1)
         val openRelease = CountDownLatch(1)
+        var failOpenFor: SessionId? = null
 
         fun enqueueRun(run: Run) {
             runResults += run
@@ -881,6 +937,7 @@ class RunObservationStateHolderTest {
         override fun createSession(title: String?): Session = error("not used")
 
         override fun openSession(sessionId: SessionId): Session {
+            if (failOpenFor == sessionId) error("gateway unavailable")
             if (blockOpenFor == sessionId) {
                 openStarted.countDown()
                 openRelease.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)

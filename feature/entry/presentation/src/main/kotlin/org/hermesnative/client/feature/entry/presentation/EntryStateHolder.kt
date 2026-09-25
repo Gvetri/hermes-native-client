@@ -3261,8 +3261,7 @@ class EntryStateHolder(
 
     private fun openSession(sessionId: SessionId) {
         val gateway = sessionGateway ?: return
-        var observationToClose: RunEventObservation? = null
-        var observationJobToCancel: Job? = null
+        var replacedSessionId: SessionId? = null
         val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
@@ -3285,15 +3284,10 @@ class EntryStateHolder(
                 ) {
                     return
                 }
-                // The conversation pane now shows a different Session, so the Session that
-                // leaves it is released exactly like any other way of leaving a conversation.
-                sessionList.openedSession?.session?.id?.let { openedSessionId ->
-                    if (openedSessionId != sessionId) {
-                        val released = releaseRunObservation(openedSessionId)
-                        observationJobToCancel = released.job
-                        observationToClose = released.observation
-                    }
-                }
+                // A Session that leaves the conversation pane is released exactly like any other
+                // way of leaving a conversation. The release waits for the Open to succeed, so a
+                // failed switch leaves the still-visible Session with its observation running.
+                replacedSessionId = sessionList.openedSession?.session?.id?.takeIf { it != sessionId }
 
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
@@ -3353,6 +3347,14 @@ class EntryStateHolder(
                                 )
                             }
                         if (applied) {
+                            // The replacement succeeded, so the Session that just left the pane is
+                            // released here and not earlier: a failed Open leaves it on screen, and
+                            // its observation then has to keep running.
+                            replacedSessionId?.let { releasedSessionId ->
+                                val released = synchronized(sessionRequestLock) { releaseRunObservation(releasedSessionId) }
+                                released.job?.cancel()
+                                released.observation?.close()
+                            }
                             val pendingTimeoutRecovery =
                                 synchronized(sessionRequestLock) {
                                     pendingTimedOutSends[sessionId]
@@ -3397,8 +3399,6 @@ class EntryStateHolder(
                 }
             }
         job.start()
-        observationJobToCancel?.cancel()
-        observationToClose?.close()
     }
 
     private fun showSessionOpenFailure(
