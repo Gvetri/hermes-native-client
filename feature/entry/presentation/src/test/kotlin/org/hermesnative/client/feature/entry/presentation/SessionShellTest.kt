@@ -111,6 +111,9 @@ class SessionShellTest {
         composeTestRule
             .onNode(hasText("Second Session") and hasClickAction())
             .assertIsNotSelected()
+        // The open Session is also visible as such: exactly one row carries the marker.
+        composeTestRule.onAllNodesWithText("Open").assertCountEquals(1)
+        composeTestRule.onNodeWithText("Open").assertIsDisplayed()
     }
 
     @Test

@@ -552,11 +552,22 @@ private fun SessionRow(
                         text = session.title,
                         style = MaterialTheme.typography.titleMedium,
                     )
-                    if (session.pinned) {
-                        Text(
-                            text = "Pinned",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (selected) {
+                            Text(
+                                text = "Open",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                        if (session.pinned) {
+                            Text(
+                                text = "Pinned",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
                     }
                 }
                 session.preview?.let { preview ->

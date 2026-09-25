@@ -49,7 +49,8 @@ images with the JVM/Robolectric Compose test gate.
 
 `feature/entry/presentation/src/test/roborazzi-baselines.txt` lists the PNGs
 that belong to the matrix. Each entry maps to one test method in
-`SelectedVisualRegressionTest`.
+`SelectedVisualRegressionTest` or, for the shell window contracts, in
+`SelectedShellVisualRegressionTest`.
 
 | State | Compose surface | Reason for inclusion |
 | --- | --- | --- |

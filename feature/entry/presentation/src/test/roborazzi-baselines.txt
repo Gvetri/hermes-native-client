@@ -1,4 +1,4 @@
-# Relative paths for the approved SelectedVisualRegressionTest states.
+# Relative paths for the approved visual states.
 org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.connection_form.png
 org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.connection_error.png
 org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.empty_session_list.png
