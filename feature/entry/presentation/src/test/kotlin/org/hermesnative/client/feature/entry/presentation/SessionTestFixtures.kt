@@ -29,6 +29,7 @@ internal fun session(
 internal fun conversationEntryState(
     sessionTitle: String = "First Session",
     sessionPreview: String? = null,
+    composerText: String = "",
 ): EntryUiState =
     entryState(
         SessionListUiState(
@@ -37,6 +38,7 @@ internal fun conversationEntryState(
                 OpenSessionUiState(
                     session = session("first", sessionTitle, preview = sessionPreview),
                     messages = listOf(message("message-1", "user", "Conversation message")),
+                    composerText = composerText,
                 ),
         ),
     )

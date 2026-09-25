@@ -869,6 +869,7 @@ internal fun SessionDetailContent(
     // Without a transcript there is no weighted list to absorb the free space, so the pane
     // scrolls as one surface and the composer and Send stay reachable in short windows.
     val paneScrollState = rememberScrollState()
+    val tailScrollState = rememberScrollState()
     Column(
         modifier =
             if (displayedMessages.isEmpty()) {
@@ -950,62 +951,82 @@ internal fun SessionDetailContent(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null
-        val sendEnabled =
-            composerEnabled &&
-                !state.isReconciliationInProgress &&
-                state.latestRunState != RunPresentationState.UNCERTAIN &&
-                state.sendErrorCategory != MessageSendErrorCategory.UNCERTAIN &&
-                !state.hasUnresolvedSubmission &&
-                canSubmit &&
-                state.composerText.isNotBlank()
-        OutlinedTextField(
-            value = state.composerText,
-            onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },
-            label = { Text("Message") },
-            placeholder = { Text("Write a message") },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = composerEnabled,
-            singleLine = false,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions =
-                KeyboardActions(
-                    onSend = {
-                        if (sendEnabled) onEvent(EntryUiEvent.SendMessageClicked)
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            // The composer tail keeps a floor of 120 dp for the transcript. Below that it
+            // scrolls on its own, so a long draft at a large font scale cannot push Send out
+            // of a short window.
+            val tailMaxHeight = (maxHeight - 120.dp).coerceAtLeast(0.dp)
+            Column(
+                modifier =
+                    if (displayedMessages.isEmpty()) {
+                        Modifier
+                    } else {
+                        Modifier.fillMaxWidth()
+                            .heightIn(max = tailMaxHeight)
+                            .verticalScroll(tailScrollState)
                     },
-                ),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { onEvent(EntryUiEvent.SendMessageClicked) },
-            enabled = sendEnabled,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(
-                text =
-                    when {
-                        state.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN ||
-                            state.hasUnresolvedSubmission -> "Refresh history to resolve"
-                        state.sendErrorCategory != null -> "Try again"
-                        else -> "Send"
-                    },
-            )
-        }
-        if (state.isSending) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Sending message…",
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        state.sendErrorCategory?.let { category ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = category.safeMessage,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
+            ) {
+                Spacer(modifier = Modifier.height(12.dp))
+                val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null
+                val sendEnabled =
+                    composerEnabled &&
+                        !state.isReconciliationInProgress &&
+                        state.latestRunState != RunPresentationState.UNCERTAIN &&
+                        state.sendErrorCategory != MessageSendErrorCategory.UNCERTAIN &&
+                        !state.hasUnresolvedSubmission &&
+                        canSubmit &&
+                        state.composerText.isNotBlank()
+                OutlinedTextField(
+                    value = state.composerText,
+                    onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },
+                    label = { Text("Message") },
+                    placeholder = { Text("Write a message") },
+                    // A long draft scrolls inside the field instead of growing it without bound,
+                    // which would otherwise push Send out of a short window.
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = composerEnabled,
+                    singleLine = false,
+                    maxLines = 5,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions =
+                        KeyboardActions(
+                            onSend = {
+                                if (sendEnabled) onEvent(EntryUiEvent.SendMessageClicked)
+                            },
+                        ),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { onEvent(EntryUiEvent.SendMessageClicked) },
+                    enabled = sendEnabled,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text(
+                        text =
+                            when {
+                                state.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN ||
+                                    state.hasUnresolvedSubmission -> "Refresh history to resolve"
+                                state.sendErrorCategory != null -> "Try again"
+                                else -> "Send"
+                            },
+                    )
+                }
+                if (state.isSending) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Sending message…",
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                state.sendErrorCategory?.let { category ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = category.safeMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+                    )
+                }
+            }
         }
     }
 }

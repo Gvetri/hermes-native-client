@@ -242,7 +242,25 @@ class SessionShellTest {
         }
 
         composeTestRule.onNodeWithText("Message").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Send").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w891dp-h360dp")
+    fun very_short_two_pane_conversation_with_a_multiline_draft_keeps_send_reachable() {
+        val draft = (1..10).joinToString("\n") { line -> "Draft line $line" }
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(
+                        state = conversationEntryState(composerText = draft),
+                        onEvent = {},
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("Send").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -270,7 +288,7 @@ class SessionShellTest {
         }
 
         composeTestRule.onNodeWithText("Message").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Send").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -286,7 +304,7 @@ class SessionShellTest {
         }
 
         composeTestRule.onNodeWithText("Message").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Send").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").performScrollTo().assertIsDisplayed()
     }
 
     @Test
