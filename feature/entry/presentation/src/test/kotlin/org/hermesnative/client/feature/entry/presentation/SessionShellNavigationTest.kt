@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
 import org.junit.Assert.assertEquals
@@ -132,6 +133,36 @@ class SessionShellNavigationTest {
         val rowHeightAfter =
             composeTestRule.onNodeWithText("First Session").fetchSemanticsNode().boundsInWindow.height
         assertEquals(rowHeightBefore, rowHeightAfter, 0.5f)
+    }
+
+    @Test
+    @Config(qualifiers = "w891dp-h411dp")
+    fun delivered_ime_insets_keep_the_create_confirmation_above_the_keyboard() {
+        setContent(
+            entryState(SessionListUiState(createSession = SessionCreationUiState())),
+            {},
+        )
+        val imeInset = 240
+
+        composeTestRule.runOnUiThread {
+            val insets =
+                WindowInsetsCompat
+                    .Builder()
+                    .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imeInset))
+                    .build()
+            composeTestRule.activity.window.decorView.dispatchApplyWindowInsets(insets.toWindowInsets())
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Confirm Create Session").performScrollTo().assertIsDisplayed()
+        val confirmBottom =
+            composeTestRule.onNodeWithText("Confirm Create Session").fetchSemanticsNode().boundsInWindow.bottom
+        val windowHeight = composeTestRule.activity.window.decorView.height.toFloat()
+        assertTrue(
+            "the confirmation must scroll into the space above the keyboard " +
+                "(bottom=$confirmBottom, window=$windowHeight, ime=$imeInset)",
+            confirmBottom <= windowHeight - imeInset + 1f,
+        )
     }
 
     private fun setContent(

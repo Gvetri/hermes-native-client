@@ -500,7 +500,11 @@ internal fun CreateSessionContent(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .imePadding()
+                .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.Top,
     ) {
         OutlinedButton(
