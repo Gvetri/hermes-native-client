@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
@@ -56,29 +57,42 @@ internal fun SessionListContent(
     modifier: Modifier = Modifier,
     runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
 ) {
-    val openedSession = state.openedSession
-    val createSession = state.createSession
+    SessionModeContent(state = state, onEvent = onEvent, modifier = modifier) {
+        SessionListPane(
+            state = state,
+            onEvent = onEvent,
+            modifier = modifier,
+            runStatusNotifications = runStatusNotifications,
+        )
+    }
+}
+
+/**
+ * Renders the surface that matches the current [SessionShellMode]. Callers differ only
+ * in the fallback they show while the Session list itself is on screen.
+ */
+@Composable
+internal fun SessionModeContent(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    modifier: Modifier = Modifier,
+    fallback: @Composable () -> Unit,
+) {
     when (state.shellMode()) {
         SessionShellMode.OpenedSession ->
             OpenedSessionContent(
                 state = state,
-                openedSession = requireNotNull(openedSession),
+                openedSession = requireNotNull(state.openedSession),
                 onEvent = onEvent,
                 modifier = modifier,
             )
         SessionShellMode.CreateSession ->
             CreateSessionContent(
-                state = requireNotNull(createSession),
+                state = requireNotNull(state.createSession),
                 onEvent = onEvent,
                 modifier = modifier,
             )
-        SessionShellMode.SessionList ->
-            SessionListPane(
-                state = state,
-                onEvent = onEvent,
-                modifier = modifier,
-                runStatusNotifications = runStatusNotifications,
-            )
+        SessionShellMode.SessionList -> fallback()
     }
 }
 
@@ -109,6 +123,7 @@ internal fun SessionListPane(
     runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
     selectedSessionId: SessionId? = null,
 ) {
+    val spacing = LocalHermesDesignTokens.current.spacing
     Column(modifier = modifier.fillMaxSize()) {
         if (state.sessions.isEmpty()) {
             // Without rows the pane keeps the content at its natural height, so the controls
@@ -144,7 +159,7 @@ internal fun SessionListPane(
                             text = "Searching Sessions…",
                             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(spacing.s))
                     }
                 }
                 items(
@@ -159,7 +174,7 @@ internal fun SessionListPane(
                         onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
                         onEvent = onEvent,
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(spacing.s))
                 }
                 item {
                     SessionPaginationFooter(state = state, onEvent = onEvent)
@@ -546,6 +561,7 @@ private fun SessionRow(
     onClick: () -> Unit,
     onEvent: (EntryUiEvent) -> Unit,
 ) {
+    val spacing = LocalHermesDesignTokens.current.spacing
     Column(modifier = Modifier.fillMaxWidth()) {
         Button(
             onClick = onClick,
@@ -565,9 +581,12 @@ private fun SessionRow(
                     Text(
                         text = session.title,
                         style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(spacing.s),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         if (selected) {

@@ -119,23 +119,12 @@ private fun ConversationPaneHost(
         modifier = modifier,
         tonalElevation = LocalHermesDesignTokens.current.elevation.raised,
     ) {
-        val openedSession = state.openedSession
-        val createSession = state.createSession
-        when (state.shellMode()) {
-            SessionShellMode.OpenedSession ->
-                OpenedSessionContent(
-                    state = state,
-                    openedSession = requireNotNull(openedSession),
-                    onEvent = onEvent,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            SessionShellMode.CreateSession ->
-                CreateSessionContent(
-                    state = requireNotNull(createSession),
-                    onEvent = onEvent,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            SessionShellMode.SessionList -> SessionPlaceholderPane(modifier = Modifier.fillMaxSize())
+        SessionModeContent(
+            state = state,
+            onEvent = onEvent,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            SessionPlaceholderPane(modifier = Modifier.fillMaxSize())
         }
     }
 }

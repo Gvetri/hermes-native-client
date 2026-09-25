@@ -118,6 +118,21 @@ class SessionShellTest {
 
     @Test
     @Config(qualifiers = "w1000dp-h800dp")
+    fun a_long_session_title_keeps_the_selected_marker_visible() {
+        val longTitle = "An Extremely Long Session Title That Would Otherwise Consume The Whole Row"
+        setShellContent(
+            sessionList =
+                SessionListUiState(
+                    sessions = listOf(session("first", longTitle)),
+                    openedSession = OpenSessionUiState(session = session("first", longTitle), messages = emptyList()),
+                ),
+        )
+
+        composeTestRule.onNodeWithText("Open").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h800dp")
     fun shell_renders_loading_empty_and_unavailable_states_in_the_list_pane() {
         val state = mutableStateOf(entryState(SessionListUiState(isLoading = true)))
         setShellContent(state)

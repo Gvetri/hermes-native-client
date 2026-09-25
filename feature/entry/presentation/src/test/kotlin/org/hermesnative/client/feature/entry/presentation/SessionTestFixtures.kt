@@ -18,4 +18,6 @@ internal fun entryState(sessionList: SessionListUiState): EntryUiState =
 internal fun session(
     id: String,
     title: String,
-): SessionItemUiState = SessionItemUiState(id = SessionId(id), title = title, preview = null, pinned = false)
+    preview: String? = null,
+    pinned: Boolean = false,
+): SessionItemUiState = SessionItemUiState(id = SessionId(id), title = title, preview = preview, pinned = pinned)

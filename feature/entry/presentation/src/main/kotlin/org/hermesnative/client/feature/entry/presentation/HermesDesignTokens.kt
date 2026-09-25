@@ -12,8 +12,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * The application-owned spacing scale. Screen surfaces use these steps instead of
- * literal values so the information hierarchy stays consistent across the shell.
+ * The application-owned spacing scale. Shell surfaces use these steps instead of
+ * literal values; the extracted Session surfaces still carry their original
+ * literal spacing and move onto the scale as they migrate.
  */
 @Immutable
 data class HermesSpacing(
@@ -48,6 +49,9 @@ data class HermesDesignTokens(
     val elevation: HermesElevation,
 )
 
+// The shell starts from the Material defaults for type and shape, so the extracted
+// Session surfaces keep their existing contracts; deliberate overrides land here as
+// those surfaces migrate onto the token scale.
 private val HermesTypography = Typography()
 
 private val HermesShapes = Shapes()

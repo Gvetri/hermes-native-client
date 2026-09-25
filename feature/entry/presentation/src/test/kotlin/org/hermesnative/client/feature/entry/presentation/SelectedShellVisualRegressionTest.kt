@@ -4,7 +4,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziRule
 import com.github.takahirom.roborazzi.captureRoboImage
-import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -61,6 +60,14 @@ class SelectedShellVisualRegressionTest {
         composeTestRule.onRoot().captureRoboImage()
     }
 
+    private fun releaseChecklistSession(): SessionItemUiState =
+        session(
+            id = "release-checklist",
+            title = "Release checklist",
+            preview = "Review the release checklist.",
+            pinned = true,
+        )
+
     private fun shellState(): EntryUiState =
         EntryUiState(
             title = "Gateway connected",
@@ -71,28 +78,12 @@ class SelectedShellVisualRegressionTest {
                 SessionListUiState(
                     sessions =
                         listOf(
-                            SessionItemUiState(
-                                id = SessionId("release-checklist"),
-                                title = "Release checklist",
-                                preview = "Review the release checklist.",
-                                pinned = true,
-                            ),
-                            SessionItemUiState(
-                                id = SessionId("follow-up"),
-                                title = "Follow-up Session",
-                                preview = "Plan the next step.",
-                                pinned = false,
-                            ),
+                            releaseChecklistSession(),
+                            session("follow-up", "Follow-up Session", preview = "Plan the next step."),
                         ),
                     openedSession =
                         OpenSessionUiState(
-                            session =
-                                SessionItemUiState(
-                                    id = SessionId("release-checklist"),
-                                    title = "Release checklist",
-                                    preview = "Review the release checklist.",
-                                    pinned = true,
-                                ),
+                            session = releaseChecklistSession(),
                             messages =
                                 listOf(
                                     SessionMessageUiState(
