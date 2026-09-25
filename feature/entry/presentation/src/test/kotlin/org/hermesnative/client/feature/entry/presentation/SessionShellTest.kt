@@ -155,19 +155,23 @@ class SessionShellTest {
 
         composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
         composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
+        // The pinned control tail keeps its place while the rows and warnings scroll.
+        composeTestRule.onNodeWithText("Try again").assertIsDisplayed()
     }
 
     @Test
     @Config(qualifiers = "w1000dp-h411dp")
     fun short_two_pane_window_keeps_the_conversation_composer_reachable() {
+        val longTitle = "A Session title that wraps onto several lines at twice the font scale"
         composeTestRule.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
                 HermesTheme {
-                    EntryScreen(state = conversationEntryState(), onEvent = {})
+                    EntryScreen(state = conversationEntryState(sessionTitle = longTitle), onEvent = {})
                 }
             }
         }
 
+        composeTestRule.onNodeWithText("Message").assertIsDisplayed()
         composeTestRule.onNodeWithText("Send").assertIsDisplayed()
     }
 

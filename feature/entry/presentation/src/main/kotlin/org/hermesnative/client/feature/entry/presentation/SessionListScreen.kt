@@ -345,7 +345,8 @@ private fun SessionListPaneControls(
             !state.isLoading &&
                 !state.isRefreshing &&
                 state.openingSessionId == null &&
-                !state.hasPendingMutation,
+                !state.hasPendingMutation &&
+                state.openedSession?.isRefreshing != true,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
     ) {
         Text(text = if (state.isUnavailable) "Try again" else "Refresh")

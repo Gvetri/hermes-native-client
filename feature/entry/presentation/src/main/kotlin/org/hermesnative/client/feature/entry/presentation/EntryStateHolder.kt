@@ -1386,13 +1386,7 @@ class EntryStateHolder(
                 val sessionList = _uiState.value.sessionList ?: return@synchronized null
                 if (sessionList.openedSession != null) {
                     refreshOpenedSession(gateway)
-                } else if (
-                    (sessionList.isLoading && !sessionList.isSearching) ||
-                    sessionList.isRefreshing ||
-                    sessionList.openingSessionId != null ||
-                    sessionList.createSession != null ||
-                    sessionList.hasPendingMutation
-                ) {
+                } else if (sessionList.blocksFirstPageLoad()) {
                     null
                 } else {
                     createFirstPageLoadJob(
@@ -1416,13 +1410,7 @@ class EntryStateHolder(
         val job =
             synchronized(sessionRequestLock) {
                 val sessionList = _uiState.value.sessionList ?: return@synchronized null
-                if (
-                    (sessionList.isLoading && !sessionList.isSearching) ||
-                    sessionList.isRefreshing ||
-                    sessionList.openingSessionId != null ||
-                    sessionList.createSession != null ||
-                    sessionList.hasPendingMutation
-                ) {
+                if (sessionList.blocksFirstPageLoad()) {
                     null
                 } else {
                     createFirstPageLoadJob(
@@ -1436,6 +1424,20 @@ class EntryStateHolder(
             }
         job?.start()
     }
+
+    /**
+     * True when a first-page list load would interrupt work that is already in flight, so the load
+     * must leave the state alone. This covers the list's own work and the opened conversation's
+     * history refresh, which cancels with [beginSessionRequest] and would otherwise stay refreshing
+     * forever when a list load replaces it.
+     */
+    private fun SessionListUiState.blocksFirstPageLoad(): Boolean =
+        (isLoading && !isSearching) ||
+            isRefreshing ||
+            openingSessionId != null ||
+            createSession != null ||
+            hasPendingMutation ||
+            openedSession?.isRefreshing == true
 
     private fun refreshOpenedSession(gateway: SessionGatewayPort): Job? =
         synchronized(sessionRequestLock) {

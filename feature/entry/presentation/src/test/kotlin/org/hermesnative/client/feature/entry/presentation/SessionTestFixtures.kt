@@ -22,13 +22,13 @@ internal fun session(
     pinned: Boolean = false,
 ): SessionItemUiState = SessionItemUiState(id = SessionId(id), title = title, preview = preview, pinned = pinned)
 
-internal fun conversationEntryState(): EntryUiState =
+internal fun conversationEntryState(sessionTitle: String = "First Session"): EntryUiState =
     entryState(
         SessionListUiState(
-            sessions = listOf(session("first", "First Session")),
+            sessions = listOf(session("first", sessionTitle)),
             openedSession =
                 OpenSessionUiState(
-                    session = session("first", "First Session"),
+                    session = session("first", sessionTitle),
                     messages = listOf(message("message-1", "user", "Conversation message")),
                 ),
         ),
