@@ -160,6 +160,51 @@ class SessionShellTest {
     }
 
     @Test
+    @Config(qualifiers = "w891dp-h288dp")
+    fun very_short_two_pane_window_still_reaches_rows_and_the_list_control() {
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(
+                        state =
+                            entryState(
+                                SessionListUiState(
+                                    sessions = listOf(session("first", "First Session")),
+                                    isStale = true,
+                                    isUnavailable = true,
+                                    errorCategory = SessionListErrorCategory.GATEWAY_UNAVAILABLE,
+                                ),
+                            ),
+                        onEvent = {},
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Try again").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w600dp-h411dp")
+    fun narrow_short_two_pane_conversation_keeps_the_composer_and_send_reachable() {
+        val longTitle =
+            "A Session title that wraps onto several lines at twice the font scale. " +
+                "A Session title that wraps onto several lines at twice the font scale."
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(state = conversationEntryState(sessionTitle = longTitle), onEvent = {})
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("Message").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").assertIsDisplayed()
+    }
+
+    @Test
     @Config(qualifiers = "w1000dp-h411dp")
     fun short_two_pane_window_keeps_the_conversation_composer_reachable() {
         val longTitle = "A Session title that wraps onto several lines at twice the font scale"

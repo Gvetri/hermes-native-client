@@ -149,8 +149,9 @@ internal fun SessionListPane(
                 }
             }
         } else {
-            // With rows the list owns the remaining height and scrolls on its own, so every
-            // row stays reachable in short windows while the controls stay pinned below it.
+            // With rows the list owns the remaining height and scrolls on its own, so every row
+            // and the state warnings stay reachable in short windows while the controls stay
+            // pinned below it.
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
                 verticalArrangement = Arrangement.Top,
@@ -182,8 +183,8 @@ internal fun SessionListPane(
                 item {
                     SessionPaginationFooter(state = state, onEvent = onEvent)
                 }
+                item { SessionListStatusTexts(state = state) }
             }
-            SessionListStatusTexts(state = state)
             SessionListPaneControls(
                 state = state,
                 onEvent = onEvent,

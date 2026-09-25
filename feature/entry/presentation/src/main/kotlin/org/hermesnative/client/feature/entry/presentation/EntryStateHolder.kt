@@ -1386,16 +1386,8 @@ class EntryStateHolder(
                 val sessionList = _uiState.value.sessionList ?: return@synchronized null
                 if (sessionList.openedSession != null) {
                     refreshOpenedSession(gateway)
-                } else if (sessionList.blocksFirstPageLoad()) {
-                    null
                 } else {
-                    createFirstPageLoadJob(
-                        gateway = gateway,
-                        query = sessionList.searchQuery,
-                        isRefreshing = true,
-                        isSearching = false,
-                        preserveSessions = true,
-                    )
+                    startFirstPageListLoad(gateway, sessionList)
                 }
             }
         job?.start()
@@ -1410,20 +1402,30 @@ class EntryStateHolder(
         val job =
             synchronized(sessionRequestLock) {
                 val sessionList = _uiState.value.sessionList ?: return@synchronized null
-                if (sessionList.blocksFirstPageLoad()) {
-                    null
-                } else {
-                    createFirstPageLoadJob(
-                        gateway = gateway,
-                        query = sessionList.searchQuery,
-                        isRefreshing = true,
-                        isSearching = false,
-                        preserveSessions = true,
-                    )
-                }
+                startFirstPageListLoad(gateway, sessionList)
             }
         job?.start()
     }
+
+    /**
+     * Starts a first-page list load for [sessionList], or returns null when work is already in
+     * flight for the list or for the opened conversation's history refresh.
+     */
+    private fun startFirstPageListLoad(
+        gateway: SessionGatewayPort,
+        sessionList: SessionListUiState,
+    ): Job? =
+        if (sessionList.blocksFirstPageLoad()) {
+            null
+        } else {
+            createFirstPageLoadJob(
+                gateway = gateway,
+                query = sessionList.searchQuery,
+                isRefreshing = true,
+                isSearching = false,
+                preserveSessions = true,
+            )
+        }
 
     /**
      * True when a first-page list load would interrupt work that is already in flight, so the load
