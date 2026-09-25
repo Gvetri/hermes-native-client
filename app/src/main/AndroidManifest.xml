@@ -10,7 +10,7 @@
         android:theme="@style/Theme.HermesNativeClient">
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|layoutDirection|locale"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|fontScale"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

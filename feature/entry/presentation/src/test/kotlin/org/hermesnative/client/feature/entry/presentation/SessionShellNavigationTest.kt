@@ -6,7 +6,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
-import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -164,18 +163,4 @@ class SessionShellNavigationTest {
                     ),
             ),
         )
-
-    private fun entryState(sessionList: SessionListUiState): EntryUiState =
-        EntryUiState(
-            title = "Gateway connected",
-            supportingText = "Connected",
-            actionLabel = "Connected",
-            isConnected = true,
-            sessionList = sessionList,
-        )
-
-    private fun session(
-        id: String,
-        title: String,
-    ): SessionItemUiState = SessionItemUiState(id = SessionId(id), title = title, preview = null, pinned = false)
 }

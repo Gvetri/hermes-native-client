@@ -111,11 +111,25 @@ internal fun SessionListPane(
 ) {
     Column(modifier = modifier.fillMaxSize()) {
         if (state.sessions.isEmpty()) {
-            // Without rows the pane has nothing to scroll: the chrome and the state content
-            // keep their natural height and the controls follow them.
-            SessionListPaneHeader(state = state, onEvent = onEvent)
-            SessionListStateContent(state = state)
-            SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent)
+            // Without rows the pane keeps the content at its natural height, so the controls
+            // follow the state content; the whole pane scrolls when the window is short or the
+            // font is large, which keeps every control reachable.
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().testTag("session-list"),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                item { SessionListPaneHeader(state = state, onEvent = onEvent) }
+                item { SessionListStateContent(state = state) }
+                item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
+                item { SessionListStatusTexts(state = state) }
+                item {
+                    SessionListPaneControls(
+                        state = state,
+                        onEvent = onEvent,
+                        runStatusNotifications = runStatusNotifications,
+                    )
+                }
+            }
         } else {
             // With rows the list owns the remaining height and scrolls on its own, so every
             // row stays reachable in short windows while the controls stay pinned below it.
@@ -151,13 +165,13 @@ internal fun SessionListPane(
                     SessionPaginationFooter(state = state, onEvent = onEvent)
                 }
             }
+            SessionListStatusTexts(state = state)
+            SessionListPaneControls(
+                state = state,
+                onEvent = onEvent,
+                runStatusNotifications = runStatusNotifications,
+            )
         }
-        SessionListStatusTexts(state = state)
-        SessionListPaneControls(
-            state = state,
-            onEvent = onEvent,
-            runStatusNotifications = runStatusNotifications,
-        )
     }
 }
 
@@ -814,8 +828,17 @@ internal fun SessionDetailContent(
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val displayedMessages = state.messages + listOfNotNull(state.activeResponse)
+    // Without a transcript there is no weighted list to absorb the free space, so the pane
+    // scrolls as one surface and the composer and Send stay reachable in short windows.
+    val paneScrollState = rememberScrollState()
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier =
+            if (displayedMessages.isEmpty()) {
+                modifier.fillMaxSize().verticalScroll(paneScrollState)
+            } else {
+                modifier.fillMaxSize()
+            },
         verticalArrangement = Arrangement.Top,
     ) {
         OutlinedButton(
@@ -900,7 +923,6 @@ internal fun SessionDetailContent(
             } ?: Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
         }
         Spacer(modifier = Modifier.height(16.dp))
-        val displayedMessages = state.messages + listOfNotNull(state.activeResponse)
         val canSubmit =
             RunSubmissionState(
                 latestRun = state.latestRun,

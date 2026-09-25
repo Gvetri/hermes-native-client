@@ -18,10 +18,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -209,6 +209,35 @@ class SessionShellTest {
     }
 
     @Test
+    @Config(qualifiers = "w891dp-h411dp")
+    fun short_landscape_window_reaches_the_list_controls_without_rows() {
+        setShellContent(sessionList = SessionListUiState())
+
+        // No rows: the whole pane scrolls, so the pinned-looking controls stay reachable.
+        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(4)
+
+        composeTestRule.onNodeWithText("Refresh").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h411dp")
+    fun short_window_reaches_the_composer_without_messages() {
+        setShellContent(
+            sessionList =
+                SessionListUiState(
+                    sessions = listOf(session("first", "First Session")),
+                    openedSession =
+                        OpenSessionUiState(
+                            session = session("first", "First Session"),
+                            messages = emptyList(),
+                        ),
+                ),
+        )
+
+        composeTestRule.onNodeWithText("Send").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     @Config(qualifiers = "w599dp-h891dp")
     fun compact_width_below_the_boundary_stays_single_pane() {
         setShellContent(sessionList = SessionListUiState(sessions = listOf(session("first", "First Session"))))
@@ -283,20 +312,6 @@ class SessionShellTest {
                     ),
             ),
         )
-
-    private fun entryState(sessionList: SessionListUiState): EntryUiState =
-        EntryUiState(
-            title = "Gateway connected",
-            supportingText = "Connected",
-            actionLabel = "Connected",
-            isConnected = true,
-            sessionList = sessionList,
-        )
-
-    private fun session(
-        id: String,
-        title: String,
-    ): SessionItemUiState = SessionItemUiState(id = SessionId(id), title = title, preview = null, pinned = false)
 
     private fun message(
         id: String,
