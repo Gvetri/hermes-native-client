@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
@@ -132,7 +133,7 @@ internal fun SessionListPane(
         // The list owns the height above the pinned controls. When the window is too short to
         // keep a working list, the pinned tail scrolls on its own instead of starving the list,
         // so rows, warnings and every control stay reachable at any pane height.
-        val pinnedTailMaxHeight = (maxHeight - 120.dp).coerceAtLeast(0.dp)
+        val pinnedTailMaxHeight = paneTailMaxHeight(maxHeight)
         Column(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
@@ -838,6 +839,14 @@ private fun DeleteSessionContent(
 }
 
 /**
+ * The cap for a pane tail that must not starve the region above it: the tail takes all but
+ * 120 dp, but never less than a 48 dp touch target - and never more than the space that exists.
+ * The tail scrolls inside whatever it gets, which is what keeps its controls reachable at any
+ * pane height, including windows too short for the region above to keep its full 120 dp.
+ */
+private fun paneTailMaxHeight(available: Dp): Dp = (available - 120.dp).coerceAtLeast(minOf(48.dp, available))
+
+/**
  * The opened Session's title and preview. With a transcript they ride inside it, so a short pane
  * or a large font scale scrolls them instead of pushing the composer and Send out of reach.
  */
@@ -952,19 +961,22 @@ internal fun SessionDetailContent(
             }
         }
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            // The composer tail keeps a floor of 120 dp for the transcript. Below that it
-            // scrolls on its own, so a long draft at a large font scale cannot push Send out
+            // The composer tail keeps a floor of 120 dp for the transcript while the pane is
+            // tall enough, and below that it keeps a share of the space instead of collapsing;
+            // it scrolls on its own, so a long draft at a large font scale cannot push Send out
             // of a short window.
-            val tailMaxHeight = (maxHeight - 120.dp).coerceAtLeast(0.dp)
+            val tailMaxHeight = paneTailMaxHeight(maxHeight)
             Column(
                 modifier =
-                    if (displayedMessages.isEmpty()) {
-                        Modifier
-                    } else {
-                        Modifier.fillMaxWidth()
-                            .heightIn(max = tailMaxHeight)
-                            .verticalScroll(tailScrollState)
-                    },
+                    Modifier.testTag("conversation-composer-tail").then(
+                        if (displayedMessages.isEmpty()) {
+                            Modifier
+                        } else {
+                            Modifier.fillMaxWidth()
+                                .heightIn(max = tailMaxHeight)
+                                .verticalScroll(tailScrollState)
+                        },
+                    ),
             ) {
                 Spacer(modifier = Modifier.height(12.dp))
                 val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null

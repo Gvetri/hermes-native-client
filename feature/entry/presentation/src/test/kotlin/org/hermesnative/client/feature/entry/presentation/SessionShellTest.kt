@@ -264,6 +264,21 @@ class SessionShellTest {
     }
 
     @Test
+    @Config(qualifiers = "w1000dp-h200dp")
+    fun very_short_two_pane_conversation_keeps_a_usable_composer_tail() {
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(state = conversationEntryState(), onEvent = {})
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag("conversation-composer-tail").assertHeightIsAtLeast(24.dp)
+        composeTestRule.onNodeWithText("Send").performScrollTo().assertExists()
+    }
+
+    @Test
     @Config(qualifiers = "w1000dp-h150dp")
     fun placeholder_guidance_scrolls_in_a_short_pane() {
         setShellContent(sessionList = SessionListUiState(sessions = listOf(session("first", "First Session"))))
