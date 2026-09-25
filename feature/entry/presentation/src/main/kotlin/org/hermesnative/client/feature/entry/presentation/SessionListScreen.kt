@@ -246,7 +246,8 @@ private fun SessionListPaneHeader(
                     !state.isLoadingMore &&
                     !state.isUnavailable &&
                     state.openingSessionId == null &&
-                    state.sessionMutations.isEmpty(),
+                    state.sessionMutations.isEmpty() &&
+                    state.createSession == null,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = "Create Session")
@@ -342,6 +343,7 @@ private fun SessionListPaneControls(
                 !state.isRefreshing &&
                 state.openingSessionId == null &&
                 !state.hasPendingMutation &&
+                state.createSession == null &&
                 state.openedSession?.isRefreshing != true,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
     ) {
@@ -470,6 +472,7 @@ private fun SessionPaginationFooter(
                     !state.isUnavailable &&
                         !state.isRefreshing &&
                         state.sessionMutations.isEmpty() &&
+                        state.createSession == null &&
                         state.openedSession?.isRefreshing != true,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {

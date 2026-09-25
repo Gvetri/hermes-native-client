@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
@@ -74,6 +75,23 @@ class SessionShellTest {
         composeTestRule.onNodeWithText("Back to Sessions").assertIsDisplayed()
         composeTestRule.onNodeWithText("Conversation message").assertIsDisplayed()
         composeTestRule.onAllNodesWithText("First Session").assertCountEquals(2)
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h800dp")
+    fun list_pane_controls_are_disabled_while_creation_is_open() {
+        setShellContent(
+            sessionList =
+                SessionListUiState(
+                    sessions = listOf(session("first", "First Session")),
+                    nextCursor = "next-page",
+                    createSession = SessionCreationUiState(),
+                ),
+        )
+
+        composeTestRule.onNode(hasText("Create Session") and hasClickAction()).assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Refresh").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Load more Sessions").assertIsNotEnabled()
     }
 
     @Test

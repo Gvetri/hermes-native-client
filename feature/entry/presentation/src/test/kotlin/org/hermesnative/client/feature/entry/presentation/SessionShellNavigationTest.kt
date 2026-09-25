@@ -69,6 +69,20 @@ class SessionShellNavigationTest {
 
     @Test
     @Config(qualifiers = "w1000dp-h800dp")
+    fun system_back_on_a_two_pane_conversation_requests_the_session_list() {
+        val events = mutableListOf<EntryUiEvent>()
+        setContent(conversationEntryState(), events::add)
+
+        composeTestRule.runOnUiThread {
+            composeTestRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf(EntryUiEvent.ReturnToSessionListClicked), events)
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h800dp")
     fun system_back_cancels_creation_in_the_two_pane_detail_pane() {
         val events = mutableListOf<EntryUiEvent>()
         setContent(

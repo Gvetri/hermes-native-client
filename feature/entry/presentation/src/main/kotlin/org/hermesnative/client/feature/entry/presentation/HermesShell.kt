@@ -64,6 +64,23 @@ internal fun SessionShell(
     }
 }
 
+/**
+ * System Back follows the same path as the visible controls in both layouts: an open
+ * conversation returns to the Session list and an open creation is cancelled, so Back
+ * never exits from a screen that offers those actions.
+ */
+@Composable
+private fun SessionShellBackHandling(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    when (state.shellMode()) {
+        SessionShellMode.OpenedSession -> ShellBackHandler { onEvent(EntryUiEvent.ReturnToSessionListClicked) }
+        SessionShellMode.CreateSession -> ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
+        SessionShellMode.SessionList -> Unit
+    }
+}
+
 @Composable
 private fun SinglePaneSessionContent(
     state: SessionListUiState,
@@ -71,11 +88,7 @@ private fun SinglePaneSessionContent(
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier,
 ) {
-    when (state.shellMode()) {
-        SessionShellMode.OpenedSession -> ShellBackHandler { onEvent(EntryUiEvent.ReturnToSessionListClicked) }
-        SessionShellMode.CreateSession -> ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
-        SessionShellMode.SessionList -> Unit
-    }
+    SessionShellBackHandling(state, onEvent)
     SessionListContent(
         state = state,
         onEvent = onEvent,
@@ -91,9 +104,7 @@ private fun TwoPaneSessionContent(
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier,
 ) {
-    if (state.shellMode() == SessionShellMode.CreateSession) {
-        ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
-    }
+    SessionShellBackHandling(state, onEvent)
     Row(modifier = modifier.fillMaxSize()) {
         SessionListPane(
             state = state,
