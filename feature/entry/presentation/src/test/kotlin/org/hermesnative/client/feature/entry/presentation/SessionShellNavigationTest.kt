@@ -144,23 +144,4 @@ class SessionShellNavigationTest {
             }
         }
     }
-
-    private fun conversationEntryState(): EntryUiState =
-        entryState(
-            SessionListUiState(
-                sessions = listOf(session("first", "First Session")),
-                openedSession =
-                    OpenSessionUiState(
-                        session = session("first", "First Session"),
-                        messages =
-                            listOf(
-                                SessionMessageUiState(
-                                    id = "message-1",
-                                    role = "user",
-                                    content = "Conversation message",
-                                ),
-                            ),
-                    ),
-            ),
-        )
 }

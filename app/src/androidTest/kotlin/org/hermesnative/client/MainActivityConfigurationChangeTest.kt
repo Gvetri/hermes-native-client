@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertSame
+import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,6 +24,12 @@ import org.junit.runner.RunWith
 class MainActivityConfigurationChangeTest {
     @get:Rule
     val composeTestRule = createAndroidComposeRule<MainActivity>()
+
+    companion object {
+        @BeforeClass
+        @JvmStatic
+        fun clearSavedConnection() = clearSavedGatewayConnection()
+    }
 
     @Test
     fun activity_recreation_keeps_the_shell_usable() {

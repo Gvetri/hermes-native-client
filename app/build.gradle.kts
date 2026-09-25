@@ -67,6 +67,9 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(project(":feature:entry:domain"))
+    // The activity-launching tests clear the saved Gateway connection through the production
+    // datasource, so its interface module must be on the androidTest compile classpath.
+    androidTestImplementation(project(":feature:entry:data"))
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 

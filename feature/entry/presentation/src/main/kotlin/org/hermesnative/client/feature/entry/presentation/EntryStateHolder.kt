@@ -92,6 +92,8 @@ sealed interface EntryUiEvent {
 
     data object RefreshSessionsClicked : EntryUiEvent
 
+    data object RefreshSessionListClicked : EntryUiEvent
+
     data class SessionSearchQueryChanged(
         val value: String,
     ) : EntryUiEvent
@@ -482,6 +484,7 @@ class EntryStateHolder(
             EntryUiEvent.TryAgainClicked,
             -> verifyConnection()
             EntryUiEvent.RefreshSessionsClicked -> refreshSessions()
+            EntryUiEvent.RefreshSessionListClicked -> refreshSessionList()
             is EntryUiEvent.SessionSearchQueryChanged -> updateSearchQuery(event.value)
             EntryUiEvent.ClearSessionSearchClicked -> clearSearch()
             EntryUiEvent.LoadMoreSessionsClicked -> loadMoreSessions()
@@ -1404,6 +1407,36 @@ class EntryStateHolder(
         job?.start()
     }
 
+    /**
+     * Refreshes the Session list from the list pane itself. [refreshSessions] still serves the
+     * conversation's history refresh, so the list pane's button never acts on another pane.
+     */
+    private fun refreshSessionList() {
+        val gateway = sessionGateway ?: return
+        val job =
+            synchronized(sessionRequestLock) {
+                val sessionList = _uiState.value.sessionList ?: return@synchronized null
+                if (
+                    (sessionList.isLoading && !sessionList.isSearching) ||
+                    sessionList.isRefreshing ||
+                    sessionList.openingSessionId != null ||
+                    sessionList.createSession != null ||
+                    sessionList.hasPendingMutation
+                ) {
+                    null
+                } else {
+                    createFirstPageLoadJob(
+                        gateway = gateway,
+                        query = sessionList.searchQuery,
+                        isRefreshing = true,
+                        isSearching = false,
+                        preserveSessions = true,
+                    )
+                }
+            }
+        job?.start()
+    }
+
     private fun refreshOpenedSession(gateway: SessionGatewayPort): Job? =
         synchronized(sessionRequestLock) {
             val state = _uiState.value
@@ -2235,18 +2268,31 @@ class EntryStateHolder(
         ) {
             return
         }
-        _uiState.value =
-            state.copy(
-                sessionList =
-                    sessionList.copy(
-                        createSession = SessionCreationUiState(),
-                        // Starting a creation from a visible conversation replaces it: the
-                        // two-pane layout shows the list next to the open Session, so the
-                        // creation form must become the visible pane.
-                        openedSession = null,
-                        errorCategory = null,
-                    ),
-            )
+        var observationToClose: RunEventObservation? = null
+        var observationJobToCancel: Job? = null
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            current.openedSession?.session?.id?.let { sessionId ->
+                val released = releaseRunObservation(sessionId)
+                observationJobToCancel = released.job
+                observationToClose = released.observation
+            }
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            createSession = SessionCreationUiState(),
+                            // Starting a creation from a visible conversation replaces it: the
+                            // two-pane layout shows the list next to the open Session, so the
+                            // creation form must become the visible pane. The conversation's run
+                            // observation is released exactly like any other way of leaving it.
+                            openedSession = null,
+                            errorCategory = null,
+                        ),
+                )
+        }
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
     }
 
     private fun updateCreateSessionTitle(value: String) {
@@ -3340,6 +3386,23 @@ class EntryStateHolder(
         }
     }
 
+    /**
+     * Releases the run observation of a Session that leaves the conversation pane, so every
+     * path that closes a conversation cleans up the same way.
+     */
+    private fun releaseRunObservation(sessionId: SessionId): RunObservationRelease {
+        retainUnconfirmedTerminalRuns(sessionId)
+        val job = runObservationJobs[sessionId]
+        val observation = runObservations.remove(sessionId)
+        runObservationRunIds.remove(sessionId)
+        return RunObservationRelease(job = job, observation = observation)
+    }
+
+    private data class RunObservationRelease(
+        val job: Job?,
+        val observation: RunEventObservation?,
+    )
+
     private fun returnToSessionList() {
         var observationToClose: RunEventObservation? = null
         var observationJobToCancel: Job? = null
@@ -3359,10 +3422,9 @@ class EntryStateHolder(
                 return
             }
             current.openedSession?.session?.id?.let { sessionId ->
-                retainUnconfirmedTerminalRuns(sessionId)
-                observationJobToCancel = runObservationJobs[sessionId]
-                observationToClose = runObservations.remove(sessionId)
-                runObservationRunIds.remove(sessionId)
+                val released = releaseRunObservation(sessionId)
+                observationJobToCancel = released.job
+                observationToClose = released.observation
             }
             beginSessionRequest()
             _uiState.value =

@@ -132,6 +132,46 @@ class SessionShellTest {
     }
 
     @Test
+    @Config(qualifiers = "w891dp-h411dp")
+    fun short_two_pane_window_keeps_the_session_list_reachable_with_wrapped_state_text() {
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(
+                        state =
+                            entryState(
+                                SessionListUiState(
+                                    sessions = listOf(session("first", "First Session")),
+                                    isStale = true,
+                                    isUnavailable = true,
+                                    errorCategory = SessionListErrorCategory.GATEWAY_UNAVAILABLE,
+                                ),
+                            ),
+                        onEvent = {},
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h411dp")
+    fun short_two_pane_window_keeps_the_conversation_composer_reachable() {
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(state = conversationEntryState(), onEvent = {})
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("Send").assertIsDisplayed()
+    }
+
+    @Test
     @Config(qualifiers = "w1000dp-h800dp")
     fun shell_renders_loading_empty_and_unavailable_states_in_the_list_pane() {
         val state = mutableStateOf(entryState(SessionListUiState(isLoading = true)))
@@ -315,22 +355,4 @@ class SessionShellTest {
             }
         }
     }
-
-    private fun conversationEntryState(): EntryUiState =
-        entryState(
-            SessionListUiState(
-                sessions = listOf(session("first", "First Session")),
-                openedSession =
-                    OpenSessionUiState(
-                        session = session("first", "First Session"),
-                        messages = listOf(message("message-1", "user", "Conversation message")),
-                    ),
-            ),
-        )
-
-    private fun message(
-        id: String,
-        role: String,
-        content: String,
-    ): SessionMessageUiState = SessionMessageUiState(id = id, role = role, content = content)
 }

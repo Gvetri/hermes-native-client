@@ -593,6 +593,43 @@ class EntryStateHolderTest {
     }
 
     @Test
+    fun refreshing_the_session_list_reloads_list_data_and_keeps_the_open_conversation() {
+        val sessionId = SessionId("session-one")
+        val gateway = FakeSessionGateway()
+        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Listed title")), null))
+        gateway.openedSession = session(sessionId.value, "Authoritative title")
+        gateway.openedHistory =
+            SessionHistory(
+                sessionId = sessionId,
+                messages = listOf(GatewayHistoryMessage("message-one", "user", "Initial content")),
+                nextCursor = null,
+            )
+        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Reloaded title")), null))
+        val holder =
+            holder(
+                repository = FakeGatewayConnectionRepository(),
+                verifier = { _, _ ->
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                },
+                gateway = gateway,
+            )
+
+        verify(holder)
+        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
+        awaitState(holder, "open conversation") { it.sessionList?.openedSession != null }
+
+        holder.onEvent(EntryUiEvent.RefreshSessionListClicked)
+        awaitState(holder, "reloaded list") {
+            it.sessionList?.sessions?.singleOrNull()?.title == "Reloaded title"
+        }
+
+        val state = requireNotNull(holder.uiState.value.sessionList)
+        assertEquals(sessionId, state.openedSession?.session?.id)
+        assertTrue(requireNotNull(state.openedSession).messages.isNotEmpty())
+        holder.close()
+    }
+
+    @Test
     fun refreshing_open_history_replaces_only_confirmed_gateway_data_and_preserves_content_on_failure() {
         val sessionId = SessionId("session-one")
         val gateway = FakeSessionGateway()

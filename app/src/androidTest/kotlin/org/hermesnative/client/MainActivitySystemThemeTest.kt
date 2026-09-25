@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -24,6 +25,12 @@ import org.junit.runners.model.Statement
 @RunWith(AndroidJUnit4::class)
 class MainActivitySystemLightThemeTest {
     private val composeTestRule = createAndroidComposeRule<MainActivity>()
+
+    companion object {
+        @BeforeClass
+        @JvmStatic
+        fun clearSavedConnection() = clearSavedGatewayConnection()
+    }
 
     @get:Rule
     val rules: TestRule =
@@ -63,6 +70,12 @@ class MainActivitySystemLightThemeTest {
 @RunWith(AndroidJUnit4::class)
 class MainActivitySystemDarkThemeTest {
     private val composeTestRule = createAndroidComposeRule<MainActivity>()
+
+    companion object {
+        @BeforeClass
+        @JvmStatic
+        fun clearSavedConnection() = clearSavedGatewayConnection()
+    }
 
     @get:Rule
     val rules: TestRule =
