@@ -21,8 +21,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The shell consumes safe-drawing insets itself, so the window draws
-        // edge to edge on every supported API level.
+        // The shell consumes system-bar and display-cutout insets itself, so the
+        // window draws edge to edge; the platform keeps handling the soft
+        // keyboard, which must not collapse the shell's scrollable content.
         enableEdgeToEdge()
         entryStateHolder = EntryWiring.createEntryStateHolder(applicationContext)
         setContent {

@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.core.graphics.Insets
@@ -107,6 +108,31 @@ class SessionShellNavigationTest {
 
         assertEquals(topInset.toFloat(), backTopAfter - backTopBefore, 0.5f)
         assertEquals(bottomInset.toFloat(), sendBottomBefore - sendBottomAfter, 0.5f)
+    }
+
+    @Test
+    fun delivered_ime_insets_do_not_collapse_the_session_list() {
+        setContent(
+            entryState(SessionListUiState(sessions = listOf(session("first", "First Session")))),
+            {},
+        )
+        val rowHeightBefore =
+            composeTestRule.onNodeWithText("First Session").fetchSemanticsNode().boundsInWindow.height
+
+        composeTestRule.runOnUiThread {
+            val insets =
+                WindowInsetsCompat
+                    .Builder()
+                    .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, 900))
+                    .build()
+            composeTestRule.activity.window.decorView.dispatchApplyWindowInsets(insets.toWindowInsets())
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
+        val rowHeightAfter =
+            composeTestRule.onNodeWithText("First Session").fetchSemanticsNode().boundsInWindow.height
+        assertEquals(rowHeightBefore, rowHeightAfter, 0.5f)
     }
 
     private fun setContent(
