@@ -35,12 +35,14 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
+import org.hermesnative.client.feature.entry.domain.SessionId
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -53,28 +55,59 @@ internal fun SessionListContent(
     modifier: Modifier = Modifier,
     runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
 ) {
-    state.openedSession?.let { openedSession ->
-        SessionDetailContent(
-            state = openedSession,
-            mutation = state.sessionMutations[openedSession.session.id],
-            actionsEnabled = state.allowsSessionMutation(),
-            listRequestActive = state.hasActiveRequest,
-            listIsStale = state.isStale,
-            listErrorCategory = state.errorCategory,
-            onEvent = onEvent,
-            modifier = modifier,
-        )
-        return
+    val openedSession = state.openedSession
+    val createSession = state.createSession
+    when {
+        openedSession != null ->
+            OpenedSessionContent(
+                state = state,
+                openedSession = openedSession,
+                onEvent = onEvent,
+                modifier = modifier,
+            )
+        createSession != null ->
+            CreateSessionContent(
+                state = createSession,
+                onEvent = onEvent,
+                modifier = modifier,
+            )
+        else ->
+            SessionListPane(
+                state = state,
+                onEvent = onEvent,
+                modifier = modifier,
+                runStatusNotifications = runStatusNotifications,
+            )
     }
-    state.createSession?.let { createSession ->
-        CreateSessionContent(
-            state = createSession,
-            onEvent = onEvent,
-            modifier = modifier,
-        )
-        return
-    }
+}
 
+@Composable
+internal fun OpenedSessionContent(
+    state: SessionListUiState,
+    openedSession: OpenSessionUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SessionDetailContent(
+        state = openedSession,
+        mutation = state.sessionMutations[openedSession.session.id],
+        actionsEnabled = state.allowsSessionMutation(),
+        listRequestActive = state.hasActiveRequest,
+        listIsStale = state.isStale,
+        listErrorCategory = state.errorCategory,
+        onEvent = onEvent,
+        modifier = modifier,
+    )
+}
+
+@Composable
+internal fun SessionListPane(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    modifier: Modifier = Modifier,
+    runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
+    selectedSessionId: SessionId? = null,
+) {
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Top,
@@ -168,6 +201,7 @@ internal fun SessionListContent(
                     SessionRow(
                         session = session,
                         mutation = state.sessionMutations[session.id],
+                        selected = session.id == selectedSessionId,
                         enabled = state.allowsSessionMutation(),
                         onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
                         onEvent = onEvent,
@@ -379,7 +413,7 @@ private fun EmptySessionsContent() {
 }
 
 @Composable
-private fun CreateSessionContent(
+internal fun CreateSessionContent(
     state: SessionCreationUiState,
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier = Modifier,
@@ -445,6 +479,7 @@ private fun CreateSessionContent(
 private fun SessionRow(
     session: SessionItemUiState,
     mutation: SessionMutationUiState?,
+    selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
     onEvent: (EntryUiEvent) -> Unit,
@@ -453,7 +488,11 @@ private fun SessionRow(
         Button(
             onClick = onClick,
             enabled = enabled && mutation?.pendingAction == null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .semantics { this.selected = selected },
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -706,7 +745,7 @@ private fun DeleteSessionContent(
 }
 
 @Composable
-private fun SessionDetailContent(
+internal fun SessionDetailContent(
     state: OpenSessionUiState,
     mutation: SessionMutationUiState?,
     actionsEnabled: Boolean,

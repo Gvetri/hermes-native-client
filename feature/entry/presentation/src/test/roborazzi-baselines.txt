@@ -11,3 +11,9 @@ org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.
 org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.session_detail_with_messages.png
 org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.session_detail_active_run.png
 org.hermesnative.client.feature.entry.presentation.SelectedVisualRegressionTest.session_detail_error.png
+# Shell contract: one Session/conversation state in intentional light/dark
+# themes and phone single-pane/two-pane window contracts.
+org.hermesnative.client.feature.entry.presentation.SelectedShellVisualRegressionTest.phone_single_pane_light.png
+org.hermesnative.client.feature.entry.presentation.SelectedShellVisualRegressionTest.phone_single_pane_dark.png
+org.hermesnative.client.feature.entry.presentation.SelectedShellVisualRegressionTest.two_pane_light.png
+org.hermesnative.client.feature.entry.presentation.SelectedShellVisualRegressionTest.two_pane_dark.png
