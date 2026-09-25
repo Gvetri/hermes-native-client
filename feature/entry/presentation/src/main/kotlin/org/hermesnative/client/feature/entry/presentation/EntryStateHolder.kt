@@ -1334,6 +1334,8 @@ class EntryStateHolder(
     }
 
     private fun updateSearchQuery(value: String) {
+        var observationToClose: RunEventObservation? = null
+        var observationJobToCancel: Job? = null
         val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
@@ -1341,6 +1343,15 @@ class EntryStateHolder(
                 if (sessionList.searchQuery == value) return
                 if (sessionList.createSession?.isSubmitting == true) return
                 if (sessionList.sessionMutations.isNotEmpty()) return
+
+                // A search replaces the visible conversation with the result list, so the
+                // Session that leaves the pane is released like every other exit path; a later
+                // switch cannot do it, because by then the selection is already null.
+                sessionList.openedSession?.session?.id?.let { openedSessionId ->
+                    val released = releaseRunObservation(openedSessionId)
+                    observationJobToCancel = released.job
+                    observationToClose = released.observation
+                }
 
                 val gateway = sessionGateway
                 val requestGeneration = beginSessionRequest()
@@ -1371,6 +1382,8 @@ class EntryStateHolder(
                 }
             }
         job?.start()
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
     }
 
     private fun clearSearch() {

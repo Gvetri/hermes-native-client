@@ -457,6 +457,38 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun searching_the_session_list_closes_the_open_conversations_observer() {
+        val session = session("session-search")
+        val observer = BlockingObservation()
+        val gateway =
+            ScriptedGateway(session).apply {
+                observation = observer
+                enqueueRun(Run(RunId("run-search"), session.id, "running"))
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            open(holder, gateway, session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(observer.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("filter"))
+            awaitState(holder) { it.sessionList?.openedSession == null }
+
+            // The stub stream ends by itself after the test timeout, so an observer that is
+            // not released by the search would still close, only far too late.
+            assertTrue(
+                "the open conversation's screen observer closes when a search replaces it",
+                observer.closed.await(1_000, TimeUnit.MILLISECONDS),
+            )
+        } finally {
+            observer.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun terminal_reconciliation_of_another_run_keeps_the_current_run_observer_open() {
         val session = session("session-multiple-runs")
         val observedRun = Run(RunId("run-observed"), session.id, "running")
