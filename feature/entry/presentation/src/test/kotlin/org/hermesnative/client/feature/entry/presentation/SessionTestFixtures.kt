@@ -26,13 +26,16 @@ internal fun session(
     pinned: Boolean = false,
 ): SessionItemUiState = SessionItemUiState(id = SessionId(id), title = title, preview = preview, pinned = pinned)
 
-internal fun conversationEntryState(sessionTitle: String = "First Session"): EntryUiState =
+internal fun conversationEntryState(
+    sessionTitle: String = "First Session",
+    sessionPreview: String? = null,
+): EntryUiState =
     entryState(
         SessionListUiState(
-            sessions = listOf(session("first", sessionTitle)),
+            sessions = listOf(session("first", sessionTitle, preview = sessionPreview)),
             openedSession =
                 OpenSessionUiState(
-                    session = session("first", sessionTitle),
+                    session = session("first", sessionTitle, preview = sessionPreview),
                     messages = listOf(message("message-1", "user", "Conversation message")),
                 ),
         ),

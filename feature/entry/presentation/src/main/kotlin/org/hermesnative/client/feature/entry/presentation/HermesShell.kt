@@ -2,7 +2,7 @@ package org.hermesnative.client.feature.entry.presentation
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -132,22 +134,28 @@ private fun ConversationPaneHost(
 @Composable
 private fun SessionPlaceholderPane(modifier: Modifier = Modifier) {
     val spacing = LocalHermesDesignTokens.current.spacing
-    Column(
-        modifier = modifier.padding(horizontal = spacing.l),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = "No Session selected",
-            style = MaterialTheme.typography.titleLarge,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.semantics { heading() },
-        )
-        Spacer(modifier = Modifier.height(spacing.s))
-        Text(
-            text = "Select a Session from the list to view its conversation.",
-            textAlign = TextAlign.Center,
-        )
+    // Centered while the guidance fits, scrollable as soon as the pane or the font scale
+    // grows, so the guidance can never be clipped without a way to reveal it.
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Column(
+            modifier =
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = spacing.l),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = "No Session selected",
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(modifier = Modifier.height(spacing.s))
+            Text(
+                text = "Select a Session from the list to view its conversation.",
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

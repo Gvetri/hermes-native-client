@@ -221,6 +221,41 @@ class SessionShellTest {
     }
 
     @Test
+    @Config(qualifiers = "w891dp-h360dp")
+    fun very_short_two_pane_conversation_with_a_wrapping_header_keeps_send_reachable() {
+        val longTitle =
+            "A Session title that wraps onto several lines at twice the font scale and keeps " +
+                "going so the header cannot fit a short pane at this font scale"
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(
+                        state =
+                            conversationEntryState(
+                                sessionTitle = longTitle,
+                                sessionPreview = "A preview line that also wraps when the font scale is large.",
+                            ),
+                        onEvent = {},
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithText("Message").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Send").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h150dp")
+    fun placeholder_guidance_scrolls_in_a_short_pane() {
+        setShellContent(sessionList = SessionListUiState(sessions = listOf(session("first", "First Session"))))
+
+        composeTestRule.onNodeWithText("Select a Session from the list to view its conversation.")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
     @Config(qualifiers = "w600dp-h411dp")
     fun narrow_short_two_pane_conversation_keeps_the_composer_and_send_reachable() {
         val longTitle =

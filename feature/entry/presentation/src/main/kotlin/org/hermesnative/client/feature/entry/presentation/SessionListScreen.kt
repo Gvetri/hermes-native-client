@@ -837,6 +837,23 @@ private fun DeleteSessionContent(
     }
 }
 
+/**
+ * The opened Session's title and preview. With a transcript they ride inside it, so a short pane
+ * or a large font scale scrolls them instead of pushing the composer and Send out of reach.
+ */
+@Composable
+private fun SessionDetailHeader(state: OpenSessionUiState) {
+    Text(
+        text = state.session.title,
+        style = MaterialTheme.typography.headlineMedium,
+        modifier = Modifier.semantics { heading() },
+    )
+    state.session.preview?.let { preview ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = preview, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
 @Composable
 internal fun SessionDetailContent(
     state: OpenSessionUiState,
@@ -868,16 +885,10 @@ internal fun SessionDetailContent(
             Text(text = "Back to Sessions")
         }
         Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = state.session.title,
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.semantics { heading() },
-        )
-        state.session.preview?.let { preview ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = preview, style = MaterialTheme.typography.bodyLarge)
+        if (displayedMessages.isEmpty()) {
+            SessionDetailHeader(state = state)
+            Spacer(modifier = Modifier.height(12.dp))
         }
-        Spacer(modifier = Modifier.height(12.dp))
         if (displayedMessages.isEmpty()) {
             SessionDetailSummary(
                 state = state,
@@ -903,9 +914,11 @@ internal fun SessionDetailContent(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // The summary travels with the transcript, so a short pane or a large font
+                // The header travels with the transcript, so a short pane or a large font
                 // scale scrolls it instead of pushing the composer and Send out of reach.
                 item {
+                    SessionDetailHeader(state = state)
+                    Spacer(modifier = Modifier.height(12.dp))
                     SessionDetailSummary(
                         state = state,
                         mutation = mutation,
