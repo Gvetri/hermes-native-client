@@ -1,7 +1,5 @@
 package org.hermesnative.client
 
-import android.content.pm.ActivityInfo
-import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -24,16 +22,14 @@ import org.hermesnative.client.feature.entry.presentation.SessionItemUiState
 import org.hermesnative.client.feature.entry.presentation.SessionListUiState
 import org.hermesnative.client.feature.entry.presentation.SessionMessageUiState
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
  * On-device integration coverage for the adaptive shell: the real Android back
- * dispatcher returns from the conversation to the Session list, the conversation
- * stays usable when the font scale increases, and an open conversation stays
- * usable after a real orientation change.
+ * dispatcher returns from the conversation to the Session list, and the
+ * conversation stays usable when the font scale increases.
  */
 @RunWith(AndroidJUnit4::class)
 class ShellIntegrationTest {
@@ -90,43 +86,6 @@ class ShellIntegrationTest {
             .assertIsDisplayed()
             .assertHasClickAction()
             .assertHeightIsAtLeast(48.dp)
-    }
-
-    @Test
-    fun open_conversation_stays_usable_after_an_orientation_change() {
-        composeTestRule.setContent {
-            HermesTheme {
-                EntryScreen(state = conversationEntryState(), onEvent = {})
-            }
-        }
-
-        composeTestRule.onNodeWithText("Back to Sessions").assertIsDisplayed()
-        val widthBeforeRotation = composeTestRule.activity.resources.configuration.screenWidthDp
-
-        try {
-            composeTestRule.runOnUiThread {
-                composeTestRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            }
-            composeTestRule.waitUntil(timeoutMillis = 10_000) {
-                runCatching {
-                    composeTestRule.activity.resources.configuration.orientation ==
-                        Configuration.ORIENTATION_LANDSCAPE
-                }.getOrDefault(false)
-            }
-
-            assertTrue(
-                "the rotation really changed the window width",
-                composeTestRule.activity.resources.configuration.screenWidthDp != widthBeforeRotation,
-            )
-            composeTestRule.onNodeWithText("Back to Sessions").assertIsDisplayed()
-            composeTestRule.onNodeWithText("Message").assertIsDisplayed()
-            composeTestRule.onNodeWithText("Send").assertIsDisplayed()
-        } finally {
-            composeTestRule.runOnUiThread {
-                composeTestRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-            }
-            composeTestRule.waitForIdle()
-        }
     }
 
     private fun conversationEntryState(): EntryUiState =

@@ -71,6 +71,9 @@ dependencies {
     // datasource, so its interface module must be on the androidTest compile classpath.
     androidTestImplementation(project(":feature:entry:data"))
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    // The debug-only shell host activity builds a connected UI state directly, so the
+    // on-device configuration tests can render a connected shell without a live Gateway.
+    debugImplementation(project(":feature:entry:domain"))
 }
 
 tasks.register("verifyConnectedAndroidTests") {
