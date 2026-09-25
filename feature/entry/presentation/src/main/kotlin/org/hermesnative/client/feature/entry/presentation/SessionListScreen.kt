@@ -203,6 +203,7 @@ private fun SessionListPaneHeader(
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(
             onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
+            enabled = state.createSession == null,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = "Remove Gateway Connection")

@@ -7,7 +7,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
+import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -79,6 +81,57 @@ class SessionShellNavigationTest {
         composeTestRule.waitForIdle()
 
         assertEquals(listOf(EntryUiEvent.ReturnToSessionListClicked), events)
+    }
+
+    @Test
+    fun system_back_dismisses_an_open_delete_confirmation() {
+        val sessionId = SessionId("first")
+        val events = mutableListOf<EntryUiEvent>()
+        setContent(
+            entryState(
+                SessionListUiState(
+                    sessions = listOf(session("first", "First Session")),
+                    sessionMutations = mapOf(sessionId to SessionMutationUiState(delete = SessionDeleteUiState())),
+                ),
+            ),
+            events::add,
+        )
+
+        composeTestRule.runOnUiThread {
+            composeTestRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf(EntryUiEvent.CancelDeleteSessionClicked(sessionId)), events)
+        assertFalse(composeTestRule.activity.isFinishing)
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h800dp")
+    fun system_back_dismisses_a_rename_confirmation_before_leaving_the_conversation() {
+        val sessionId = SessionId("first")
+        val events = mutableListOf<EntryUiEvent>()
+        setContent(
+            entryState(
+                SessionListUiState(
+                    sessions = listOf(session("first", "First Session")),
+                    openedSession =
+                        OpenSessionUiState(
+                            session = session("first", "First Session"),
+                            messages = listOf(message("message-1", "user", "Conversation message")),
+                        ),
+                    sessionMutations = mapOf(sessionId to SessionMutationUiState(rename = SessionRenameUiState("First Session"))),
+                ),
+            ),
+            events::add,
+        )
+
+        composeTestRule.runOnUiThread {
+            composeTestRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf(EntryUiEvent.CancelRenameSessionClicked(sessionId)), events)
     }
 
     @Test

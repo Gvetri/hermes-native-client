@@ -96,6 +96,20 @@ class SessionShellTest {
 
     @Test
     @Config(qualifiers = "w1000dp-h800dp")
+    fun gateway_removal_is_disabled_while_creation_is_open() {
+        setShellContent(
+            sessionList =
+                SessionListUiState(
+                    sessions = listOf(session("first", "First Session")),
+                    createSession = SessionCreationUiState(),
+                ),
+        )
+
+        composeTestRule.onNodeWithText("Remove Gateway Connection").assertIsNotEnabled()
+    }
+
+    @Test
+    @Config(qualifiers = "w1000dp-h800dp")
     fun two_pane_shell_shows_guidance_until_a_session_is_selected() {
         setShellContent(
             sessionList =

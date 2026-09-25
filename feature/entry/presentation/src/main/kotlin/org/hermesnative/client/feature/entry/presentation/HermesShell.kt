@@ -65,19 +65,35 @@ internal fun SessionShell(
 }
 
 /**
- * System Back follows the same path as the visible controls in both layouts: an open
- * conversation returns to the Session list and an open creation is cancelled, so Back
- * never exits from a screen that offers those actions.
+ * System Back follows the same path as the visible controls: an open rename or delete
+ * confirmation is dismissed first, then an open conversation returns to the Session list
+ * and an open creation is cancelled, in both layouts.
  */
 @Composable
 private fun SessionShellBackHandling(
     state: SessionListUiState,
     onEvent: (EntryUiEvent) -> Unit,
 ) {
-    when (state.shellMode()) {
-        SessionShellMode.OpenedSession -> ShellBackHandler { onEvent(EntryUiEvent.ReturnToSessionListClicked) }
-        SessionShellMode.CreateSession -> ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
-        SessionShellMode.SessionList -> Unit
+    val confirmation =
+        state.sessionMutations.entries
+            .firstOrNull { it.value.rename != null || it.value.delete != null }
+    when {
+        confirmation != null ->
+            ShellBackHandler {
+                val sessionId = confirmation.key
+                onEvent(
+                    if (confirmation.value.rename != null) {
+                        EntryUiEvent.CancelRenameSessionClicked(sessionId)
+                    } else {
+                        EntryUiEvent.CancelDeleteSessionClicked(sessionId)
+                    },
+                )
+            }
+        state.shellMode() == SessionShellMode.OpenedSession ->
+            ShellBackHandler { onEvent(EntryUiEvent.ReturnToSessionListClicked) }
+        state.shellMode() == SessionShellMode.CreateSession ->
+            ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
+        else -> Unit
     }
 }
 
