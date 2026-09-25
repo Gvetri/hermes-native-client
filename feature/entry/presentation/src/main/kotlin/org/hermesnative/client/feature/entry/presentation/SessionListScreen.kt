@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -127,71 +128,62 @@ internal fun SessionListPane(
     selectedSessionId: SessionId? = null,
 ) {
     val spacing = LocalHermesDesignTokens.current.spacing
-    Column(modifier = modifier.fillMaxSize()) {
-        if (state.sessions.isEmpty()) {
-            // Without rows the pane keeps the content at its natural height, so the controls
-            // follow the state content; the whole pane scrolls when the window is short or the
-            // font is large, which keeps every control reachable.
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().testTag("session-list"),
-                verticalArrangement = Arrangement.Top,
-            ) {
-                item { SessionListPaneHeader(state = state, onEvent = onEvent) }
-                item { SessionListStateContent(state = state) }
-                item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
-                item { SessionListStatusTexts(state = state) }
-                item {
-                    RunStatusNotificationSettingsContent(
-                        state = runStatusNotifications,
-                        onEvent = onEvent,
-                    )
-                }
-                item { SessionListPaneControls(state = state, onEvent = onEvent) }
-            }
-        } else {
-            // With rows the list owns the remaining height and scrolls on its own, so every row
-            // and the state warnings stay reachable in short windows while the controls stay
-            // pinned below it.
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // The list owns the height above the pinned controls. When the window is too short to
+        // keep a working list, the pinned tail scrolls on its own instead of starving the list,
+        // so rows, warnings and every control stay reachable at any pane height.
+        val pinnedTailMaxHeight = (maxHeight - 120.dp).coerceAtLeast(0.dp)
+        Column(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
                 verticalArrangement = Arrangement.Top,
             ) {
                 item { SessionListPaneHeader(state = state, onEvent = onEvent) }
-                if (state.isSearching) {
-                    item {
-                        Text(
-                            text = "Searching Sessions…",
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                if (state.sessions.isEmpty()) {
+                    item { SessionListStateContent(state = state) }
+                    item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
+                } else {
+                    if (state.isSearching) {
+                        item {
+                            Text(
+                                text = "Searching Sessions…",
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            Spacer(modifier = Modifier.height(spacing.s))
+                        }
+                    }
+                    items(
+                        items = state.sessions,
+                        key = { session -> session.id.value },
+                    ) { session ->
+                        SessionRow(
+                            session = session,
+                            mutation = state.sessionMutations[session.id],
+                            selected = session.id == selectedSessionId,
+                            enabled = state.allowsSessionMutation(),
+                            onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
+                            onEvent = onEvent,
                         )
                         Spacer(modifier = Modifier.height(spacing.s))
                     }
-                }
-                items(
-                    items = state.sessions,
-                    key = { session -> session.id.value },
-                ) { session ->
-                    SessionRow(
-                        session = session,
-                        mutation = state.sessionMutations[session.id],
-                        selected = session.id == selectedSessionId,
-                        enabled = state.allowsSessionMutation(),
-                        onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
-                        onEvent = onEvent,
-                    )
-                    Spacer(modifier = Modifier.height(spacing.s))
-                }
-                item {
-                    SessionPaginationFooter(state = state, onEvent = onEvent)
+                    item {
+                        SessionPaginationFooter(state = state, onEvent = onEvent)
+                    }
                 }
                 item { SessionListStatusTexts(state = state) }
-                item {
-                    RunStatusNotificationSettingsContent(
-                        state = runStatusNotifications,
-                        onEvent = onEvent,
-                    )
-                }
             }
-            SessionListPaneControls(state = state, onEvent = onEvent)
+            Column(
+                modifier =
+                    Modifier
+                        .heightIn(max = pinnedTailMaxHeight)
+                        .verticalScroll(rememberScrollState()),
+            ) {
+                SessionListPaneControls(
+                    state = state,
+                    onEvent = onEvent,
+                    runStatusNotifications = runStatusNotifications,
+                )
+            }
         }
     }
 }
@@ -334,14 +326,12 @@ private fun SessionListStatusTexts(state: SessionListUiState) {
     }
 }
 
-/**
- * The refresh control pinned below the list area. It is the only pinned control, so rows,
- * warnings and the notification settings all stay reachable at any pane height.
- */
+/** Controls pinned below the list area: refresh and the notification settings stay reachable. */
 @Composable
 private fun SessionListPaneControls(
     state: SessionListUiState,
     onEvent: (EntryUiEvent) -> Unit,
+    runStatusNotifications: RunStatusNotificationsUiState,
 ) {
     Spacer(modifier = Modifier.height(12.dp))
     Button(
@@ -356,6 +346,11 @@ private fun SessionListPaneControls(
     ) {
         Text(text = if (state.isUnavailable) "Try again" else "Refresh")
     }
+
+    RunStatusNotificationSettingsContent(
+        state = runStatusNotifications,
+        onEvent = onEvent,
+    )
 }
 
 @Composable

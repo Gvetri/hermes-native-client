@@ -351,8 +351,8 @@ class SessionShellTest {
     fun short_landscape_window_reaches_the_list_controls_without_rows() {
         setShellContent(sessionList = SessionListUiState())
 
-        // No rows: the whole pane scrolls, so the pinned-looking controls stay reachable.
-        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(4)
+        // No rows: the pinned controls stay reachable, and the state content scrolls.
+        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(3)
 
         composeTestRule.onNodeWithText("Refresh").assertIsDisplayed()
     }
