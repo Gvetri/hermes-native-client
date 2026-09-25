@@ -27,7 +27,6 @@ class HermesThemeTokensTest {
             assertEquals(12.dp, tokens.spacing.m)
             assertEquals(16.dp, tokens.spacing.l)
             assertEquals(24.dp, tokens.spacing.xl)
-            assertEquals(0.dp, tokens.elevation.flat)
             assertEquals(3.dp, tokens.elevation.raised)
             assertNotNull(tokens.typography.headlineMedium)
             assertNotNull(tokens.typography.bodyLarge)

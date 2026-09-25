@@ -26,12 +26,11 @@ data class HermesSpacing(
 )
 
 /**
- * The application-owned elevation scale. [flat] is the base content plane and
- * [raised] marks the active conversation pane on larger displays.
+ * The application-owned elevation scale. [raised] marks the active conversation
+ * pane on larger displays; every other surface stays on the base content plane.
  */
 @Immutable
 data class HermesElevation(
-    val flat: Dp,
     val raised: Dp,
 )
 
@@ -85,7 +84,6 @@ private val HermesSpacingScale =
 
 private val HermesElevationScale =
     HermesElevation(
-        flat = 0.dp,
         raised = 3.dp,
     )
 
