@@ -3248,6 +3248,8 @@ class EntryStateHolder(
 
     private fun openSession(sessionId: SessionId) {
         val gateway = sessionGateway ?: return
+        var observationToClose: RunEventObservation? = null
+        var observationJobToCancel: Job? = null
         val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
@@ -3269,6 +3271,15 @@ class EntryStateHolder(
                     sessionList.sessionMutations[sessionId]?.pendingAction != null
                 ) {
                     return
+                }
+                // The conversation pane now shows a different Session, so the Session that
+                // leaves it is released exactly like any other way of leaving a conversation.
+                sessionList.openedSession?.session?.id?.let { openedSessionId ->
+                    if (openedSessionId != sessionId) {
+                        val released = releaseRunObservation(openedSessionId)
+                        observationJobToCancel = released.job
+                        observationToClose = released.observation
+                    }
                 }
 
                 val query = sessionList.searchQuery
@@ -3373,6 +3384,8 @@ class EntryStateHolder(
                 }
             }
         job.start()
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
     }
 
     private fun showSessionOpenFailure(

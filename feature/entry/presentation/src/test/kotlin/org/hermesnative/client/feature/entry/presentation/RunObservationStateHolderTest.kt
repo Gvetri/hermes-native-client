@@ -413,6 +413,50 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun switching_to_another_session_closes_the_previous_screen_observer() {
+        val first = session("session-1")
+        val second = session("session-2")
+        val firstObservation = BlockingObservation()
+        val gateway =
+            ScriptedGateway(first, additionalSessions = listOf(second)).apply {
+                observation = firstObservation
+                enqueueRun(Run(RunId("run-switch"), first.id, "running"))
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+            holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
+            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+            awaitState(holder) {
+                it.sessionList?.sessions == listOf(first, second).map { session -> session.toSessionItemUiState() }
+            }
+
+            holder.onEvent(EntryUiEvent.SessionClicked(first.id))
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(second.id))
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
+
+            // The fake's stream ends by itself after the test timeout, so an observer that is
+            // not released on the switch would still close, only far too late. A real Gateway
+            // stream does not end on its own, which is why the release has to be prompt.
+            assertTrue(
+                "the previous Session's screen observer closes when another Session replaces it",
+                firstObservation.closed.await(1_000, TimeUnit.MILLISECONDS),
+            )
+        } finally {
+            firstObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun terminal_reconciliation_of_another_run_keeps_the_current_run_observer_open() {
         val session = session("session-multiple-runs")
         val observedRun = Run(RunId("run-observed"), session.id, "running")
