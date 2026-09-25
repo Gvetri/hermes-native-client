@@ -181,6 +181,40 @@ class SessionShellTest {
             }
         }
 
+        composeTestRule.onNodeWithTag("session-list").assertHeightIsAtLeast(120.dp)
+        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Try again").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w891dp-h288dp")
+    fun very_short_list_pane_with_a_notification_explanation_still_reaches_rows() {
+        composeTestRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                HermesTheme {
+                    EntryScreen(
+                        state =
+                            entryState(
+                                sessionList =
+                                    SessionListUiState(
+                                        sessions = listOf(session("first", "First Session")),
+                                        isStale = true,
+                                        isUnavailable = true,
+                                        errorCategory = SessionListErrorCategory.GATEWAY_UNAVAILABLE,
+                                    ),
+                                runStatusNotifications =
+                                    RunStatusNotificationsUiState(
+                                        explanation = RunStatusNotificationExplanation.PERMISSION_DENIED,
+                                    ),
+                            ),
+                        onEvent = {},
+                    )
+                }
+            }
+        }
+
+        composeTestRule.onNodeWithTag("session-list").assertHeightIsAtLeast(120.dp)
         composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
         composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
         composeTestRule.onNodeWithText("Try again").assertIsDisplayed()

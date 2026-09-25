@@ -6,13 +6,17 @@ import org.hermesnative.client.feature.entry.domain.SessionId
  * Fixtures shared by the Session shell tests: an entry state that reports a connected
  * Gateway, a minimal Session row, and a conversation with one message.
  */
-internal fun entryState(sessionList: SessionListUiState): EntryUiState =
+internal fun entryState(
+    sessionList: SessionListUiState,
+    runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
+): EntryUiState =
     EntryUiState(
         title = "Gateway connected",
         supportingText = "Connected",
         actionLabel = "Connected",
         isConnected = true,
         sessionList = sessionList,
+        runStatusNotifications = runStatusNotifications,
     )
 
 internal fun session(

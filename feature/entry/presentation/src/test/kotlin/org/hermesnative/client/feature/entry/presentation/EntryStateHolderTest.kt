@@ -751,6 +751,46 @@ class EntryStateHolderTest {
     }
 
     @Test
+    fun load_more_is_rejected_while_a_history_refresh_is_in_flight() {
+        val gateway =
+            BlockingSessionGateway(
+                blockHistoryRefresh = true,
+                blockListRefresh = true,
+                nextPageCursor = "page-two",
+            )
+        val dispatcher = Executors.newFixedThreadPool(4).asCoroutineDispatcher()
+        val holder = slowHolder(gateway, dispatcher)
+
+        try {
+            verify(holder)
+            awaitState(holder, "initial Session list") {
+                it.sessionList?.nextCursor == "page-two"
+            }
+            holder.onEvent(EntryUiEvent.SessionClicked(gateway.sessionId))
+            awaitState(holder, "opened Session") {
+                it.sessionList?.openedSession != null
+            }
+
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            assertTrue(gateway.refreshStarted.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(requireNotNull(holder.uiState.value.sessionList).openedSession?.isRefreshing == true)
+
+            holder.onEvent(EntryUiEvent.LoadMoreSessionsClicked)
+            assertFalse(gateway.listRefreshStarted.await(250, TimeUnit.MILLISECONDS))
+
+            gateway.releaseRefresh.countDown()
+            awaitState(holder, "history refresh completion") {
+                it.sessionList?.openedSession?.isRefreshing == false
+            }
+        } finally {
+            gateway.releaseRefresh.countDown()
+            gateway.releaseListRefresh.countDown()
+            holder.close()
+            dispatcher.close()
+        }
+    }
+
+    @Test
     fun history_refresh_is_rejected_while_a_list_refresh_is_in_flight() {
         val gateway = BlockingSessionGateway(blockListRefresh = true)
         val dispatcher = Executors.newFixedThreadPool(4).asCoroutineDispatcher()
@@ -1218,6 +1258,7 @@ class EntryStateHolderTest {
     private class BlockingSessionGateway(
         private val blockHistoryRefresh: Boolean = false,
         private val blockListRefresh: Boolean = false,
+        private val nextPageCursor: String? = null,
     ) : SessionGatewayPort {
         val sessionId = SessionId("session-one")
         val refreshStarted = CountDownLatch(1)
@@ -1248,7 +1289,7 @@ class EntryStateHolderTest {
                 listRefreshStarted.countDown()
                 awaitRelease(releaseListRefresh, "list refresh")
             }
-            return SessionPage(listOf(listedSession), null)
+            return SessionPage(listOf(listedSession), nextPageCursor)
         }
 
         override fun createSession(title: String?): Session = error("not used")

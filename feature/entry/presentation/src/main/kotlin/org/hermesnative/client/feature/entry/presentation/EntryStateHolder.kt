@@ -2211,6 +2211,7 @@ class EntryStateHolder(
                     sessionList.isSearching ||
                     sessionList.isLoadingMore ||
                     sessionList.isUnavailable ||
+                    sessionList.openedSession?.isRefreshing == true ||
                     sessionList.openingSessionId != null ||
                     sessionList.createSession != null ||
                     sessionList.sessionMutations.isNotEmpty()

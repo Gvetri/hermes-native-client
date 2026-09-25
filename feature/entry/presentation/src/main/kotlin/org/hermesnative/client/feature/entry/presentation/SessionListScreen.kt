@@ -141,12 +141,12 @@ internal fun SessionListPane(
                 item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
                 item { SessionListStatusTexts(state = state) }
                 item {
-                    SessionListPaneControls(
-                        state = state,
+                    RunStatusNotificationSettingsContent(
+                        state = runStatusNotifications,
                         onEvent = onEvent,
-                        runStatusNotifications = runStatusNotifications,
                     )
                 }
+                item { SessionListPaneControls(state = state, onEvent = onEvent) }
             }
         } else {
             // With rows the list owns the remaining height and scrolls on its own, so every row
@@ -184,12 +184,14 @@ internal fun SessionListPane(
                     SessionPaginationFooter(state = state, onEvent = onEvent)
                 }
                 item { SessionListStatusTexts(state = state) }
+                item {
+                    RunStatusNotificationSettingsContent(
+                        state = runStatusNotifications,
+                        onEvent = onEvent,
+                    )
+                }
             }
-            SessionListPaneControls(
-                state = state,
-                onEvent = onEvent,
-                runStatusNotifications = runStatusNotifications,
-            )
+            SessionListPaneControls(state = state, onEvent = onEvent)
         }
     }
 }
@@ -332,12 +334,14 @@ private fun SessionListStatusTexts(state: SessionListUiState) {
     }
 }
 
-/** Controls pinned below the list area: refresh stays reachable at any pane height. */
+/**
+ * The refresh control pinned below the list area. It is the only pinned control, so rows,
+ * warnings and the notification settings all stay reachable at any pane height.
+ */
 @Composable
 private fun SessionListPaneControls(
     state: SessionListUiState,
     onEvent: (EntryUiEvent) -> Unit,
-    runStatusNotifications: RunStatusNotificationsUiState,
 ) {
     Spacer(modifier = Modifier.height(12.dp))
     Button(
@@ -352,11 +356,6 @@ private fun SessionListPaneControls(
     ) {
         Text(text = if (state.isUnavailable) "Try again" else "Refresh")
     }
-
-    RunStatusNotificationSettingsContent(
-        state = runStatusNotifications,
-        onEvent = onEvent,
-    )
 }
 
 @Composable
@@ -471,7 +470,11 @@ private fun SessionPaginationFooter(
         state.nextCursor != null ->
             Button(
                 onClick = { onEvent(EntryUiEvent.LoadMoreSessionsClicked) },
-                enabled = !state.isUnavailable && !state.isRefreshing && state.sessionMutations.isEmpty(),
+                enabled =
+                    !state.isUnavailable &&
+                        !state.isRefreshing &&
+                        state.sessionMutations.isEmpty() &&
+                        state.openedSession?.isRefreshing != true,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
                 Text(text = "Load more Sessions")
