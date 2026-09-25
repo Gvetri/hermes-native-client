@@ -3423,7 +3423,7 @@ class EntryStateHolder(
      */
     private fun releaseRunObservation(sessionId: SessionId): RunObservationRelease {
         retainUnconfirmedTerminalRuns(sessionId)
-        val job = runObservationJobs[sessionId]
+        val job = runObservationJobs.remove(sessionId)
         val observation = runObservations.remove(sessionId)
         runObservationRunIds.remove(sessionId)
         return RunObservationRelease(job = job, observation = observation)

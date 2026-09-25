@@ -489,6 +489,55 @@ class RunObservationStateHolderTest {
     }
 
     @Test
+    fun a_pending_second_open_does_not_restart_the_replaced_sessions_observer() {
+        val first = session("session-1")
+        val second = session("session-2")
+        val firstObservation = BlockingObservation()
+        val gateway =
+            ScriptedGateway(first, additionalSessions = listOf(second)).apply {
+                observation = firstObservation
+                enqueueRun(Run(RunId("run-pending"), first.id, "running"))
+                blockOpenFor = second.id
+            }
+        val holder = holder(gateway, Dispatchers.Default)
+
+        try {
+            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+            holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
+            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+            awaitState(holder) {
+                it.sessionList?.sessions == listOf(first, second).map { session -> session.toSessionItemUiState() }
+            }
+
+            holder.onEvent(EntryUiEvent.SessionClicked(first.id))
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
+
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            holder.onEvent(EntryUiEvent.SessionClicked(second.id))
+            assertTrue(gateway.openStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            // While the second Open is still in flight the pane still shows the first Session,
+            // which is exactly the window in which the replaced observer could start itself again.
+            Thread.sleep(300)
+            gateway.openRelease.countDown()
+            awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
+
+            assertEquals(
+                "the replaced Session's observer must not restart while its replacement is pending",
+                listOf(RunId("run-pending")),
+                gateway.observedRunIds.toList(),
+            )
+        } finally {
+            gateway.openRelease.countDown()
+            firstObservation.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
     fun terminal_reconciliation_of_another_run_keeps_the_current_run_observer_open() {
         val session = session("session-multiple-runs")
         val observedRun = Run(RunId("run-observed"), session.id, "running")
@@ -811,6 +860,9 @@ class RunObservationStateHolderTest {
         var blockStatus = false
         val statusStarted = CountDownLatch(1)
         val statusRelease = CountDownLatch(1)
+        var blockOpenFor: SessionId? = null
+        val openStarted = CountDownLatch(1)
+        val openRelease = CountDownLatch(1)
 
         fun enqueueRun(run: Run) {
             runResults += run
@@ -828,7 +880,13 @@ class RunObservationStateHolderTest {
 
         override fun createSession(title: String?): Session = error("not used")
 
-        override fun openSession(sessionId: SessionId): Session = (listOf(session) + additionalSessions).single { it.id == sessionId }
+        override fun openSession(sessionId: SessionId): Session {
+            if (blockOpenFor == sessionId) {
+                openStarted.countDown()
+                openRelease.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            }
+            return (listOf(session) + additionalSessions).single { it.id == sessionId }
+        }
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
             historyBySession[sessionId]
