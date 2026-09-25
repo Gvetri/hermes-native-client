@@ -16,7 +16,9 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import org.hermesnative.client.feature.entry.domain.SessionId
@@ -188,6 +190,19 @@ class SessionShellTest {
             .onNodeWithText("First Session")
             .assertHasClickAction()
             .assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test
+    @Config(qualifiers = "w891dp-h411dp")
+    fun short_landscape_window_keeps_the_session_list_reachable() {
+        setShellContent(
+            SessionListUiState(sessions = listOf(session("first", "First Session"))),
+        )
+
+        composeTestRule.onNodeWithText("Sessions").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
+
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
     }
 
     @Test

@@ -27,6 +27,7 @@ import org.hermesnative.client.feature.entry.domain.SessionPage
 import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -555,6 +556,39 @@ class EntryStateHolderTest {
         assertEquals(SessionListErrorCategory.SESSION_UNAVAILABLE, unavailable.errorCategory)
         assertTrue(unavailable.isUnavailable)
         assertEquals(listOf("session-one"), unavailable.sessions.map { it.id.value })
+        holder.close()
+    }
+
+    @Test
+    fun starting_creation_from_an_open_conversation_replaces_it_with_the_creation_form() {
+        val sessionId = SessionId("session-one")
+        val gateway = FakeSessionGateway()
+        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Listed title")), null))
+        gateway.openedSession = session(sessionId.value, "Authoritative title")
+        gateway.openedHistory =
+            SessionHistory(
+                sessionId = sessionId,
+                messages = listOf(GatewayHistoryMessage("message-one", "user", "Initial content")),
+                nextCursor = null,
+            )
+        val holder =
+            holder(
+                repository = FakeGatewayConnectionRepository(),
+                verifier = { _, _ ->
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                },
+                gateway = gateway,
+            )
+
+        verify(holder)
+        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
+        assertNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+
+        holder.onEvent(EntryUiEvent.CreateSessionClicked)
+
+        val state = requireNotNull(holder.uiState.value.sessionList)
+        assertNotNull(state.createSession)
+        assertNull(state.openedSession)
         holder.close()
     }
 

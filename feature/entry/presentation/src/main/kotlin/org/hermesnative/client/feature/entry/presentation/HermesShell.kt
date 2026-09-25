@@ -27,6 +27,20 @@ internal const val TWO_PANE_MIN_WIDTH_DP = 600
 private const val SESSION_LIST_PANE_WEIGHT = 2f
 private const val CONVERSATION_PANE_WEIGHT = 3f
 
+/** Which surface the shell shows for the current list state. */
+internal enum class SessionShellMode { SessionList, OpenedSession, CreateSession }
+
+/**
+ * Derives the active surface once. Creation and an open conversation are mutually
+ * exclusive: starting creation closes the conversation.
+ */
+internal fun SessionListUiState.shellMode(): SessionShellMode =
+    when {
+        openedSession != null -> SessionShellMode.OpenedSession
+        createSession != null -> SessionShellMode.CreateSession
+        else -> SessionShellMode.SessionList
+    }
+
 /**
  * The session shell. Phones stay single-pane: the Session list is the entry
  * surface and the conversation replaces it, with the system back action
@@ -55,9 +69,10 @@ private fun SinglePaneSessionContent(
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier,
 ) {
-    when {
-        state.openedSession != null -> ShellBackHandler { onEvent(EntryUiEvent.ReturnToSessionListClicked) }
-        state.createSession != null -> ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
+    when (state.shellMode()) {
+        SessionShellMode.OpenedSession -> ShellBackHandler { onEvent(EntryUiEvent.ReturnToSessionListClicked) }
+        SessionShellMode.CreateSession -> ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
+        SessionShellMode.SessionList -> Unit
     }
     SessionListContent(
         state = state,
@@ -74,7 +89,7 @@ private fun TwoPaneSessionContent(
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier,
 ) {
-    if (state.createSession != null) {
+    if (state.shellMode() == SessionShellMode.CreateSession) {
         ShellBackHandler { onEvent(EntryUiEvent.CancelCreateSessionClicked) }
     }
     Row(modifier = modifier.fillMaxSize()) {
@@ -106,21 +121,21 @@ private fun ConversationPaneHost(
     ) {
         val openedSession = state.openedSession
         val createSession = state.createSession
-        when {
-            openedSession != null ->
+        when (state.shellMode()) {
+            SessionShellMode.OpenedSession ->
                 OpenedSessionContent(
                     state = state,
-                    openedSession = openedSession,
+                    openedSession = requireNotNull(openedSession),
                     onEvent = onEvent,
                     modifier = Modifier.fillMaxSize(),
                 )
-            createSession != null ->
+            SessionShellMode.CreateSession ->
                 CreateSessionContent(
-                    state = createSession,
+                    state = requireNotNull(createSession),
                     onEvent = onEvent,
                     modifier = Modifier.fillMaxSize(),
                 )
-            else -> SessionPlaceholderPane(modifier = Modifier.fillMaxSize())
+            SessionShellMode.SessionList -> SessionPlaceholderPane(modifier = Modifier.fillMaxSize())
         }
     }
 }

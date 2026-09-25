@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,6 +43,7 @@ class MainActivityConfigurationChangeTest {
     @Test
     fun orientation_change_keeps_the_shell_usable() {
         composeTestRule.onNodeWithText("Connect to a Hermes Gateway").assertIsDisplayed()
+        val activityBeforeRotation = composeTestRule.activity
 
         try {
             composeTestRule.runOnUiThread {
@@ -54,6 +56,11 @@ class MainActivityConfigurationChangeTest {
                 }.getOrDefault(false)
             }
 
+            assertSame(
+                "the shell keeps its activity across a rotation",
+                activityBeforeRotation,
+                composeTestRule.activity,
+            )
             composeTestRule.onNodeWithText("Hermes Native Client").assertIsDisplayed()
             composeTestRule.onNodeWithText("Connect to a Hermes Gateway").assertIsDisplayed()
             composeTestRule

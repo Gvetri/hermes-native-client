@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -57,21 +58,21 @@ internal fun SessionListContent(
 ) {
     val openedSession = state.openedSession
     val createSession = state.createSession
-    when {
-        openedSession != null ->
+    when (state.shellMode()) {
+        SessionShellMode.OpenedSession ->
             OpenedSessionContent(
                 state = state,
-                openedSession = openedSession,
+                openedSession = requireNotNull(openedSession),
                 onEvent = onEvent,
                 modifier = modifier,
             )
-        createSession != null ->
+        SessionShellMode.CreateSession ->
             CreateSessionContent(
-                state = createSession,
+                state = requireNotNull(createSession),
                 onEvent = onEvent,
                 modifier = modifier,
             )
-        else ->
+        SessionShellMode.SessionList ->
             SessionListPane(
                 state = state,
                 onEvent = onEvent,
@@ -108,10 +109,64 @@ internal fun SessionListPane(
     runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
     selectedSessionId: SessionId? = null,
 ) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Top,
-    ) {
+    Column(modifier = modifier.fillMaxSize()) {
+        if (state.sessions.isEmpty()) {
+            // Without rows the pane has nothing to scroll: the chrome and the state content
+            // keep their natural height and the controls follow them.
+            SessionListPaneHeader(state = state, onEvent = onEvent)
+            SessionListStateContent(state = state)
+            SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent)
+        } else {
+            // With rows the list owns the remaining height and scrolls on its own, so every
+            // row stays reachable in short windows while the controls stay pinned below it.
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                item { SessionListPaneHeader(state = state, onEvent = onEvent) }
+                if (state.isSearching) {
+                    item {
+                        Text(
+                            text = "Searching Sessions…",
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+                items(
+                    items = state.sessions,
+                    key = { session -> session.id.value },
+                ) { session ->
+                    SessionRow(
+                        session = session,
+                        mutation = state.sessionMutations[session.id],
+                        selected = session.id == selectedSessionId,
+                        enabled = state.allowsSessionMutation(),
+                        onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
+                        onEvent = onEvent,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                item {
+                    SessionPaginationFooter(state = state, onEvent = onEvent)
+                }
+            }
+        }
+        SessionListStatusTexts(state = state)
+        SessionListPaneControls(
+            state = state,
+            onEvent = onEvent,
+            runStatusNotifications = runStatusNotifications,
+        )
+    }
+}
+
+@Composable
+private fun SessionListPaneHeader(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "Sessions",
             style = MaterialTheme.typography.headlineMedium,
@@ -169,112 +224,105 @@ internal fun SessionListPane(
             Text(text = "Create Session")
         }
         Spacer(modifier = Modifier.height(12.dp))
+    }
+}
 
-        if ((state.isLoading || state.isSearching) && state.sessions.isEmpty()) {
-            LoadingSessionsContent(if (state.isSearching) "Searching Sessions…" else "Loading Sessions…")
-        } else if (state.sessions.isEmpty() && (state.isUnavailable || state.isStale)) {
-            if (state.searchQuery.isNotBlank()) {
-                SearchUnavailableContent()
-            } else {
-                SessionsUnavailableContent()
-            }
-        } else if (state.searchQuery.isNotBlank() && state.sessions.isEmpty()) {
-            NoSearchResultsContent()
-        } else if (state.sessions.isEmpty()) {
-            EmptySessionsContent()
+/** State content for a pane without rows; panes with rows render the list instead. */
+@Composable
+private fun SessionListStateContent(state: SessionListUiState) {
+    if ((state.isLoading || state.isSearching) && state.sessions.isEmpty()) {
+        LoadingSessionsContent(if (state.isSearching) "Searching Sessions…" else "Loading Sessions…")
+    } else if (state.sessions.isEmpty() && (state.isUnavailable || state.isStale)) {
+        if (state.searchQuery.isNotBlank()) {
+            SearchUnavailableContent()
         } else {
-            if (state.isSearching) {
-                Text(
-                    text = "Searching Sessions…",
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(
-                    items = state.sessions,
-                    key = { session -> session.id.value },
-                ) { session ->
-                    SessionRow(
-                        session = session,
-                        mutation = state.sessionMutations[session.id],
-                        selected = session.id == selectedSessionId,
-                        enabled = state.allowsSessionMutation(),
-                        onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
-                        onEvent = onEvent,
-                    )
-                }
-                item {
-                    SessionPaginationFooter(state = state, onEvent = onEvent)
-                }
-            }
+            SessionsUnavailableContent()
         }
-        if (
-            state.sessions.isEmpty() &&
-            !state.isLoading &&
-            !state.isSearching &&
-            state.nextCursor != null
-        ) {
-            SessionPaginationFooter(state = state, onEvent = onEvent)
-        }
+    } else if (state.searchQuery.isNotBlank() && state.sessions.isEmpty()) {
+        NoSearchResultsContent()
+    } else if (state.sessions.isEmpty()) {
+        EmptySessionsContent()
+    }
+}
 
-        if (state.openingSessionId != null) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Opening Session…",
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        if (state.isRefreshing) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Refreshing Sessions…",
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        if (state.isUnavailable || state.isStale) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text =
-                    if (state.isUnavailable) {
-                        "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
-                    } else {
-                        "The displayed Session data may be stale."
-                    },
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
-        state.errorCategory?.let { category ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = category.safeMessage,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
+@Composable
+private fun SessionListPaginationFooterIfAvailable(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    if (
+        state.sessions.isEmpty() &&
+        !state.isLoading &&
+        !state.isSearching &&
+        state.nextCursor != null
+    ) {
+        SessionPaginationFooter(state = state, onEvent = onEvent)
+    }
+}
 
+@Composable
+private fun SessionListStatusTexts(state: SessionListUiState) {
+    if (state.openingSessionId != null) {
         Spacer(modifier = Modifier.height(12.dp))
-        Button(
-            onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
-            enabled =
-                !state.isLoading &&
-                    !state.isRefreshing &&
-                    state.openingSessionId == null &&
-                    !state.hasPendingMutation,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(text = if (state.isUnavailable) "Try again" else "Refresh")
-        }
-
-        RunStatusNotificationSettingsContent(
-            state = runStatusNotifications,
-            onEvent = onEvent,
+        Text(
+            text = "Opening Session…",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
+    if (state.isRefreshing) {
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Refreshing Sessions…",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    if (state.isUnavailable || state.isStale) {
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text =
+                if (state.isUnavailable) {
+                    "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
+                } else {
+                    "The displayed Session data may be stale."
+                },
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+    state.errorCategory?.let { category ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = category.safeMessage,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+}
+
+/** Controls pinned below the list area: refresh stays reachable at any pane height. */
+@Composable
+private fun SessionListPaneControls(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    runStatusNotifications: RunStatusNotificationsUiState,
+) {
+    Spacer(modifier = Modifier.height(12.dp))
+    Button(
+        onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
+        enabled =
+            !state.isLoading &&
+                !state.isRefreshing &&
+                state.openingSessionId == null &&
+                !state.hasPendingMutation,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) {
+        Text(text = if (state.isUnavailable) "Try again" else "Refresh")
+    }
+
+    RunStatusNotificationSettingsContent(
+        state = runStatusNotifications,
+        onEvent = onEvent,
+    )
 }
 
 @Composable

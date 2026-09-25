@@ -2240,6 +2240,10 @@ class EntryStateHolder(
                 sessionList =
                     sessionList.copy(
                         createSession = SessionCreationUiState(),
+                        // Starting a creation from a visible conversation replaces it: the
+                        // two-pane layout shows the list next to the open Session, so the
+                        // creation form must become the visible pane.
+                        openedSession = null,
                         errorCategory = null,
                     ),
             )
