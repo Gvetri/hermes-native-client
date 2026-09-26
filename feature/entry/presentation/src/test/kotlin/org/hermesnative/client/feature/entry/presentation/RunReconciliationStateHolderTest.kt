@@ -3,6 +3,7 @@ package org.hermesnative.client.feature.entry.presentation
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
@@ -337,17 +338,20 @@ class RunReconciliationStateHolderTest {
             assertTrue(registry.entered.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             awaitState(holder) { it.sessionList?.openedSession?.isReconciliationInProgress == true }
 
+            val replacedRequest = privateField(holder, "sessionJob") as? Job
             holder.onEvent(EntryUiEvent.CreateSessionClicked)
             awaitState(holder) { it.sessionList?.createSession != null }
             assertNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             registry.release.countDown()
 
+            // The abandoned request records its outcome inside its own job, so waiting for that job
+            // to finish is what makes the absence below a fact instead of a guess.
+            runBlocking { replacedRequest?.join() }
+
             assertFalse(
                 "the replaced conversation's request recorded its outcome after it left the screen",
-                settles {
-                    privateField(holder, "recoveryLoadFailed") == true ||
-                        session.id in recoveryUnavailableSessions(holder)
-                },
+                privateField(holder, "recoveryLoadFailed") == true ||
+                    session.id in recoveryUnavailableSessions(holder),
             )
         } finally {
             registry.release.countDown()
