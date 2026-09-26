@@ -185,10 +185,12 @@ class SessionShellTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
-        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
-        // The pinned control tail keeps its place while the rows and warnings scroll.
+        val sessionList = composeTestRule.onNodeWithTag("session-list")
+        // The wrapped warnings scroll inside the list, and the pinned control tail keeps its place.
+        sessionList.performScrollToIndex(2)
         composeTestRule.onNodeWithText("Try again").assertIsDisplayed()
+        sessionList.performScrollToIndex(0)
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
     }
 
     @Test
@@ -213,10 +215,13 @@ class SessionShellTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("session-list").assertHeightIsAtLeast(120.dp)
-        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
-        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
+        val sessionList = composeTestRule.onNodeWithTag("session-list")
+        sessionList.assertHeightIsAtLeast(120.dp)
+        // The wrapped warnings scroll inside the list, and the pinned control tail keeps its place.
+        sessionList.performScrollToIndex(2)
         composeTestRule.onNodeWithText("Try again").assertIsDisplayed()
+        sessionList.performScrollToIndex(0)
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
     }
 
     @Test
@@ -246,10 +251,13 @@ class SessionShellTest {
             }
         }
 
-        composeTestRule.onNodeWithTag("session-list").assertHeightIsAtLeast(120.dp)
-        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
-        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
+        val sessionList = composeTestRule.onNodeWithTag("session-list")
+        sessionList.assertHeightIsAtLeast(120.dp)
+        // The wrapped warnings scroll inside the list, and the pinned control tail keeps its place.
+        sessionList.performScrollToIndex(2)
         composeTestRule.onNodeWithText("Try again").assertIsDisplayed()
+        sessionList.performScrollToIndex(0)
+        composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
     }
 
     @Test
@@ -441,7 +449,6 @@ class SessionShellTest {
         )
 
         composeTestRule.onNodeWithText("Sessions").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(1)
 
         composeTestRule.onNodeWithText("First Session").assertIsDisplayed()
     }
@@ -452,7 +459,7 @@ class SessionShellTest {
         setShellContent(sessionList = SessionListUiState())
 
         // No rows: the pinned controls stay reachable, and the state content scrolls.
-        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(3)
+        composeTestRule.onNodeWithTag("session-list").performScrollToIndex(2)
 
         composeTestRule.onNodeWithText("Refresh").assertIsDisplayed()
     }

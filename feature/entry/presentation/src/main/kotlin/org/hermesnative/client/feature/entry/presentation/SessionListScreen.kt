@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -34,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -148,22 +152,42 @@ internal fun SessionListPane(
         }
     val paneModifier = if (searchFocused && imeVisible) modifier.imePadding() else modifier
     BoxWithConstraints(modifier = paneModifier.fillMaxSize()) {
-        // The list owns the height above the pinned controls. When the window is too short to
-        // keep a working list, the pinned tail scrolls on its own instead of starving the list,
-        // so rows, warnings and every control stay reachable at any pane height.
-        val pinnedTailMaxHeight = paneTailMaxHeight(maxHeight)
+        val density = LocalDensity.current
+        // The list owns the height between the pinned header and the pinned controls. Both pinned
+        // regions are capped so a short window still keeps a working list: past its cap each one
+        // scrolls on its own instead of starving the list, so rows, warnings and every control
+        // stay reachable at any pane height.
+        val pinnedHeaderMaxHeight = panePinnedHeaderMaxHeight(maxHeight)
+        var pinnedHeaderHeight by remember { mutableStateOf(0.dp) }
+        val pinnedTailMaxHeight = paneTailMaxHeight(maxHeight - pinnedHeaderHeight)
         Column(modifier = Modifier.fillMaxSize()) {
+            // Search and Create Session stay reachable while the rows and warnings scroll.
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = pinnedHeaderMaxHeight)
+                        // Measured outside the scroll so the cap, not the scrolled content, is reported.
+                        .onSizeChanged { pinnedHeaderHeight = with(density) { it.height.toDp() } }
+                        .verticalScroll(rememberScrollState()),
+            ) {
+                SessionListPaneHeader(
+                    state = state,
+                    onEvent = onEvent,
+                    onSearchFocusChanged = { searchFocused = it },
+                )
+            }
+            val listState = rememberLazyListState()
+            // A Search change starts the list at its beginning, so clearing Search shows the first
+            // Session again instead of leaving the list scrolled where the Search left it.
+            LaunchedEffect(state.searchQuery) {
+                if (state.searchQuery.isEmpty()) listState.scrollToItem(0)
+            }
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
                 verticalArrangement = Arrangement.Top,
             ) {
-                item {
-                    SessionListPaneHeader(
-                        state = state,
-                        onEvent = onEvent,
-                        onSearchFocusChanged = { searchFocused = it },
-                    )
-                }
                 if (state.sessions.isEmpty()) {
                     item { SessionListStateContent(state = state) }
                     item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
@@ -898,6 +922,14 @@ private fun DeleteSessionContent(
  * pane height, including windows too short for the region above to keep its full 120 dp.
  */
 private fun paneTailMaxHeight(available: Dp): Dp = (available - 120.dp).coerceAtLeast(minOf(48.dp, available))
+
+/**
+ * Caps the pinned header so a short pane still gives the list its working height and the pinned
+ * tail its floor. Past the cap the header scrolls on its own, so Search and Create Session stay
+ * reachable. The header yields first on a very short pane: a slice of it stays on screen and the
+ * rest scrolls.
+ */
+private fun panePinnedHeaderMaxHeight(available: Dp): Dp = (available - 120.dp - 48.dp).coerceAtLeast(minOf(24.dp, available))
 
 /**
  * The opened Session's title and preview. With a transcript they ride inside it, so a short pane
