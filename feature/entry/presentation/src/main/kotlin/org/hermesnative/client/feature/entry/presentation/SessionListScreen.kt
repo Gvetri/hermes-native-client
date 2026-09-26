@@ -1,15 +1,21 @@
 package org.hermesnative.client.feature.entry.presentation
 
+import android.graphics.Rect
+import android.os.Build
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,12 +33,15 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -86,9 +95,9 @@ internal fun SessionModeContent(
                 state = state,
                 openedSession = requireNotNull(state.openedSession),
                 onEvent = onEvent,
-                // Only the conversation consumes IME insets, so the soft keyboard lifts the
-                // composer and Send instead of covering them, while the Session list keeps
-                // its height and never collapses.
+                // The conversation consumes IME insets for its composer. The Session list consumes them only
+                // while Search has focus, so its pinned controls stay above the keyboard without shrinking
+                // the list during conversation input.
                 modifier = modifier.imePadding(),
             )
         SessionShellMode.CreateSession ->
@@ -120,6 +129,7 @@ internal fun OpenedSessionContent(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SessionListPane(
     state: SessionListUiState,
@@ -129,7 +139,15 @@ internal fun SessionListPane(
     selectedSessionId: SessionId? = null,
 ) {
     val spacing = LocalHermesDesignTokens.current.spacing
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    var searchFocused by remember { mutableStateOf(false) }
+    val imeVisible =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsets.isImeVisible
+        } else {
+            rememberLegacyImeVisibility()
+        }
+    val paneModifier = if (searchFocused && imeVisible) modifier.imePadding() else modifier
+    BoxWithConstraints(modifier = paneModifier.fillMaxSize()) {
         // The list owns the height above the pinned controls. When the window is too short to
         // keep a working list, the pinned tail scrolls on its own instead of starving the list,
         // so rows, warnings and every control stay reachable at any pane height.
@@ -139,7 +157,13 @@ internal fun SessionListPane(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
                 verticalArrangement = Arrangement.Top,
             ) {
-                item { SessionListPaneHeader(state = state, onEvent = onEvent) }
+                item {
+                    SessionListPaneHeader(
+                        state = state,
+                        onEvent = onEvent,
+                        onSearchFocusChanged = { searchFocused = it },
+                    )
+                }
                 if (state.sessions.isEmpty()) {
                     item { SessionListStateContent(state = state) }
                     item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
@@ -190,9 +214,30 @@ internal fun SessionListPane(
 }
 
 @Composable
+private fun rememberLegacyImeVisibility(): Boolean {
+    val view = LocalView.current
+    var imeVisible by remember(view) { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val visibleFrame = Rect()
+        val rootView = view.rootView
+        val listener =
+            ViewTreeObserver.OnGlobalLayoutListener {
+                view.getWindowVisibleDisplayFrame(visibleFrame)
+                val rootHeight = rootView.height
+                imeVisible = rootHeight > 0 && rootHeight - visibleFrame.height() > rootHeight / 6
+            }
+        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        listener.onGlobalLayout()
+        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+    }
+    return imeVisible
+}
+
+@Composable
 private fun SessionListPaneHeader(
     state: SessionListUiState,
     onEvent: (EntryUiEvent) -> Unit,
+    onSearchFocusChanged: (Boolean) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -224,7 +269,7 @@ private fun SessionListPaneHeader(
             label = { Text("Search Sessions") },
             placeholder = { Text("Search titles and previews") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().onFocusChanged { onSearchFocusChanged(it.isFocused) },
         )
         if (state.searchQuery.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))

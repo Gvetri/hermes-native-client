@@ -3,7 +3,9 @@ package org.hermesnative.client.feature.entry.presentation
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.core.graphics.Insets
 import androidx.core.view.WindowInsetsCompat
@@ -178,6 +180,72 @@ class SessionShellNavigationTest {
     }
 
     @Test
+    fun search_ime_keeps_pinned_session_controls_above_the_keyboard() {
+        setContent(
+            entryState(SessionListUiState(sessions = listOf(session("first", "First Session")))),
+            {},
+        )
+        val imeInset = 320
+        composeTestRule.onNodeWithText("Search Sessions").performClick()
+
+        composeTestRule.runOnUiThread {
+            val insets =
+                WindowInsetsCompat
+                    .Builder()
+                    .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imeInset))
+                    .setVisible(WindowInsetsCompat.Type.ime(), true)
+                    .build()
+            composeTestRule.activity.window.decorView.dispatchApplyWindowInsets(insets.toWindowInsets())
+        }
+        composeTestRule.waitForIdle()
+
+        val keyboardTop = composeTestRule.activity.window.decorView.height - imeInset + 1
+        val refreshBottom = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
+        val notificationsBottom =
+            composeTestRule.onNodeWithContentDescription("Run status notifications")
+                .fetchSemanticsNode().boundsInWindow.bottom
+        assertTrue("Refresh must stay above the keyboard", refreshBottom <= keyboardTop)
+        assertTrue("notification controls must stay above the keyboard", notificationsBottom <= keyboardTop)
+    }
+
+    @Test
+    fun search_ime_padding_is_removed_when_keyboard_hides_even_if_insets_remain() {
+        setContent(
+            entryState(SessionListUiState(sessions = listOf(session("first", "First Session")))),
+            {},
+        )
+        val imeInset = 320
+        val windowHeight = composeTestRule.activity.window.decorView.height.toFloat()
+        val refreshBottomBefore = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
+        composeTestRule.onNodeWithText("Search Sessions").performClick()
+
+        fun dispatchImeInsets(isVisible: Boolean) {
+            composeTestRule.runOnUiThread {
+                val insets =
+                    WindowInsetsCompat
+                        .Builder()
+                        .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imeInset))
+                        .setVisible(WindowInsetsCompat.Type.ime(), isVisible)
+                        .build()
+                composeTestRule.activity.window.decorView.dispatchApplyWindowInsets(insets.toWindowInsets())
+            }
+            composeTestRule.waitForIdle()
+        }
+
+        dispatchImeInsets(isVisible = true)
+        val refreshBottomWhileVisible = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
+        assertTrue(refreshBottomWhileVisible <= windowHeight - imeInset + 1f)
+
+        dispatchImeInsets(isVisible = false)
+        val refreshBottomAfterHidden = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
+        assertTrue(
+            "the controls must return to the full pane when the IME is hidden",
+            refreshBottomAfterHidden - refreshBottomWhileVisible >= imeInset * 0.75f,
+        )
+        assertEquals(refreshBottomBefore, refreshBottomAfterHidden, 1f)
+    }
+
+    @Test
     fun delivered_ime_insets_do_not_collapse_the_session_list() {
         setContent(
             entryState(SessionListUiState(sessions = listOf(session("first", "First Session")))),
@@ -191,6 +259,7 @@ class SessionShellNavigationTest {
                 WindowInsetsCompat
                     .Builder()
                     .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, 900))
+                    .setVisible(WindowInsetsCompat.Type.ime(), true)
                     .build()
             composeTestRule.activity.window.decorView.dispatchApplyWindowInsets(insets.toWindowInsets())
         }
@@ -216,6 +285,7 @@ class SessionShellNavigationTest {
                 WindowInsetsCompat
                     .Builder()
                     .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imeInset))
+                    .setVisible(WindowInsetsCompat.Type.ime(), true)
                     .build()
             composeTestRule.activity.window.decorView.dispatchApplyWindowInsets(insets.toWindowInsets())
         }
