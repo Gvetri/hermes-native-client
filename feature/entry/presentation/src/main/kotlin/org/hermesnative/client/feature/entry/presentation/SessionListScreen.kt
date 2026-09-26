@@ -1,16 +1,25 @@
 package org.hermesnative.client.feature.entry.presentation
 
+import android.graphics.Rect
+import android.os.Build
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,22 +34,32 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunSubmissionState
+import org.hermesnative.client.feature.entry.domain.SessionId
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -53,32 +72,198 @@ internal fun SessionListContent(
     modifier: Modifier = Modifier,
     runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
 ) {
-    state.openedSession?.let { openedSession ->
-        SessionDetailContent(
-            state = openedSession,
-            mutation = state.sessionMutations[openedSession.session.id],
-            actionsEnabled = state.allowsSessionMutation(),
-            listRequestActive = state.hasActiveRequest,
-            listIsStale = state.isStale,
-            listErrorCategory = state.errorCategory,
+    SessionModeContent(state = state, onEvent = onEvent, modifier = modifier) {
+        SessionListPane(
+            state = state,
             onEvent = onEvent,
             modifier = modifier,
+            runStatusNotifications = runStatusNotifications,
         )
-        return
     }
-    state.createSession?.let { createSession ->
-        CreateSessionContent(
-            state = createSession,
-            onEvent = onEvent,
-            modifier = modifier,
-        )
-        return
-    }
+}
 
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Top,
-    ) {
+/**
+ * Renders the surface that matches the current [SessionShellMode]. Callers differ only
+ * in the fallback they show while the Session list itself is on screen.
+ */
+@Composable
+internal fun SessionModeContent(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    modifier: Modifier = Modifier,
+    fallback: @Composable () -> Unit,
+) {
+    when (state.shellMode()) {
+        SessionShellMode.OpenedSession ->
+            OpenedSessionContent(
+                state = state,
+                openedSession = requireNotNull(state.openedSession),
+                onEvent = onEvent,
+                // The conversation consumes IME insets for its composer. The Session list consumes them only
+                // while Search has focus, so its pinned controls stay above the keyboard without shrinking
+                // the list during conversation input.
+                modifier = modifier.imePadding(),
+            )
+        SessionShellMode.CreateSession ->
+            CreateSessionContent(
+                state = requireNotNull(state.createSession),
+                onEvent = onEvent,
+                modifier = modifier,
+            )
+        SessionShellMode.SessionList -> fallback()
+    }
+}
+
+@Composable
+internal fun OpenedSessionContent(
+    state: SessionListUiState,
+    openedSession: OpenSessionUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SessionDetailContent(
+        state = openedSession,
+        mutation = state.sessionMutations[openedSession.session.id],
+        actionsEnabled = state.allowsSessionMutation(),
+        listRequestActive = state.hasActiveRequest,
+        listIsStale = state.isStale,
+        listErrorCategory = state.errorCategory,
+        onEvent = onEvent,
+        modifier = modifier,
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun SessionListPane(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    modifier: Modifier = Modifier,
+    runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
+    selectedSessionId: SessionId? = null,
+) {
+    val spacing = LocalHermesDesignTokens.current.spacing
+    var searchFocused by remember { mutableStateOf(false) }
+    val imeVisible =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsets.isImeVisible
+        } else {
+            rememberLegacyImeVisibility()
+        }
+    val paneModifier = if (searchFocused && imeVisible) modifier.imePadding() else modifier
+    BoxWithConstraints(modifier = paneModifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        // The list owns the height between the pinned header and the pinned controls. Both pinned
+        // regions are capped so a short window still keeps a working list: past its cap each one
+        // scrolls on its own instead of starving the list, so rows, warnings and every control
+        // stay reachable at any pane height.
+        val pinnedHeaderMaxHeight = panePinnedHeaderMaxHeight(maxHeight)
+        var pinnedHeaderHeight by remember { mutableStateOf(0.dp) }
+        val pinnedTailMaxHeight = paneTailMaxHeight(maxHeight - pinnedHeaderHeight)
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Search and Create Session stay reachable while the rows and warnings scroll.
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = pinnedHeaderMaxHeight)
+                        // Measured outside the scroll so the cap, not the scrolled content, is reported.
+                        .onSizeChanged { pinnedHeaderHeight = with(density) { it.height.toDp() } }
+                        .verticalScroll(rememberScrollState()),
+            ) {
+                SessionListPaneHeader(
+                    state = state,
+                    onEvent = onEvent,
+                    onSearchFocusChanged = { searchFocused = it },
+                )
+            }
+            val listState = rememberLazyListState()
+            // A Search change starts the list at its beginning, so clearing Search shows the first
+            // Session again instead of leaving the list scrolled where the Search left it.
+            LaunchedEffect(state.searchQuery) {
+                if (state.searchQuery.isEmpty()) listState.scrollToItem(0)
+            }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                if (state.sessions.isEmpty()) {
+                    item { SessionListStateContent(state = state) }
+                    item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
+                } else {
+                    if (state.isSearching) {
+                        item {
+                            Text(
+                                text = "Searching Sessions…",
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                            Spacer(modifier = Modifier.height(spacing.s))
+                        }
+                    }
+                    items(
+                        items = state.sessions,
+                        key = { session -> session.id.value },
+                    ) { session ->
+                        SessionRow(
+                            session = session,
+                            mutation = state.sessionMutations[session.id],
+                            selected = session.id == selectedSessionId,
+                            enabled = state.allowsSessionMutation(),
+                            onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
+                            onEvent = onEvent,
+                        )
+                        Spacer(modifier = Modifier.height(spacing.s))
+                    }
+                    item {
+                        SessionPaginationFooter(state = state, onEvent = onEvent)
+                    }
+                }
+                item { SessionListStatusTexts(state = state) }
+            }
+            Column(
+                modifier =
+                    Modifier
+                        .heightIn(max = pinnedTailMaxHeight)
+                        .verticalScroll(rememberScrollState()),
+            ) {
+                SessionListPaneControls(
+                    state = state,
+                    onEvent = onEvent,
+                    runStatusNotifications = runStatusNotifications,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberLegacyImeVisibility(): Boolean {
+    val view = LocalView.current
+    var imeVisible by remember(view) { mutableStateOf(false) }
+    DisposableEffect(view) {
+        val visibleFrame = Rect()
+        val rootView = view.rootView
+        val listener =
+            ViewTreeObserver.OnGlobalLayoutListener {
+                view.getWindowVisibleDisplayFrame(visibleFrame)
+                val rootHeight = rootView.height
+                imeVisible = rootHeight > 0 && rootHeight - visibleFrame.height() > rootHeight / 6
+            }
+        view.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        listener.onGlobalLayout()
+        onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
+    }
+    return imeVisible
+}
+
+@Composable
+private fun SessionListPaneHeader(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    onSearchFocusChanged: (Boolean) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "Sessions",
             style = MaterialTheme.typography.headlineMedium,
@@ -87,6 +272,7 @@ internal fun SessionListContent(
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(
             onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
+            enabled = state.createSession == null,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = "Remove Gateway Connection")
@@ -107,7 +293,7 @@ internal fun SessionListContent(
             label = { Text("Search Sessions") },
             placeholder = { Text("Search titles and previews") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().onFocusChanged { onSearchFocusChanged(it.isFocused) },
         )
         if (state.searchQuery.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
@@ -130,117 +316,115 @@ internal fun SessionListContent(
                     !state.isLoadingMore &&
                     !state.isUnavailable &&
                     state.openingSessionId == null &&
-                    state.sessionMutations.isEmpty(),
+                    state.sessionMutations.isEmpty() &&
+                    state.createSession == null,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = "Create Session")
         }
         Spacer(modifier = Modifier.height(12.dp))
+    }
+}
 
-        if ((state.isLoading || state.isSearching) && state.sessions.isEmpty()) {
-            LoadingSessionsContent(if (state.isSearching) "Searching Sessions…" else "Loading Sessions…")
-        } else if (state.sessions.isEmpty() && (state.isUnavailable || state.isStale)) {
-            if (state.searchQuery.isNotBlank()) {
-                SearchUnavailableContent()
-            } else {
-                SessionsUnavailableContent()
-            }
-        } else if (state.searchQuery.isNotBlank() && state.sessions.isEmpty()) {
-            NoSearchResultsContent()
-        } else if (state.sessions.isEmpty()) {
-            EmptySessionsContent()
+/** State content for a pane without rows; panes with rows render the list instead. */
+@Composable
+private fun SessionListStateContent(state: SessionListUiState) {
+    if ((state.isLoading || state.isSearching) && state.sessions.isEmpty()) {
+        LoadingSessionsContent(if (state.isSearching) "Searching Sessions…" else "Loading Sessions…")
+    } else if (state.sessions.isEmpty() && (state.isUnavailable || state.isStale)) {
+        if (state.searchQuery.isNotBlank()) {
+            SearchUnavailableContent()
         } else {
-            if (state.isSearching) {
-                Text(
-                    text = "Searching Sessions…",
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(
-                    items = state.sessions,
-                    key = { session -> session.id.value },
-                ) { session ->
-                    SessionRow(
-                        session = session,
-                        mutation = state.sessionMutations[session.id],
-                        enabled = state.allowsSessionMutation(),
-                        onClick = { onEvent(EntryUiEvent.SessionClicked(session.id)) },
-                        onEvent = onEvent,
-                    )
-                }
-                item {
-                    SessionPaginationFooter(state = state, onEvent = onEvent)
-                }
-            }
+            SessionsUnavailableContent()
         }
-        if (
-            state.sessions.isEmpty() &&
-            !state.isLoading &&
-            !state.isSearching &&
-            state.nextCursor != null
-        ) {
-            SessionPaginationFooter(state = state, onEvent = onEvent)
-        }
+    } else if (state.searchQuery.isNotBlank() && state.sessions.isEmpty()) {
+        NoSearchResultsContent()
+    } else if (state.sessions.isEmpty()) {
+        EmptySessionsContent()
+    }
+}
 
-        if (state.openingSessionId != null) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Opening Session…",
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        if (state.isRefreshing) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Refreshing Sessions…",
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        if (state.isUnavailable || state.isStale) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text =
-                    if (state.isUnavailable) {
-                        "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
-                    } else {
-                        "The displayed Session data may be stale."
-                    },
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
-        state.errorCategory?.let { category ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = category.safeMessage,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
+@Composable
+private fun SessionListPaginationFooterIfAvailable(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    if (
+        state.sessions.isEmpty() &&
+        !state.isLoading &&
+        !state.isSearching &&
+        state.nextCursor != null
+    ) {
+        SessionPaginationFooter(state = state, onEvent = onEvent)
+    }
+}
 
+@Composable
+private fun SessionListStatusTexts(state: SessionListUiState) {
+    if (state.openingSessionId != null) {
         Spacer(modifier = Modifier.height(12.dp))
-        Button(
-            onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
-            enabled =
-                !state.isLoading &&
-                    !state.isRefreshing &&
-                    state.openingSessionId == null &&
-                    !state.hasPendingMutation,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(text = if (state.isUnavailable) "Try again" else "Refresh")
-        }
-
-        RunStatusNotificationSettingsContent(
-            state = runStatusNotifications,
-            onEvent = onEvent,
+        Text(
+            text = "Opening Session…",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
+    if (state.isRefreshing) {
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Refreshing Sessions…",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    if (state.isUnavailable || state.isStale) {
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text =
+                if (state.isUnavailable) {
+                    "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
+                } else {
+                    "The displayed Session data may be stale."
+                },
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+    state.errorCategory?.let { category ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = category.safeMessage,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+}
+
+/** Controls pinned below the list area: refresh and the notification settings stay reachable. */
+@Composable
+private fun SessionListPaneControls(
+    state: SessionListUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+    runStatusNotifications: RunStatusNotificationsUiState,
+) {
+    Spacer(modifier = Modifier.height(12.dp))
+    Button(
+        onClick = { onEvent(EntryUiEvent.RefreshSessionListClicked) },
+        enabled =
+            !state.isLoading &&
+                !state.isRefreshing &&
+                state.openingSessionId == null &&
+                !state.hasPendingMutation &&
+                state.createSession == null &&
+                state.openedSession?.isRefreshing != true &&
+                state.openedSession?.isReconciliationInProgress != true,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) {
+        Text(text = if (state.isUnavailable) "Try again" else "Refresh")
+    }
+
+    RunStatusNotificationSettingsContent(
+        state = runStatusNotifications,
+        onEvent = onEvent,
+    )
 }
 
 @Composable
@@ -355,7 +539,13 @@ private fun SessionPaginationFooter(
         state.nextCursor != null ->
             Button(
                 onClick = { onEvent(EntryUiEvent.LoadMoreSessionsClicked) },
-                enabled = !state.isUnavailable && !state.isRefreshing && state.sessionMutations.isEmpty(),
+                enabled =
+                    !state.isUnavailable &&
+                        !state.isRefreshing &&
+                        state.sessionMutations.isEmpty() &&
+                        state.createSession == null &&
+                        state.openedSession?.isRefreshing != true &&
+                        state.openedSession?.isReconciliationInProgress != true,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
                 Text(text = "Load more Sessions")
@@ -379,13 +569,17 @@ private fun EmptySessionsContent() {
 }
 
 @Composable
-private fun CreateSessionContent(
+internal fun CreateSessionContent(
     state: SessionCreationUiState,
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        modifier =
+            modifier
+                .fillMaxSize()
+                .imePadding()
+                .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.Top,
     ) {
         OutlinedButton(
@@ -445,15 +639,21 @@ private fun CreateSessionContent(
 private fun SessionRow(
     session: SessionItemUiState,
     mutation: SessionMutationUiState?,
+    selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
     onEvent: (EntryUiEvent) -> Unit,
 ) {
+    val spacing = LocalHermesDesignTokens.current.spacing
     Column(modifier = Modifier.fillMaxWidth()) {
         Button(
             onClick = onClick,
             enabled = enabled && mutation?.pendingAction == null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 64.dp)
+                    .semantics { this.selected = selected },
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
@@ -464,12 +664,24 @@ private fun SessionRow(
                     Text(
                         text = session.title,
                         style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
                     )
-                    if (session.pinned) {
-                        Text(
-                            text = "Pinned",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(spacing.s),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (selected) {
+                            Text(
+                                text = "Open",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                        if (session.pinned) {
+                            Text(
+                                text = "Pinned",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
                     }
                 }
                 session.preview?.let { preview ->
@@ -705,8 +917,41 @@ private fun DeleteSessionContent(
     }
 }
 
+/**
+ * The cap for a pane tail that must not starve the region above it: the tail takes all but
+ * 120 dp, but never less than a 48 dp touch target - and never more than the space that exists.
+ * The tail scrolls inside whatever it gets, which is what keeps its controls reachable at any
+ * pane height, including windows too short for the region above to keep its full 120 dp.
+ */
+private fun paneTailMaxHeight(available: Dp): Dp = (available - 120.dp).coerceAtLeast(minOf(48.dp, available))
+
+/**
+ * Caps the pinned header so a short pane still gives the list its working height and the pinned
+ * tail its floor. Past the cap the header scrolls on its own, so Search and Create Session stay
+ * reachable. The header yields first on a very short pane: a slice of it stays on screen and the
+ * rest scrolls.
+ */
+private fun panePinnedHeaderMaxHeight(available: Dp): Dp = (available - 120.dp - 48.dp).coerceAtLeast(minOf(24.dp, available))
+
+/**
+ * The opened Session's title and preview. With a transcript they ride inside it, so a short pane
+ * or a large font scale scrolls them instead of pushing the composer and Send out of reach.
+ */
 @Composable
-private fun SessionDetailContent(
+private fun SessionDetailHeader(state: OpenSessionUiState) {
+    Text(
+        text = state.session.title,
+        style = MaterialTheme.typography.headlineMedium,
+        modifier = Modifier.semantics { heading() },
+    )
+    state.session.preview?.let { preview ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(text = preview, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+internal fun SessionDetailContent(
     state: OpenSessionUiState,
     mutation: SessionMutationUiState?,
     actionsEnabled: Boolean,
@@ -716,8 +961,18 @@ private fun SessionDetailContent(
     onEvent: (EntryUiEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val displayedMessages = state.messages + listOfNotNull(state.activeResponse)
+    // Without a transcript there is no weighted list to absorb the free space, so the pane
+    // scrolls as one surface and the composer and Send stay reachable in short windows.
+    val paneScrollState = rememberScrollState()
+    val tailScrollState = rememberScrollState()
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier =
+            if (displayedMessages.isEmpty()) {
+                modifier.fillMaxSize().verticalScroll(paneScrollState)
+            } else {
+                modifier.fillMaxSize()
+            },
         verticalArrangement = Arrangement.Top,
     ) {
         OutlinedButton(
@@ -727,82 +982,22 @@ private fun SessionDetailContent(
             Text(text = "Back to Sessions")
         }
         Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = state.session.title,
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.semantics { heading() },
-        )
-        state.session.preview?.let { preview ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = preview, style = MaterialTheme.typography.bodyLarge)
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedButton(
-            onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
-            enabled = !state.isRefreshing && !listRequestActive && mutation?.pendingAction == null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(text = "Refresh history")
-        }
-        if (state.isRefreshing) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text =
-                    if (state.isReconciliationInProgress) {
-                        "Refreshing Run and Session state…"
-                    } else {
-                        "Refreshing Session history…"
-                    },
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        if (state.isStale || listIsStale) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text =
-                    if (state.isStale) {
-                        "The displayed Session history may be stale."
-                    } else {
-                        "The displayed Session data may be stale."
-                    },
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
-        state.errorCategory?.let { category ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = category.safeMessage,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
-        listErrorCategory?.let { category ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = category.safeMessage,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
-        SessionActionControls(
-            session = state.session,
-            mutation = mutation,
-            enabled = actionsEnabled && mutation?.pendingAction == null,
-            onEvent = onEvent,
-        )
-        state.latestRun?.let { run ->
+        if (displayedMessages.isEmpty()) {
+            SessionDetailHeader(state = state)
             Spacer(modifier = Modifier.height(12.dp))
-            Text(text = "Latest Run: ${run.id.value}")
-            state.latestRunState?.let { runState ->
-                Text(
-                    text = "Run state: ${runState.label}",
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
-            } ?: Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
         }
-        Spacer(modifier = Modifier.height(16.dp))
-        val displayedMessages = state.messages + listOfNotNull(state.activeResponse)
+        if (displayedMessages.isEmpty()) {
+            SessionDetailSummary(
+                state = state,
+                mutation = mutation,
+                actionsEnabled = actionsEnabled,
+                listRequestActive = listRequestActive,
+                listIsStale = listIsStale,
+                listErrorCategory = listErrorCategory,
+                onEvent = onEvent,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
         val canSubmit =
             RunSubmissionState(
                 latestRun = state.latestRun,
@@ -816,6 +1011,22 @@ private fun SessionDetailContent(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // The header travels with the transcript, so a short pane or a large font
+                // scale scrolls it instead of pushing the composer and Send out of reach.
+                item {
+                    SessionDetailHeader(state = state)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    SessionDetailSummary(
+                        state = state,
+                        mutation = mutation,
+                        actionsEnabled = actionsEnabled,
+                        listRequestActive = listRequestActive,
+                        listIsStale = listIsStale,
+                        listErrorCategory = listErrorCategory,
+                        onEvent = onEvent,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 items(
                     items = displayedMessages,
                     key = { message -> message.id },
@@ -836,63 +1047,166 @@ private fun SessionDetailContent(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null
-        val sendEnabled =
-            composerEnabled &&
-                !state.isReconciliationInProgress &&
-                state.latestRunState != RunPresentationState.UNCERTAIN &&
-                state.sendErrorCategory != MessageSendErrorCategory.UNCERTAIN &&
-                !state.hasUnresolvedSubmission &&
-                canSubmit &&
-                state.composerText.isNotBlank()
-        OutlinedTextField(
-            value = state.composerText,
-            onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },
-            label = { Text("Message") },
-            placeholder = { Text("Write a message") },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = composerEnabled,
-            singleLine = false,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions =
-                KeyboardActions(
-                    onSend = {
-                        if (sendEnabled) onEvent(EntryUiEvent.SendMessageClicked)
-                    },
-                ),
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { onEvent(EntryUiEvent.SendMessageClicked) },
-            enabled = sendEnabled,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(
-                text =
-                    when {
-                        state.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN ||
-                            state.hasUnresolvedSubmission -> "Refresh history to resolve"
-                        state.sendErrorCategory != null -> "Try again"
-                        else -> "Send"
-                    },
-            )
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            // The composer tail keeps a floor of 120 dp for the transcript while the pane is
+            // tall enough, and below that it keeps a share of the space instead of collapsing;
+            // it scrolls on its own, so a long draft at a large font scale cannot push Send out
+            // of a short window.
+            val tailMaxHeight = paneTailMaxHeight(maxHeight)
+            Column(
+                modifier =
+                    Modifier.testTag("conversation-composer-tail").then(
+                        if (displayedMessages.isEmpty()) {
+                            Modifier
+                        } else {
+                            Modifier.fillMaxWidth()
+                                .heightIn(max = tailMaxHeight)
+                                .verticalScroll(tailScrollState)
+                        },
+                    ),
+            ) {
+                Spacer(modifier = Modifier.height(12.dp))
+                val composerEnabled = !state.isRefreshing && mutation?.pendingAction == null
+                val sendEnabled =
+                    composerEnabled &&
+                        !state.isReconciliationInProgress &&
+                        state.latestRunState != RunPresentationState.UNCERTAIN &&
+                        state.sendErrorCategory != MessageSendErrorCategory.UNCERTAIN &&
+                        !state.hasUnresolvedSubmission &&
+                        canSubmit &&
+                        state.composerText.isNotBlank()
+                OutlinedTextField(
+                    value = state.composerText,
+                    onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },
+                    label = { Text("Message") },
+                    placeholder = { Text("Write a message") },
+                    // A long draft scrolls inside the field instead of growing it without bound,
+                    // which would otherwise push Send out of a short window.
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = composerEnabled,
+                    singleLine = false,
+                    maxLines = 5,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions =
+                        KeyboardActions(
+                            onSend = {
+                                if (sendEnabled) onEvent(EntryUiEvent.SendMessageClicked)
+                            },
+                        ),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { onEvent(EntryUiEvent.SendMessageClicked) },
+                    enabled = sendEnabled,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text(
+                        text =
+                            when {
+                                state.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN ||
+                                    state.hasUnresolvedSubmission -> "Refresh history to resolve"
+                                state.sendErrorCategory != null -> "Try again"
+                                else -> "Send"
+                            },
+                    )
+                }
+                if (state.isSending) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Sending message…",
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+                state.sendErrorCategory?.let { category ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = category.safeMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+                    )
+                }
+            }
         }
-        if (state.isSending) {
-            Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+/**
+ * The Session summary above the transcript: history refresh, state warnings, Session actions,
+ * and Run information. It renders inside the transcript when one exists.
+ */
+@Composable
+private fun SessionDetailSummary(
+    state: OpenSessionUiState,
+    mutation: SessionMutationUiState?,
+    actionsEnabled: Boolean,
+    listRequestActive: Boolean,
+    listIsStale: Boolean,
+    listErrorCategory: SessionListErrorCategory?,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    OutlinedButton(
+        onClick = { onEvent(EntryUiEvent.RefreshSessionsClicked) },
+        enabled = !state.isRefreshing && !listRequestActive && mutation?.pendingAction == null,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) {
+        Text(text = "Refresh history")
+    }
+    if (state.isRefreshing) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text =
+                if (state.isReconciliationInProgress) {
+                    "Refreshing Run and Session state…"
+                } else {
+                    "Refreshing Session history…"
+                },
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    if (state.isStale || listIsStale) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text =
+                if (state.isStale) {
+                    "The displayed Session history may be stale."
+                } else {
+                    "The displayed Session data may be stale."
+                },
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+    state.errorCategory?.let { category ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = category.safeMessage,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+    listErrorCategory?.let { category ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = category.safeMessage,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+    SessionActionControls(
+        session = state.session,
+        mutation = mutation,
+        enabled = actionsEnabled && mutation?.pendingAction == null,
+        onEvent = onEvent,
+    )
+    state.latestRun?.let { run ->
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(text = "Latest Run: ${run.id.value}")
+        state.latestRunState?.let { runState ->
             Text(
-                text = "Sending message…",
+                text = "Run state: ${runState.label}",
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
-        }
-        state.sendErrorCategory?.let { category ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = category.safeMessage,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
+        } ?: Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
     }
 }
 

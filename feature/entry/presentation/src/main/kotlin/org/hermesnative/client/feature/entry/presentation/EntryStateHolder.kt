@@ -92,6 +92,8 @@ sealed interface EntryUiEvent {
 
     data object RefreshSessionsClicked : EntryUiEvent
 
+    data object RefreshSessionListClicked : EntryUiEvent
+
     data class SessionSearchQueryChanged(
         val value: String,
     ) : EntryUiEvent
@@ -482,6 +484,7 @@ class EntryStateHolder(
             EntryUiEvent.TryAgainClicked,
             -> verifyConnection()
             EntryUiEvent.RefreshSessionsClicked -> refreshSessions()
+            EntryUiEvent.RefreshSessionListClicked -> refreshSessionList()
             is EntryUiEvent.SessionSearchQueryChanged -> updateSearchQuery(event.value)
             EntryUiEvent.ClearSessionSearchClicked -> clearSearch()
             EntryUiEvent.LoadMoreSessionsClicked -> loadMoreSessions()
@@ -1331,6 +1334,8 @@ class EntryStateHolder(
     }
 
     private fun updateSearchQuery(value: String) {
+        var observationToClose: RunEventObservation? = null
+        var observationJobToCancel: Job? = null
         val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
@@ -1338,6 +1343,15 @@ class EntryStateHolder(
                 if (sessionList.searchQuery == value) return
                 if (sessionList.createSession?.isSubmitting == true) return
                 if (sessionList.sessionMutations.isNotEmpty()) return
+
+                // A search replaces the visible conversation with the result list, so the
+                // Session that leaves the pane is released like every other exit path; a later
+                // switch cannot do it, because by then the selection is already null.
+                sessionList.openedSession?.session?.id?.let { openedSessionId ->
+                    val released = releaseRunObservation(openedSessionId)
+                    observationJobToCancel = released.job
+                    observationToClose = released.observation
+                }
 
                 val gateway = sessionGateway
                 val requestGeneration = beginSessionRequest()
@@ -1368,6 +1382,8 @@ class EntryStateHolder(
                 }
             }
         job?.start()
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
     }
 
     private fun clearSearch() {
@@ -1383,26 +1399,61 @@ class EntryStateHolder(
                 val sessionList = _uiState.value.sessionList ?: return@synchronized null
                 if (sessionList.openedSession != null) {
                     refreshOpenedSession(gateway)
-                } else if (
-                    (sessionList.isLoading && !sessionList.isSearching) ||
-                    sessionList.isRefreshing ||
-                    sessionList.openingSessionId != null ||
-                    sessionList.createSession != null ||
-                    sessionList.hasPendingMutation
-                ) {
-                    null
                 } else {
-                    createFirstPageLoadJob(
-                        gateway = gateway,
-                        query = sessionList.searchQuery,
-                        isRefreshing = true,
-                        isSearching = false,
-                        preserveSessions = true,
-                    )
+                    startFirstPageListLoad(gateway, sessionList)
                 }
             }
         job?.start()
     }
+
+    /**
+     * Refreshes the Session list from the list pane itself. [refreshSessions] still serves the
+     * conversation's history refresh, so the list pane's button never acts on another pane.
+     */
+    private fun refreshSessionList() {
+        val gateway = sessionGateway ?: return
+        val job =
+            synchronized(sessionRequestLock) {
+                val sessionList = _uiState.value.sessionList ?: return@synchronized null
+                startFirstPageListLoad(gateway, sessionList)
+            }
+        job?.start()
+    }
+
+    /**
+     * Starts a first-page list load for [sessionList], or returns null when work is already in
+     * flight for the list or for the opened conversation's history refresh.
+     */
+    private fun startFirstPageListLoad(
+        gateway: SessionGatewayPort,
+        sessionList: SessionListUiState,
+    ): Job? =
+        if (sessionList.blocksFirstPageLoad()) {
+            null
+        } else {
+            createFirstPageLoadJob(
+                gateway = gateway,
+                query = sessionList.searchQuery,
+                isRefreshing = true,
+                isSearching = false,
+                preserveSessions = true,
+            )
+        }
+
+    /**
+     * True when a first-page list load would interrupt work that is already in flight, so the load
+     * must leave the state alone. This covers the list's own work and the opened conversation's
+     * history refresh and reconciliation, which cancel with [beginSessionRequest] and would
+     * otherwise stay refreshing or reconciling forever when a list load replaces them.
+     */
+    private fun SessionListUiState.blocksFirstPageLoad(): Boolean =
+        (isLoading && !isSearching) ||
+            isRefreshing ||
+            openingSessionId != null ||
+            createSession != null ||
+            hasPendingMutation ||
+            openedSession?.isRefreshing == true ||
+            openedSession?.isReconciliationInProgress == true
 
     private fun refreshOpenedSession(gateway: SessionGatewayPort): Job? =
         synchronized(sessionRequestLock) {
@@ -2174,6 +2225,8 @@ class EntryStateHolder(
                     sessionList.isSearching ||
                     sessionList.isLoadingMore ||
                     sessionList.isUnavailable ||
+                    sessionList.openedSession?.isRefreshing == true ||
+                    sessionList.openedSession?.isReconciliationInProgress == true ||
                     sessionList.openingSessionId != null ||
                     sessionList.createSession != null ||
                     sessionList.sessionMutations.isNotEmpty()
@@ -2235,14 +2288,34 @@ class EntryStateHolder(
         ) {
             return
         }
-        _uiState.value =
-            state.copy(
-                sessionList =
-                    sessionList.copy(
-                        createSession = SessionCreationUiState(),
-                        errorCategory = null,
-                    ),
-            )
+        var observationToClose: RunEventObservation? = null
+        var observationJobToCancel: Job? = null
+        synchronized(sessionRequestLock) {
+            val current = _uiState.value.sessionList ?: return
+            current.openedSession?.session?.id?.let { sessionId ->
+                val released = releaseRunObservation(sessionId)
+                observationJobToCancel = released.job
+                observationToClose = released.observation
+                // Replacing the conversation abandons its in-flight request, exactly like
+                // returning to the list or searching again does.
+                beginSessionRequest()
+            }
+            _uiState.value =
+                _uiState.value.copy(
+                    sessionList =
+                        current.copy(
+                            createSession = SessionCreationUiState(),
+                            // Starting a creation from a visible conversation replaces it: the
+                            // two-pane layout shows the list next to the open Session, so the
+                            // creation form must become the visible pane. The conversation's run
+                            // observation is released exactly like any other way of leaving it.
+                            openedSession = null,
+                            errorCategory = null,
+                        ),
+                )
+        }
+        observationJobToCancel?.cancel()
+        observationToClose?.close()
     }
 
     private fun updateCreateSessionTitle(value: String) {
@@ -3193,6 +3266,7 @@ class EntryStateHolder(
 
     private fun openSession(sessionId: SessionId) {
         val gateway = sessionGateway ?: return
+        var replacedSessionId: SessionId? = null
         val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
@@ -3215,6 +3289,10 @@ class EntryStateHolder(
                 ) {
                     return
                 }
+                // A Session that leaves the conversation pane is released exactly like any other
+                // way of leaving a conversation. The release waits for the Open to succeed, so a
+                // failed switch leaves the still-visible Session with its observation running.
+                replacedSessionId = sessionList.openedSession?.session?.id?.takeIf { it != sessionId }
 
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
@@ -3274,6 +3352,14 @@ class EntryStateHolder(
                                 )
                             }
                         if (applied) {
+                            // The replacement succeeded, so the Session that just left the pane is
+                            // released here and not earlier: a failed Open leaves it on screen, and
+                            // its observation then has to keep running.
+                            replacedSessionId?.let { releasedSessionId ->
+                                val released = synchronized(sessionRequestLock) { releaseRunObservation(releasedSessionId) }
+                                released.job?.cancel()
+                                released.observation?.close()
+                            }
                             val pendingTimeoutRecovery =
                                 synchronized(sessionRequestLock) {
                                     pendingTimedOutSends[sessionId]
@@ -3336,6 +3422,23 @@ class EntryStateHolder(
         }
     }
 
+    /**
+     * Releases the run observation of a Session that leaves the conversation pane, so every
+     * path that closes a conversation cleans up the same way.
+     */
+    private fun releaseRunObservation(sessionId: SessionId): RunObservationRelease {
+        retainUnconfirmedTerminalRuns(sessionId)
+        val job = runObservationJobs.remove(sessionId)
+        val observation = runObservations.remove(sessionId)
+        runObservationRunIds.remove(sessionId)
+        return RunObservationRelease(job = job, observation = observation)
+    }
+
+    private data class RunObservationRelease(
+        val job: Job?,
+        val observation: RunEventObservation?,
+    )
+
     private fun returnToSessionList() {
         var observationToClose: RunEventObservation? = null
         var observationJobToCancel: Job? = null
@@ -3355,10 +3458,9 @@ class EntryStateHolder(
                 return
             }
             current.openedSession?.session?.id?.let { sessionId ->
-                retainUnconfirmedTerminalRuns(sessionId)
-                observationJobToCancel = runObservationJobs[sessionId]
-                observationToClose = runObservations.remove(sessionId)
-                runObservationRunIds.remove(sessionId)
+                val released = releaseRunObservation(sessionId)
+                observationJobToCancel = released.job
+                observationToClose = released.observation
             }
             beginSessionRequest()
             _uiState.value =

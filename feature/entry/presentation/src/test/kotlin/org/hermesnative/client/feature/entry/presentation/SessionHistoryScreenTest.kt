@@ -79,7 +79,8 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Run result: Done").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Completed").performScrollTo().assertIsDisplayed()
         composeTestRule.onNode(hasText("Timestamp:", substring = true)).performScrollTo().assertIsDisplayed()
-        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        // Index 0 is the Session summary, so the message items start at 1.
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
         composeTestRule.onNodeWithText("Answer").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Role: assistant").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Message").assertIsDisplayed().assertIsEnabled()
@@ -572,17 +573,19 @@ class SessionHistoryScreenTest {
         }
 
         composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(2)
-        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        // Index 0 is the Session summary, so the message items start at 1.
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
         composeTestRule.onNodeWithText("Run ID: run-failed").assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Failed").assertIsDisplayed()
         composeTestRule.onNodeWithText(RunFailureCategory.GATEWAY_REPORTED.safeMessage).assertIsDisplayed()
         composeTestRule.onAllNodesWithText("Try again").assertCountEquals(1)
-        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
         composeTestRule.onNodeWithText("Run ID: run-retried").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Retry answer").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Completed").assertIsDisplayed()
         composeTestRule.onNodeWithText("Run result: Done").assertIsDisplayed()
-        composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(2)
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
+        composeTestRule.onNodeWithText("Run ID: run-failed").assertIsDisplayed()
     }
 
     @Test

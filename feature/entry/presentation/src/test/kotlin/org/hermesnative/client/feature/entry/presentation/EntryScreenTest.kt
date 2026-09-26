@@ -389,7 +389,7 @@ class EntryScreenTest {
         composeTestRule.onNodeWithText("No Sessions on this Gateway").assertDoesNotExist()
         composeTestRule.onNodeWithText("Try again").assertHasClickAction().performClick()
 
-        assertEquals(listOf(EntryUiEvent.RefreshSessionsClicked), events)
+        assertEquals(listOf(EntryUiEvent.RefreshSessionListClicked), events)
     }
 
     @Test
@@ -582,7 +582,7 @@ class EntryScreenTest {
             .onNodeWithText("The Gateway returned no Sessions. Create one to get started.")
             .assertIsDisplayed()
         composeTestRule.onNodeWithText("Refresh").assertHasClickAction().performClick()
-        assertEquals(listOf(EntryUiEvent.RefreshSessionsClicked), events)
+        assertEquals(listOf(EntryUiEvent.RefreshSessionListClicked), events)
     }
 
     @Test
@@ -769,7 +769,7 @@ class EntryScreenTest {
 
         composeTestRule.onNodeWithText(SessionListErrorCategory.GATEWAY_UNAVAILABLE.safeMessage).assertIsDisplayed()
         composeTestRule.onNodeWithText("Try again").assertHasClickAction().performClick()
-        assertEquals(EntryUiEvent.RefreshSessionsClicked, events.single())
+        assertEquals(EntryUiEvent.RefreshSessionListClicked, events.single())
     }
 
     @Test

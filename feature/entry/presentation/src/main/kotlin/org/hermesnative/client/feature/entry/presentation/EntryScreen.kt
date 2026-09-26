@@ -1,13 +1,19 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -39,63 +45,79 @@ fun EntryScreen(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        if (state.sessionList != null) {
-            SessionListContent(
-                state = state.sessionList,
-                onEvent = onEvent,
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                runStatusNotifications = state.runStatusNotifications,
-            )
-        } else {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = "Hermes Native Client",
-                    style = MaterialTheme.typography.headlineMedium,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.semantics { heading() },
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)),
+        ) {
+            val sessionList = state.sessionList
+            if (sessionList != null) {
+                SessionShell(
+                    state = sessionList,
+                    runStatusNotifications = state.runStatusNotifications,
+                    onEvent = onEvent,
+                    modifier = Modifier.fillMaxSize().padding(LocalHermesDesignTokens.current.spacing.xl),
                 )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = state.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = state.supportingText,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                when {
-                    state.isConnected -> ConnectedGatewayContent(onEvent)
-                    state.connectionSetupRequested ->
-                        GatewayConnectionForm(
-                            state = state,
-                            onEvent = onEvent,
-                        )
-                    else ->
-                        Button(
-                            onClick = { onEvent(EntryUiEvent.AddGatewayConnectionClicked) },
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp),
-                        ) {
-                            Text(text = state.actionLabel)
-                        }
-                }
+            } else {
+                ConnectionContent(state = state, onEvent = onEvent)
             }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionContent(
+    state: EntryUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(LocalHermesDesignTokens.current.spacing.xl),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "Hermes Native Client",
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = state.title,
+            style = MaterialTheme.typography.headlineSmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = state.supportingText,
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        when {
+            state.isConnected -> ConnectedGatewayContent(onEvent)
+            state.connectionSetupRequested ->
+                GatewayConnectionForm(
+                    state = state,
+                    onEvent = onEvent,
+                )
+            else ->
+                Button(
+                    onClick = { onEvent(EntryUiEvent.AddGatewayConnectionClicked) },
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
+                ) {
+                    Text(text = state.actionLabel)
+                }
         }
     }
 }

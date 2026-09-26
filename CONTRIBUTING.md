@@ -49,7 +49,8 @@ images with the JVM/Robolectric Compose test gate.
 
 `feature/entry/presentation/src/test/roborazzi-baselines.txt` lists the PNGs
 that belong to the matrix. Each entry maps to one test method in
-`SelectedVisualRegressionTest`.
+`SelectedVisualRegressionTest` or, for the shell window contracts, in
+`SelectedShellVisualRegressionTest`.
 
 | State | Compose surface | Reason for inclusion |
 | --- | --- | --- |
@@ -66,6 +67,19 @@ that belong to the matrix. Each entry maps to one test method in
 | `session_detail_active_run` | Session detail | Active run with a partial response |
 | `session_detail_error` | Session detail | Failed send with the draft preserved |
 
+### Shell contract matrix
+
+`SelectedShellVisualRegressionTest` pins the adaptive shell contract with one
+Session/conversation state rendered in intentional light and dark themes on a
+phone single-pane window and on a two-pane window.
+
+| State | Window | Reason for inclusion |
+| --- | --- | --- |
+| `phone_single_pane_light` | `w411dp-h891dp-notnight` | Phone conversation with the light token set |
+| `phone_single_pane_dark` | `w411dp-h891dp-night` | Phone conversation with the dark token set |
+| `two_pane_light` | `w1000dp-h800dp-notnight` | Session list and conversation side by side, light token set |
+| `two_pane_dark` | `w1000dp-h800dp-night` | Session list and conversation side by side, dark token set |
+
 The current implementation has no dialog overlay such as `Dialog` or
 `AlertDialog`. Here, "modal" means a conditional confirmation mode in the
 existing Compose state model. The rename and delete confirmation modes are
@@ -74,10 +88,12 @@ screenshot.
 
 The matrix uses Robolectric SDK 35, a fixed `w411dp-h891dp-notnight` viewport,
 native graphics mode, the light `HermesTheme`, and synthetic in-memory values.
-It excludes timestamps, live Gateway/provider data, credentials, animated
-loading states, Activity lifecycle behavior, system theme switching, and other
-system-dependent rendering. Behavior and semantics tests remain in their
-existing test classes.
+The shell contract class uses the viewport qualifiers above and selects the
+light or dark token set explicitly, so each capture proves one designed theme
+instead of the ambient system setting. Both classes exclude timestamps, live
+Gateway/provider data, credentials, animated loading states, Activity lifecycle
+behavior, and other system-dependent rendering. Behavior and semantics tests
+remain in their existing test classes.
 
 The pull-request Compose job first runs
 `verifyRoborazziBaselineManifest`. It reports `Missing baselines` and

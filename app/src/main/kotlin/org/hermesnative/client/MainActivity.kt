@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -20,6 +21,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The shell consumes system-bar and display-cutout insets itself, so the
+        // window draws edge to edge; the platform keeps handling the soft
+        // keyboard, which must not collapse the shell's scrollable content.
+        enableEdgeToEdge()
         entryStateHolder = EntryWiring.createEntryStateHolder(applicationContext)
         setContent {
             val notificationPermissionLauncher =
