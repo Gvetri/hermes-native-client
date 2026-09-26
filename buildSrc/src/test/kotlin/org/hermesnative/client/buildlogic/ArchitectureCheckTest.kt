@@ -90,6 +90,30 @@ class ArchitectureCheckTest {
     }
 
     @Test
+    fun rejects_executable_web_content_in_presentation() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/presentation/src/main/kotlin/org/hermesnative/client/feature/entry/presentation/MarkdownContent.kt",
+            content = "\nval forbiddenWebContent = android.webkit.WebView(null)\n",
+        )
+    }
+
+    @Test
+    fun rejects_network_access_to_a_link_destination_in_presentation() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/presentation/src/main/kotlin/org/hermesnative/client/feature/entry/presentation/MarkdownContent.kt",
+            content = "\nval forbiddenPrefetch = java.net.URL(\"https://example.com/secure\")\n",
+        )
+    }
+
+    @Test
+    fun accepts_the_presentation_renderer_of_a_supported_construct() {
+        assertArchitectureAccepted(
+            relativePath = "feature/entry/presentation/src/main/kotlin/org/hermesnative/client/feature/entry/presentation/MarkdownContent.kt",
+            content = "\nval allowedContent = \"https://example.com/secure\"\n",
+        )
+    }
+
+    @Test
     fun accepts_fully_qualified_domain_port_reference_in_application() {
         assertArchitectureAccepted(
             relativePath = "feature/entry/application/src/main/kotlin/org/hermesnative/client/feature/entry/application/LoadEntryState.kt",

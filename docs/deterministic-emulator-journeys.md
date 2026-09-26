@@ -50,10 +50,13 @@ public-network dependency, real provider credentials, or live model execution.
   The client currently defines no optional capabilities, so the disabled-
   with-explanation surface is the required-capability explanation plus
   unknown-additive tolerance.
-- Markdown and link safety are pinned as literal, inert text: the journey
-  shows a benign HTTPS link and a `javascript:` scheme rendered exactly as
-  authored, because the client renders message content as plain text (no
-  Markdown execution, no automatic linkification).
+- Markdown and link safety are pinned by rendering outcome: the journey shows
+  emphasis and an HTTPS link rendered natively (neither the `**` markers nor the
+  link target are ever displayed), a rejected `javascript:` scheme left as inert
+  label text exactly as authored, a fenced code block rendered literally with its
+  own Copy action, and each message card carrying its own explicit Copy and Share
+  actions. Message content is never executed, and no link leaves the
+  client without an explicit user selection.
 
 ## Running locally
 
