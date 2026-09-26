@@ -522,6 +522,27 @@ class SessionShellTest {
         composeTestRule.onNodeWithText("No Session selected").assertDoesNotExist()
     }
 
+    @Test
+    @Config(qualifiers = "w1000dp-h800dp")
+    fun list_pane_controls_are_disabled_while_the_open_conversation_reconciles() {
+        setShellContent(
+            sessionList =
+                SessionListUiState(
+                    sessions = listOf(session("first", "First Session")),
+                    nextCursor = "cursor-one",
+                    openedSession =
+                        OpenSessionUiState(
+                            session = session("first", "First Session"),
+                            messages = listOf(message("message-1", "user", "Conversation message")),
+                            isReconciliationInProgress = true,
+                        ),
+                ),
+        )
+
+        composeTestRule.onNodeWithText("Refresh").assertIsNotEnabled()
+        composeTestRule.onNodeWithText("Load more Sessions").assertIsNotEnabled()
+    }
+
     private fun phoneConfiguration(): Configuration =
         Configuration().apply {
             screenWidthDp = 411

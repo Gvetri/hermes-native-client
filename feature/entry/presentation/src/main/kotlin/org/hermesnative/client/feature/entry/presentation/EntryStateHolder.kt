@@ -1443,8 +1443,8 @@ class EntryStateHolder(
     /**
      * True when a first-page list load would interrupt work that is already in flight, so the load
      * must leave the state alone. This covers the list's own work and the opened conversation's
-     * history refresh, which cancels with [beginSessionRequest] and would otherwise stay refreshing
-     * forever when a list load replaces it.
+     * history refresh and reconciliation, which cancel with [beginSessionRequest] and would
+     * otherwise stay refreshing or reconciling forever when a list load replaces them.
      */
     private fun SessionListUiState.blocksFirstPageLoad(): Boolean =
         (isLoading && !isSearching) ||
@@ -1452,7 +1452,8 @@ class EntryStateHolder(
             openingSessionId != null ||
             createSession != null ||
             hasPendingMutation ||
-            openedSession?.isRefreshing == true
+            openedSession?.isRefreshing == true ||
+            openedSession?.isReconciliationInProgress == true
 
     private fun refreshOpenedSession(gateway: SessionGatewayPort): Job? =
         synchronized(sessionRequestLock) {
@@ -2225,6 +2226,7 @@ class EntryStateHolder(
                     sessionList.isLoadingMore ||
                     sessionList.isUnavailable ||
                     sessionList.openedSession?.isRefreshing == true ||
+                    sessionList.openedSession?.isReconciliationInProgress == true ||
                     sessionList.openingSessionId != null ||
                     sessionList.createSession != null ||
                     sessionList.sessionMutations.isNotEmpty()
@@ -2294,6 +2296,9 @@ class EntryStateHolder(
                 val released = releaseRunObservation(sessionId)
                 observationJobToCancel = released.job
                 observationToClose = released.observation
+                // Replacing the conversation abandons its in-flight request, exactly like
+                // returning to the list or searching again does.
+                beginSessionRequest()
             }
             _uiState.value =
                 _uiState.value.copy(

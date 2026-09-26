@@ -414,7 +414,8 @@ private fun SessionListPaneControls(
                 state.openingSessionId == null &&
                 !state.hasPendingMutation &&
                 state.createSession == null &&
-                state.openedSession?.isRefreshing != true,
+                state.openedSession?.isRefreshing != true &&
+                state.openedSession?.isReconciliationInProgress != true,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
     ) {
         Text(text = if (state.isUnavailable) "Try again" else "Refresh")
@@ -543,7 +544,8 @@ private fun SessionPaginationFooter(
                         !state.isRefreshing &&
                         state.sessionMutations.isEmpty() &&
                         state.createSession == null &&
-                        state.openedSession?.isRefreshing != true,
+                        state.openedSession?.isRefreshing != true &&
+                        state.openedSession?.isReconciliationInProgress != true,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) {
                 Text(text = "Load more Sessions")

@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -246,6 +247,110 @@ class RunReconciliationStateHolderTest {
             assertTrue(recoveryRegistry.load().isEmpty())
         } finally {
             gateway.releaseStatus.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun a_list_pane_refresh_cannot_strand_a_reconciling_conversation() {
+        val session = session()
+        val run = Run(RunId("run-list-race"), session.id, "succeeded")
+        val gateway =
+            FakeGateway(session).apply {
+                // The opened history already carries a Run: that is what starts the reconcile.
+                histories.add(
+                    SessionHistory(
+                        session.id,
+                        listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                        null,
+                    ),
+                )
+                statuses.add(run)
+                runs.add(run)
+            }
+        val registry = ArmingRunRecoveryRegistry()
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = registry)
+
+        try {
+            connect(holder, gateway)
+            awaitCondition { privateField(holder, "recoveryLoadPending") == false }
+            registry.armed = true
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+
+            // Opening a Session whose history already carries a Run reconciles before it settles,
+            // so the conversation is reconciling while the list pane's refresh is still allowed.
+            assertTrue(registry.entered.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) { state ->
+                val opened = state.sessionList?.openedSession
+                opened != null &&
+                    opened.session.id == session.id &&
+                    opened.isReconciliationInProgress &&
+                    !opened.isRefreshing
+            }
+
+            val listRequestsBefore = gateway.listRequests
+            holder.onEvent(EntryUiEvent.RefreshSessionListClicked)
+            val listLoadedOverTheConversation = settles { gateway.listRequests > listRequestsBefore }
+            registry.release.countDown()
+
+            assertFalse(
+                "the list pane refresh replaced the conversation's in-flight request",
+                listLoadedOverTheConversation,
+            )
+            awaitState(holder) { state ->
+                val opened = state.sessionList?.openedSession
+                opened != null && opened.session.id == session.id && !opened.isReconciliationInProgress
+            }
+        } finally {
+            registry.release.countDown()
+            holder.close()
+        }
+    }
+
+    @Test
+    fun replacing_a_reconciling_conversation_leaves_no_reconciliation_outcome_behind() {
+        val session = session()
+        val run = Run(RunId("run-create-race"), session.id, "succeeded")
+        val gateway =
+            FakeGateway(session).apply {
+                // The opened history already carries a Run: that is what starts the reconcile.
+                histories.add(
+                    SessionHistory(
+                        session.id,
+                        listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
+                        null,
+                    ),
+                )
+                statuses.add(run)
+                runs.add(run)
+            }
+        val registry = ArmingRunRecoveryRegistry(failAfterRelease = true)
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = registry)
+
+        try {
+            connect(holder, gateway)
+            awaitCondition { privateField(holder, "recoveryLoadPending") == false }
+            registry.armed = true
+
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            assertTrue(registry.entered.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            awaitState(holder) { it.sessionList?.openedSession?.isReconciliationInProgress == true }
+
+            holder.onEvent(EntryUiEvent.CreateSessionClicked)
+            awaitState(holder) { it.sessionList?.createSession != null }
+            assertNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            registry.release.countDown()
+
+            assertFalse(
+                "the replaced conversation's request recorded its outcome after it left the screen",
+                settles {
+                    privateField(holder, "recoveryLoadFailed") == true ||
+                        session.id in recoveryUnavailableSessions(holder)
+                },
+            )
+        } finally {
+            registry.release.countDown()
             holder.close()
         }
     }
@@ -2080,6 +2185,63 @@ class RunReconciliationStateHolderTest {
         }
     }
 
+    private fun connect(
+        holder: EntryStateHolder,
+        gateway: FakeGateway,
+    ) {
+        holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
+        holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
+        holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
+        holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
+        awaitState(holder) { it.sessionList?.sessions == listOf(gateway.session.toSessionItemUiState()) }
+    }
+
+    /**
+     * Waits up to [SETTLE_MILLIS] for [predicate]. Behaviour that must *not* happen can only be
+     * checked by giving the stray request a bounded chance to appear first.
+     */
+    private fun settles(predicate: () -> Boolean): Boolean {
+        val appeared =
+            runBlocking {
+                try {
+                    withTimeout(SETTLE_MILLIS) {
+                        while (!predicate()) delay(5)
+                    }
+                    true
+                } catch (_: TimeoutCancellationException) {
+                    false
+                }
+            }
+        return appeared || predicate()
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun recoveryUnavailableSessions(holder: EntryStateHolder): Set<SessionId> =
+        privateField(holder, "recoveryUnavailableSessions") as Set<SessionId>
+
+    /** Holds [load] open once [armed], so a request can be caught between its state and its work. */
+    private class ArmingRunRecoveryRegistry(
+        private val failAfterRelease: Boolean = false,
+    ) : RunRecoveryRegistry {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+
+        @Volatile
+        var armed = false
+
+        override fun load(): List<RunRecoveryEntry> {
+            if (!armed) return emptyList()
+            entered.countDown()
+            check(release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "recovery load was not released." }
+            if (failAfterRelease) error("recovery registry is unavailable")
+            return emptyList()
+        }
+
+        override fun save(entry: RunRecoveryEntry) = Unit
+
+        override fun remove(entry: RunRecoveryEntry) = Unit
+    }
+
     private fun holder(
         gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
@@ -2188,6 +2350,8 @@ class RunReconciliationStateHolderTest {
         val observations = ArrayDeque<RunEventObservation>()
         private val historyRequestCount = AtomicInteger(0)
         val historyRequests: Int get() = historyRequestCount.get()
+        private val listRequestCount = AtomicInteger(0)
+        val listRequests: Int get() = listRequestCount.get()
         var observation: RunEventObservation = ScriptedObservation(emptyList())
         var blockRunCreation = false
         var failRunCreation = false
@@ -2210,7 +2374,10 @@ class RunReconciliationStateHolderTest {
         val secondObservationRequested = CountDownLatch(1)
         private val observationRequests = mutableListOf<RunId>()
 
-        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session), null)
+        override fun listSessions(request: SessionListRequest): SessionPage {
+            listRequestCount.incrementAndGet()
+            return SessionPage(listOf(session), null)
+        }
 
         override fun createSession(title: String?): Session = error("not used")
 
@@ -2525,5 +2692,6 @@ class RunReconciliationStateHolderTest {
 
     private companion object {
         const val TEST_TIMEOUT_MILLIS = 5_000L
+        const val SETTLE_MILLIS = 500L
     }
 }
