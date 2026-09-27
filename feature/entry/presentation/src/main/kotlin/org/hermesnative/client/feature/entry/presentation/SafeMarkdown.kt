@@ -97,8 +97,9 @@ internal fun parseSafeMarkdown(content: String): List<MarkdownBlock> {
             isFenceLine(line) -> {
                 flushParagraph()
                 val code = mutableListOf<String>()
+                val openingFenceLength = fenceLength(line)
                 index++
-                while (index < lines.size && !isFenceLine(lines[index])) {
+                while (index < lines.size && !isClosingFence(lines[index], openingFenceLength)) {
                     code += lines[index]
                     index++
                 }
@@ -198,6 +199,14 @@ private fun emphasisedRange(
 private fun parseInline(text: String): List<MarkdownSpan> {
     val spans = mutableListOf<MarkdownSpan>()
     val literal = StringBuilder()
+    val nextClosingBrackets = if (text.indexOf(LINK_OPEN) >= 0) IntArray(text.length) else IntArray(0)
+    if (nextClosingBrackets.isNotEmpty()) {
+        var nextClosingBracket = -1
+        for (position in text.lastIndex downTo 0) {
+            if (text[position] == ']') nextClosingBracket = position
+            nextClosingBrackets[position] = nextClosingBracket
+        }
+    }
 
     fun flushLiteral() {
         if (literal.isNotEmpty()) {
@@ -215,13 +224,13 @@ private fun parseInline(text: String): List<MarkdownSpan> {
             text.startsWith(IMAGE_PREFIX, index) -> {
                 // An image is not a supported construct: it stays inert source text
                 // instead of turning into a link that carries the image target.
-                val image = linkAt(text, index + IMAGE_PREFIX.length)
+                val image = linkAt(text, index + IMAGE_PREFIX.length, nextClosingBrackets)
                 val end = image?.endIndex ?: index + IMAGE_PREFIX.length
                 literal.append(text, index, end)
                 index = end
             }
             text.startsWith(LINK_OPEN, index) -> {
-                val link = linkAt(text, index)
+                val link = linkAt(text, index, nextClosingBrackets)
                 if (link == null) {
                     literal.append(text[index])
                     index++
@@ -272,9 +281,10 @@ private data class LinkMatch(
 private fun linkAt(
     text: String,
     index: Int,
+    nextClosingBrackets: IntArray,
 ): LinkMatch? {
     if (!text.startsWith(LINK_OPEN, index)) return null
-    val labelEnd = text.indexOf(']', startIndex = index + 1)
+    val labelEnd = nextClosingBrackets[index]
     if (labelEnd < 0) return null
     val destinationStart = labelEnd + 2
     if (destinationStart >= text.length || text[labelEnd + 1] != '(') return null
@@ -296,8 +306,21 @@ private fun linkAt(
     )
 }
 
-/** Whether the line opens or closes a fenced code block. */
-private fun isFenceLine(line: String): Boolean = line.trimStart().startsWith(CODE_FENCE)
+/** The opening backtick run length of a fenced code block, or zero when the line has no fence. */
+private fun fenceLength(line: String): Int = line.trimStart().takeWhile { it == '`' }.length
+
+/** Whether the line opens a fenced code block. */
+private fun isFenceLine(line: String): Boolean = fenceLength(line) >= CODE_FENCE.length
+
+/** Whether a line closes the fence opened with [openingFenceLength] backticks. */
+private fun isClosingFence(
+    line: String,
+    openingFenceLength: Int,
+): Boolean {
+    val trimmed = line.trim()
+    val closingFenceLength = fenceLength(trimmed)
+    return closingFenceLength >= openingFenceLength && trimmed.drop(closingFenceLength).isEmpty()
+}
 
 /** The optional info string of a fence line, which names the code language. */
-private fun fenceLanguage(line: String): String? = line.trimStart().drop(CODE_FENCE.length).trim().substringBefore(' ').ifEmpty { null }
+private fun fenceLanguage(line: String): String? = line.trimStart().drop(fenceLength(line)).trim().substringBefore(' ').ifEmpty { null }

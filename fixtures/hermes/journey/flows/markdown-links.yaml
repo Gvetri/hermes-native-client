@@ -31,12 +31,13 @@ name: markdown-links
     direction: DOWN
 - assertVisible: ".*Visit the safe HTTPS link.*"
 - assertNotVisible: ".*example.com/secure.*"
-# A rejected scheme stays inert text exactly as authored.
+# A rejected Markdown destination renders as its inert label, not as a target.
 - scrollUntilVisible:
     element:
       text: ".*stays plain text.*"
     direction: DOWN
-- assertVisible: ".*javascript:alert.*"
+- assertVisible: ".*inert label.*"
+- assertNotVisible: ".*javascript:.*"
 # A fenced code block renders literally in its own scrollable region.
 - scrollUntilVisible:
     element:

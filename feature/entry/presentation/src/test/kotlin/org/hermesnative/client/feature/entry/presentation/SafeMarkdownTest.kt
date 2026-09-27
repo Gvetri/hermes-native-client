@@ -78,6 +78,18 @@ class SafeMarkdownTest {
     }
 
     @Test
+    fun a_fence_like_line_does_not_close_a_longer_fenced_code_block() {
+        val blocks =
+            parseSafeMarkdown(
+                "````kotlin\n```\n````python\n**not bold** [x](https://example.com)\n````",
+            )
+
+        val code = blocks.single() as MarkdownBlock.CodeBlock
+        assertEquals("kotlin", code.language)
+        assertEquals("```\n````python\n**not bold** [x](https://example.com)", code.code)
+    }
+
+    @Test
     fun an_unterminated_fence_keeps_its_lines_as_code_while_a_response_streams() {
         val blocks = parseSafeMarkdown("```\nstreaming line 1\nstreaming line 2")
 
@@ -198,6 +210,15 @@ class SafeMarkdownTest {
 
         assertTrue(blocks.isNotEmpty())
         assertTrue("The parse lost its trailing content", blocks.plainText().endsWith("tail-marker"))
+    }
+
+    @Test(timeout = 2_000)
+    fun many_unmatched_link_brackets_do_not_make_parsing_quadratic() {
+        val content = "[".repeat(500_000)
+
+        val blocks = parseSafeMarkdown(content)
+
+        assertEquals(content, blocks.plainText())
     }
 }
 

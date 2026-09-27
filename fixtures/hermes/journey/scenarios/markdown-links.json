@@ -37,7 +37,7 @@
         {
           "id": "message-markdown-3",
           "role": "assistant",
-          "content": "Unsafe scheme javascript:alert(1) stays plain text"
+          "content": "Unsafe scheme [inert label](javascript:alert(1)) stays plain text"
         },
         {
           "id": "message-markdown-4",
