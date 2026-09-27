@@ -165,6 +165,15 @@ class SafeMarkdownTest {
     }
 
     @Test
+    fun an_image_construct_stays_literal_around_a_link_nested_in_its_label() {
+        val content = "![alt [inner](https://example.com)](https://example.com/pixel.png)"
+        val blocks = parseSafeMarkdown(content)
+
+        assertEquals(content, blocks.plainText())
+        assertTrue("An image construct must stay inert", blocks.spans().all { it.link == null })
+    }
+
+    @Test
     fun unpaired_link_syntax_stays_literal_text() {
         val blocks = parseSafeMarkdown("Broken [link(https://example.com) and [label] without a target")
 

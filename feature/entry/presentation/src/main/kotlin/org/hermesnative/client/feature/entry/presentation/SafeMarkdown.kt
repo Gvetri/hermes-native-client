@@ -216,8 +216,11 @@ private fun parseInline(text: String): List<MarkdownSpan> {
         when {
             text.startsWith(IMAGE_PREFIX, index) -> {
                 // An image is not a supported construct: it stays inert source text
-                // instead of turning into a link that carries the image target.
-                val image = linkAt(text, index + IMAGE_PREFIX.length, linkBrackets)
+                // instead of turning into a link that carries the image target. The label's
+                // bracket follows the '!' this branch matched, so the lookup starts there and
+                // the whole construct is consumed as literal text.
+                val labelBracket = index + 1
+                val image = linkAt(text, labelBracket, linkBrackets)
                 val end = image?.endIndex ?: index + IMAGE_PREFIX.length
                 literal.append(text, index, end)
                 index = end
