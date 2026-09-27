@@ -199,14 +199,7 @@ private fun emphasisedRange(
 private fun parseInline(text: String): List<MarkdownSpan> {
     val spans = mutableListOf<MarkdownSpan>()
     val literal = StringBuilder()
-    val nextClosingBrackets = if (text.indexOf(LINK_OPEN) >= 0) IntArray(text.length) else IntArray(0)
-    if (nextClosingBrackets.isNotEmpty()) {
-        var nextClosingBracket = -1
-        for (position in text.lastIndex downTo 0) {
-            if (text[position] == ']') nextClosingBracket = position
-            nextClosingBrackets[position] = nextClosingBracket
-        }
-    }
+    val linkBrackets = if (text.indexOf(LINK_OPEN) >= 0) LinkBrackets(text) else null
 
     fun flushLiteral() {
         if (literal.isNotEmpty()) {
@@ -224,13 +217,13 @@ private fun parseInline(text: String): List<MarkdownSpan> {
             text.startsWith(IMAGE_PREFIX, index) -> {
                 // An image is not a supported construct: it stays inert source text
                 // instead of turning into a link that carries the image target.
-                val image = linkAt(text, index + IMAGE_PREFIX.length, nextClosingBrackets)
+                val image = linkAt(text, index + IMAGE_PREFIX.length, linkBrackets)
                 val end = image?.endIndex ?: index + IMAGE_PREFIX.length
                 literal.append(text, index, end)
                 index = end
             }
             text.startsWith(LINK_OPEN, index) -> {
-                val link = linkAt(text, index, nextClosingBrackets)
+                val link = linkAt(text, index, linkBrackets)
                 if (link == null) {
                     literal.append(text[index])
                     index++
@@ -274,35 +267,63 @@ private data class LinkMatch(
 )
 
 /**
+ * The bracket pairings of one text run, computed once per run so that no link candidate scans
+ * the text for itself: the nearest closing bracket after every position, and the destination
+ * end of every opening parenthesis. A candidate that scanned for itself made parsing quadratic
+ * on bracket-heavy content, which a crafted message could use to stall rendering.
+ */
+private class LinkBrackets(
+    text: String,
+) {
+    /** The closing bracket that ends a label opened at each position, or -1 when there is none. */
+    val labelEnds = IntArray(text.length)
+
+    /** The index just past the destination opened at each position, or -1 when it never closes. */
+    val destinationEnds = IntArray(text.length) { -1 }
+
+    init {
+        var nextClosingBracket = -1
+        for (position in text.lastIndex downTo 0) {
+            if (text[position] == ']') nextClosingBracket = position
+            labelEnds[position] = nextClosingBracket
+        }
+
+        // A destination ends at the first closing parenthesis to its right that no other opening
+        // parenthesis has taken, which one right-to-left pass of the unmatched closings finds.
+        val unmatchedClosings = IntArray(text.length)
+        var unmatchedCount = 0
+        for (position in text.lastIndex downTo 0) {
+            when (text[position]) {
+                ')' -> unmatchedClosings[unmatchedCount++] = position
+                '(' -> if (unmatchedCount > 0) destinationEnds[position] = unmatchedClosings[--unmatchedCount] + 1
+            }
+        }
+    }
+}
+
+/**
  * The link construct that starts at [index], or null when the brackets or the
- * parentheses are unpaired and the text must stay literal. The destination scan
- * balances parentheses, so a `)` inside the target cannot end it early.
+ * parentheses are unpaired and the text must stay literal. The destination end comes
+ * from the run's pairings, which balance parentheses, so a `)` inside the target
+ * cannot end it early.
  */
 private fun linkAt(
     text: String,
     index: Int,
-    nextClosingBrackets: IntArray,
+    linkBrackets: LinkBrackets?,
 ): LinkMatch? {
-    if (!text.startsWith(LINK_OPEN, index)) return null
-    val labelEnd = nextClosingBrackets[index]
+    if (linkBrackets == null || !text.startsWith(LINK_OPEN, index)) return null
+    val labelEnd = linkBrackets.labelEnds[index]
     if (labelEnd < 0) return null
     val destinationStart = labelEnd + 2
     if (destinationStart >= text.length || text[labelEnd + 1] != '(') return null
 
-    var depth = 1
-    var cursor = destinationStart
-    while (cursor < text.length && depth > 0) {
-        when (text[cursor]) {
-            '(' -> depth++
-            ')' -> depth--
-        }
-        cursor++
-    }
-    if (depth != 0) return null
+    val endIndex = linkBrackets.destinationEnds[labelEnd + 1]
+    if (endIndex < 0) return null
     return LinkMatch(
         label = text.substring(index + 1, labelEnd),
-        destination = text.substring(destinationStart, cursor - 1),
-        endIndex = cursor,
+        destination = text.substring(destinationStart, endIndex - 1),
+        endIndex = endIndex,
     )
 }
 

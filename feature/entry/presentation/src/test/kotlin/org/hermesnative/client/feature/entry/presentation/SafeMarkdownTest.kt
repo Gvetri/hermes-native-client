@@ -220,6 +220,29 @@ class SafeMarkdownTest {
 
         assertEquals(content, blocks.plainText())
     }
+
+    // Every opening bracket reaches the same closing bracket, so its unclosed destination must
+    // not be scanned again for each of them. The size is chosen so that a repeated scan exceeds
+    // the timeout while a single pass stays far below it.
+    @Test(timeout = 1_500)
+    fun link_candidates_sharing_a_closing_bracket_do_not_rescan_the_destination() {
+        val content = "[".repeat(60_000) + "](https://example.com/" + "(".repeat(60_000)
+
+        val blocks = parseSafeMarkdown(content)
+
+        assertEquals(content, blocks.plainText())
+    }
+
+    // Many candidates that each own an unclosed destination, so caching one failed scan is not
+    // enough: no candidate may scan the text at all.
+    @Test(timeout = 1_500)
+    fun many_unclosed_link_destinations_do_not_make_parsing_quadratic() {
+        val content = "[]((".repeat(38_000)
+
+        val blocks = parseSafeMarkdown(content)
+
+        assertEquals(content, blocks.plainText())
+    }
 }
 
 private fun List<MarkdownSpan>.text(): String = joinToString(separator = "") { it.text }
