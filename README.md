@@ -68,7 +68,7 @@ app
 - `wiring`: concrete implementation selection for one feature.
 - `app`: thin Android composition root and launcher activity.
 
-`architectureCheck` rejects Android, Compose, HTTP/SSE, serialization, dependency-injection, and concrete-data imports or fully qualified references from domain and application source. It also rejects forbidden dependency declarations in the domain and application module build scripts. Tests use deterministic fakes. No mocking framework is part of production or test code.
+`architectureCheck` rejects Android, Compose, HTTP/SSE, serialization, dependency-injection, and concrete-data imports or fully qualified references from domain and application source. It also rejects forbidden dependency declarations in the domain and application module build scripts. It rejects app-external file references in every main source, so a file shared with another app stays a read-only content URI from the declared file provider. Tests use deterministic fakes. No mocking framework is part of production or test code.
 
 ## Public connection boundary
 

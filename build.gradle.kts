@@ -44,6 +44,20 @@ val presentationForbiddenReferences = listOf(
     Regex("""java\.net\.|okhttp3\.|HttpURLConnection|URLConnection"""),
 )
 
+/**
+ * The client hands a file to another app only through its declared, non-exported file provider and
+ * a read-only grant, so an exported snapshot is never a path another app can open or modify. A
+ * file-scheme reference, a write grant, or a persistable grant would widen that app-external
+ * boundary, so every main Kotlin source is scanned for them. The patterns name qualified references
+ * or the file scheme itself, so the check fails on prose mentions of a file scheme too.
+ */
+val appExternalFileEgressForbiddenReferences = listOf(
+    Regex("""Uri\.fromFile"""),
+    Regex("""file://"""),
+    Regex("""FLAG_GRANT_WRITE_URI_PERMISSION"""),
+    Regex("""FLAG_GRANT_PERSISTABLE_URI_PERMISSION"""),
+)
+
 val architectureRuleTestSource =
     file("buildSrc/src/test/kotlin/org/hermesnative/client/buildlogic/ArchitectureCheckTest.kt")
 val architectureRuleTestClass = "org.hermesnative.client.buildlogic.ArchitectureCheckTest"
@@ -192,7 +206,7 @@ fun requireFixtureDescriptorTestEvidence() {
 
 tasks.register("architectureCheck") {
     group = "verification"
-    description = "Checks the inward dependency rules and the untrusted-content boundary."
+    description = "Checks the inward dependency rules, the untrusted-content boundary, and the app-external file boundary."
     doLast {
         val sourceFiles = architectureSourceRoots.flatMap { root ->
             if (root.isDirectory) root.walkTopDown().filter { it.extension == "kt" }.toList() else emptyList()
@@ -244,7 +258,23 @@ tasks.register("architectureCheck") {
                 }
             }
         }
-        val violations = sourceViolations + dependencyViolations + presentationViolations
+        val fileEgressSourceFiles =
+            fileTree(projectDir) {
+                include("**/src/main/**/*.kt")
+            }.files.toList()
+        check(fileEgressSourceFiles.isNotEmpty()) {
+            "Architecture check found no main Kotlin sources for the app-external file boundary."
+        }
+        val fileEgressViolations = fileEgressSourceFiles.flatMap { sourceFile ->
+            sourceFile.readLines().mapIndexedNotNull { index, line ->
+                if (appExternalFileEgressForbiddenReferences.any { pattern -> pattern.containsMatchIn(line) }) {
+                    "${sourceFile.relativeTo(projectDir)}:${index + 1}: forbidden app-external file reference: $line"
+                } else {
+                    null
+                }
+            }
+        }
+        val violations = sourceViolations + dependencyViolations + presentationViolations + fileEgressViolations
         check(violations.isEmpty()) { "Architecture violations:\n${violations.joinToString("\n")}" }
     }
 }

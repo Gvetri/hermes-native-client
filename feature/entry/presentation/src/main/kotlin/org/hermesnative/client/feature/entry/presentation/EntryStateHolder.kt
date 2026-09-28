@@ -15,6 +15,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -39,6 +40,13 @@ import org.hermesnative.client.feature.entry.domain.AuthoritativeRunReconciliati
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionPersistenceException
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
+import org.hermesnative.client.feature.entry.domain.LocalDiagnosticEvent
+import org.hermesnative.client.feature.entry.domain.LocalDiagnosticEventType
+import org.hermesnative.client.feature.entry.domain.LocalDiagnosticStatus
+import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsExportResult
+import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsExporter
+import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsRecorder
+import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsStore
 import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunEvent
@@ -181,6 +189,18 @@ sealed interface EntryUiEvent {
     data class RunStatusNotificationPermissionResult(
         val granted: Boolean,
     ) : EntryUiEvent
+
+    data object OpenLocalDiagnosticsClicked : EntryUiEvent
+
+    data object CloseLocalDiagnosticsClicked : EntryUiEvent
+
+    data object ExportDiagnosticsClicked : EntryUiEvent
+
+    data object ClearDiagnosticsClicked : EntryUiEvent
+
+    data object ConfirmClearDiagnosticsClicked : EntryUiEvent
+
+    data object CancelClearDiagnosticsClicked : EntryUiEvent
 }
 
 enum class EntryErrorCategory(
@@ -390,7 +410,47 @@ data class EntryUiState(
     val errorCategory: EntryErrorCategory? = null,
     val sessionList: SessionListUiState? = null,
     val runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
+    val localDiagnostics: LocalDiagnosticsUiState = LocalDiagnosticsUiState(),
 )
+
+/**
+ * State of the Local diagnostics surface: a private, redacted buffer of approved
+ * operational records with explicit export and clear actions.
+ */
+data class LocalDiagnosticsUiState(
+    val isOpen: Boolean = false,
+    val isLoadingRecords: Boolean = false,
+    val recordCount: Int = 0,
+    val isExporting: Boolean = false,
+    val exportFailure: LocalDiagnosticsExportFailure? = null,
+    val isClearConfirmationOpen: Boolean = false,
+) {
+    /** True when the buffer holds records, so an export can produce a snapshot. */
+    val hasRecords: Boolean
+        get() = recordCount > 0
+
+    /** Export stays disabled until the buffer holds records and no export is running. */
+    val isExportEnabled: Boolean
+        get() = hasRecords && !isExporting
+}
+
+/**
+ * The ports the Local diagnostics surface needs, grouped so one buffer collection
+ * serves all of them: the recorder appends approved events, the store reports and
+ * clears them, and the exporter shares a snapshot of what the buffer holds.
+ */
+data class LocalDiagnosticsPorts(
+    val recorder: LocalDiagnosticsRecorder,
+    val store: LocalDiagnosticsStore,
+    val exporter: LocalDiagnosticsExporter,
+)
+
+/** Recoverable failure shown after an export that produced no snapshot. */
+enum class LocalDiagnosticsExportFailure(
+    val safeMessage: String,
+) {
+    EXPORT_FAILED("Diagnostics export failed. The buffered diagnostics are preserved. Try again."),
+}
 
 data class RunStatusNotificationsUiState(
     val enabled: Boolean = false,
@@ -422,6 +482,7 @@ class EntryStateHolder(
     private val runStatusNotificationSettingsStore: RunStatusNotificationSettingsStore? = null,
     private val runStatusNotificationPermission: RunStatusNotificationPermission? = null,
     private val runStatusNotifier: RunStatusNotifier? = null,
+    private val localDiagnostics: LocalDiagnosticsPorts? = null,
     private val sendTimeoutMillis: Long = DEFAULT_SEND_TIMEOUT_MILLIS,
 ) {
     /**
@@ -531,6 +592,12 @@ class EntryStateHolder(
             EntryUiEvent.RunStatusNotificationsToggleClicked -> toggleRunStatusNotifications()
             is EntryUiEvent.RunStatusNotificationPermissionResult ->
                 applyRunStatusNotificationPermissionResult(event.granted)
+            EntryUiEvent.OpenLocalDiagnosticsClicked -> openLocalDiagnostics()
+            EntryUiEvent.CloseLocalDiagnosticsClicked -> closeLocalDiagnostics()
+            EntryUiEvent.ExportDiagnosticsClicked -> exportLocalDiagnostics()
+            EntryUiEvent.ClearDiagnosticsClicked -> requestClearLocalDiagnostics()
+            EntryUiEvent.ConfirmClearDiagnosticsClicked -> confirmClearLocalDiagnostics()
+            EntryUiEvent.CancelClearDiagnosticsClicked -> cancelClearLocalDiagnostics()
         }
     }
 
@@ -744,6 +811,10 @@ class EntryStateHolder(
                                                 gateway
                                             }
                                         }
+                                    recordDiagnostic(
+                                        LocalDiagnosticEventType.GATEWAY_CONNECTION_VERIFICATION,
+                                        LocalDiagnosticStatus.SUCCEEDED,
+                                    )
                                     flushPendingRecoveryEntries(normalizedEndpoint)
                                     startRunRecovery(requestConnectionGeneration)
                                     gateway?.let(::loadInitialSessions)
@@ -769,6 +840,10 @@ class EntryStateHolder(
         category: EntryErrorCategory,
         requestConnectionGeneration: Long,
     ) {
+        recordDiagnostic(
+            LocalDiagnosticEventType.GATEWAY_CONNECTION_VERIFICATION,
+            LocalDiagnosticStatus.FAILED,
+        )
         synchronized(sessionRequestLock) {
             if (connectionGeneration == requestConnectionGeneration) {
                 _uiState.value =
@@ -933,6 +1008,144 @@ class EntryStateHolder(
                     runStatusNotifications = deniedRunStatusNotificationsUiState(),
                 )
         }
+    }
+
+    /**
+     * Opens the surface, then reads the buffered record count off the caller's thread.
+     *
+     * The buffer may hold a full megabyte, so the surface opens immediately and reports the
+     * count when the read is done instead of blocking the caller on file I/O.
+     */
+    private fun openLocalDiagnostics() {
+        _uiState.update { state ->
+            state.copy(
+                localDiagnostics = LocalDiagnosticsUiState(isOpen = true, isLoadingRecords = true),
+            )
+        }
+        scope.launch { applyLocalDiagnosticsRecordCount() }
+    }
+
+    private fun closeLocalDiagnostics() {
+        _uiState.update { state -> state.copy(localDiagnostics = LocalDiagnosticsUiState()) }
+    }
+
+    /**
+     * Exports the buffered diagnostics through the platform Sharesheet.
+     *
+     * An empty buffer never reaches the exporter, so an export cannot produce an
+     * empty snapshot, and a failed export leaves the buffer for another attempt.
+     */
+    private fun exportLocalDiagnostics() {
+        val exporter = localDiagnostics?.exporter ?: return
+        val current = _uiState.value.localDiagnostics
+        if (!current.isOpen || !current.isExportEnabled) return
+        _uiState.update { state ->
+            state.copy(
+                localDiagnostics =
+                    state.localDiagnostics.copy(isExporting = true, exportFailure = null),
+            )
+        }
+        scope.launch {
+            val result =
+                runCatching { exporter.export() }
+                    .getOrDefault(LocalDiagnosticsExportResult.FAILED)
+            _uiState.update { state ->
+                state.copy(
+                    localDiagnostics =
+                        state.localDiagnostics.copy(
+                            isExporting = false,
+                            exportFailure =
+                                if (result == LocalDiagnosticsExportResult.FAILED) {
+                                    LocalDiagnosticsExportFailure.EXPORT_FAILED
+                                } else {
+                                    null
+                                },
+                        ),
+                )
+            }
+            applyLocalDiagnosticsRecordCount()
+        }
+    }
+
+    private fun requestClearLocalDiagnostics() {
+        val current = _uiState.value.localDiagnostics
+        if (!current.isOpen || !current.hasRecords) return
+        _uiState.update { state ->
+            state.copy(
+                localDiagnostics = state.localDiagnostics.copy(isClearConfirmationOpen = true),
+            )
+        }
+    }
+
+    private fun cancelClearLocalDiagnostics() {
+        _uiState.update { state ->
+            state.copy(
+                localDiagnostics = state.localDiagnostics.copy(isClearConfirmationOpen = false),
+            )
+        }
+    }
+
+    /**
+     * Clears only the local diagnostic records, off the caller's thread.
+     *
+     * The confirmation stays open when the clear fails, so a failed clear is never
+     * reported as done. A successful clear leaves no records, so the visible count
+     * needs no read.
+     */
+    private fun confirmClearLocalDiagnostics() {
+        val store = localDiagnostics?.store ?: return
+        scope.launch {
+            val cleared = runCatching { store.clear() }.isSuccess
+            _uiState.update { state ->
+                state.copy(
+                    localDiagnostics =
+                        if (cleared) {
+                            state.localDiagnostics.copy(isClearConfirmationOpen = false, recordCount = 0)
+                        } else {
+                            state.localDiagnostics
+                        },
+                )
+            }
+        }
+    }
+
+    private fun localDiagnosticsRecordCount(): Int =
+        localDiagnostics
+            ?.let { ports -> runCatching { ports.store.recordCount() }.getOrNull() }
+            ?: 0
+
+    /**
+     * Applies the count the buffer currently reports, off the caller's thread: the
+     * buffer may hold a full megabyte, so no surface path reads it inline.
+     */
+    private suspend fun applyLocalDiagnosticsRecordCount() {
+        val recordCount = localDiagnosticsRecordCount()
+        _uiState.update { state ->
+            if (!state.localDiagnostics.isOpen) {
+                state
+            } else {
+                state.copy(
+                    localDiagnostics =
+                        state.localDiagnostics.copy(isLoadingRecords = false, recordCount = recordCount),
+                )
+            }
+        }
+    }
+
+    /**
+     * Records one approved operational diagnostic event best-effort. Diagnostics
+     * never change the behavior they observe, so a failed write is ignored, and
+     * the visible record count follows the buffer while its surface is open.
+     */
+    private fun recordDiagnostic(
+        eventType: LocalDiagnosticEventType,
+        status: LocalDiagnosticStatus? = null,
+    ) {
+        localDiagnostics?.let { ports ->
+            runCatching { ports.recorder.record(LocalDiagnosticEvent(eventType, status)) }
+        }
+        if (!_uiState.value.localDiagnostics.isOpen) return
+        scope.launch { applyLocalDiagnosticsRecordCount() }
     }
 
     /**
@@ -2328,6 +2541,7 @@ class EntryStateHolder(
                                 errorCategory = null,
                             )
                         }
+                        recordDiagnostic(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
@@ -3249,6 +3463,7 @@ class EntryStateHolder(
                     errorCategory = null,
                 )
             }
+            recordDiagnostic(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)
         } catch (error: CancellationException) {
             throw error
         } catch (_: GatewayException) {
@@ -3317,6 +3532,7 @@ class EntryStateHolder(
         cursor: String?,
         preserveSessions: Boolean,
     ) {
+        recordDiagnostic(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.FAILED)
         updateCurrentSessionRequest(requestGeneration, query, cursor) { current ->
             current.copy(
                 isLoading = false,
@@ -3752,6 +3968,7 @@ class EntryStateHolder(
                                 attemptId = attemptId,
                             )
                         forgetPendingCreate(recoverySessionKey, pendingCreate)
+                        recordDiagnostic(LocalDiagnosticEventType.RUN_SUBMISSION, LocalDiagnosticStatus.SUCCEEDED)
                         if (applied) {
                             if (!run.isActive()) {
                                 val reconciliationContext =
@@ -3775,6 +3992,7 @@ class EntryStateHolder(
                             onRunSubmissionCompleted?.invoke()
                         }
                     } catch (_: TimeoutCancellationException) {
+                        recordDiagnostic(LocalDiagnosticEventType.RUN_SUBMISSION, LocalDiagnosticStatus.UNCERTAIN)
                         runCatching {
                             runSubmissionUncertaintyStore.markAmbiguous(
                                 PendingRunSubmissionKey(requestEndpoint, sessionId),
@@ -3801,6 +4019,7 @@ class EntryStateHolder(
                         }
                         throw error
                     } catch (_: GatewayException) {
+                        recordDiagnostic(LocalDiagnosticEventType.RUN_SUBMISSION, LocalDiagnosticStatus.UNCERTAIN)
                         runCatching {
                             runSubmissionUncertaintyStore.markAmbiguous(
                                 PendingRunSubmissionKey(requestEndpoint, sessionId),
@@ -3818,6 +4037,7 @@ class EntryStateHolder(
                             )
                         if (reconciled) onRunSubmissionCompleted?.invoke()
                     } catch (_: Exception) {
+                        recordDiagnostic(LocalDiagnosticEventType.RUN_SUBMISSION, LocalDiagnosticStatus.UNCERTAIN)
                         runCatching {
                             runSubmissionUncertaintyStore.markAmbiguous(
                                 PendingRunSubmissionKey(requestEndpoint, sessionId),

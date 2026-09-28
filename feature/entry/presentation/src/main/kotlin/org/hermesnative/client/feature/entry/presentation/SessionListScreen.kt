@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -410,7 +411,7 @@ private fun SessionListStatusTexts(state: SessionListUiState) {
     }
 }
 
-/** Controls pinned below the list area: refresh and the notification settings stay reachable. */
+/** Controls pinned below the list area: refresh, local diagnostics and the notification settings. */
 @Composable
 private fun SessionListPaneControls(
     state: SessionListUiState,
@@ -418,19 +419,34 @@ private fun SessionListPaneControls(
     runStatusNotifications: RunStatusNotificationsUiState,
 ) {
     Spacer(modifier = Modifier.height(12.dp))
-    Button(
-        onClick = { onEvent(EntryUiEvent.RefreshSessionListClicked) },
-        enabled =
-            !state.isLoading &&
-                !state.isRefreshing &&
-                state.openingSessionId == null &&
-                !state.hasPendingMutation &&
-                state.createSession == null &&
-                state.openedSession?.isRefreshing != true &&
-                state.openedSession?.isReconciliationInProgress != true,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    // Local diagnostics shares the Refresh row: the pinned tail is already tight, and a control of
+    // its own would take the list area's height away from the rows in a short pane.
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = if (state.isUnavailable) "Try again" else "Refresh")
+        Button(
+            onClick = { onEvent(EntryUiEvent.RefreshSessionListClicked) },
+            enabled =
+                !state.isLoading &&
+                    !state.isRefreshing &&
+                    state.openingSessionId == null &&
+                    !state.hasPendingMutation &&
+                    state.createSession == null &&
+                    state.openedSession?.isRefreshing != true &&
+                    state.openedSession?.isReconciliationInProgress != true,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Text(text = if (state.isUnavailable) "Try again" else "Refresh")
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        TextButton(
+            onClick = { onEvent(EntryUiEvent.OpenLocalDiagnosticsClicked) },
+            enabled = state.createSession == null && !state.hasPendingMutation,
+            modifier = Modifier.weight(1f, fill = false).heightIn(min = 48.dp),
+        ) {
+            Text(text = "Local diagnostics")
+        }
     }
 
     RunStatusNotificationSettingsContent(

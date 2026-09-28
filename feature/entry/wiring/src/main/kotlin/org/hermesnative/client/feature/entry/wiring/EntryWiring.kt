@@ -10,10 +10,12 @@ import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayClient
 import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
 import org.hermesnative.client.feature.entry.data.EndpointScopedRunRecoveryRegistry
+import org.hermesnative.client.feature.entry.data.RollingLocalDiagnosticsBuffer
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
+import org.hermesnative.client.feature.entry.presentation.LocalDiagnosticsPorts
 import java.util.concurrent.atomic.AtomicReference
 
 object EntryWiring {
@@ -23,6 +25,7 @@ object EntryWiring {
         sessionGatewayFactory: ((String, String) -> SessionGatewayPort)? = null,
         runGatewayFactory: ((String, String) -> RunGatewayPort)? = null,
         coroutineScope: CoroutineScope? = null,
+        clientVersion: String = androidClientVersion(context),
     ): EntryStateHolder {
         val dataSource = SharedPreferencesGatewayConnectionDataSource(context)
         val credentialStore = AndroidKeyStoreGatewayCredentialStore(context)
@@ -42,6 +45,8 @@ object EntryWiring {
                     ?: DefaultGatewayClient(endpoint, bearerCredential).discoverCapabilities()
             }
         val runSubmissionUncertaintyStore = SharedPreferencesRunSubmissionUncertaintyStore(context)
+        val localDiagnosticsBuffer =
+            RollingLocalDiagnosticsBuffer(FileLocalDiagnosticsStorage(context))
         return EntryStateHolder(
             initialState = initialState,
             verifyGatewayConnection = verifyGatewayConnection,
@@ -66,7 +71,20 @@ object EntryWiring {
                 RemoveGatewayConnection(repository) { endpoint ->
                     runRecoveryRegistry.clearForEndpoint(endpoint)
                     endpoint?.let(runSubmissionUncertaintyStore::clearEndpoint)
+                    // Diagnostics belong to the Gateway connection they were collected for.
+                    localDiagnosticsBuffer.clear()
                 },
+            localDiagnostics =
+                LocalDiagnosticsPorts(
+                    recorder = localDiagnosticsBuffer,
+                    store = localDiagnosticsBuffer,
+                    exporter =
+                        AndroidLocalDiagnosticsExporter(
+                            context = context,
+                            buffer = localDiagnosticsBuffer,
+                            clientVersion = clientVersion,
+                        ),
+                ),
             runSubmissionUncertaintyStore = runSubmissionUncertaintyStore,
             runStatusNotificationSettingsStore =
                 SharedPreferencesRunStatusNotificationSettingsStore(context),
