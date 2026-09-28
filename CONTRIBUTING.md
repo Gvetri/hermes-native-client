@@ -49,8 +49,9 @@ images with the JVM/Robolectric Compose test gate.
 
 `feature/entry/presentation/src/test/roborazzi-baselines.txt` lists the PNGs
 that belong to the matrix. Each entry maps to one test method in
-`SelectedVisualRegressionTest` or, for the shell window contracts, in
-`SelectedShellVisualRegressionTest`.
+`SelectedVisualRegressionTest`, in `SelectedShellVisualRegressionTest` for the
+shell window contracts, or in `SelectedMarkdownVisualRegressionTest` for the
+Markdown rendering contracts.
 
 | State | Compose surface | Reason for inclusion |
 | --- | --- | --- |
@@ -80,6 +81,20 @@ phone single-pane window and on a two-pane window.
 | `two_pane_light` | `w1000dp-h800dp-notnight` | Session list and conversation side by side, light token set |
 | `two_pane_dark` | `w1000dp-h800dp-night` | Session list and conversation side by side, dark token set |
 
+### Markdown contract matrix
+
+`SelectedMarkdownVisualRegressionTest` pins the supported rendering of untrusted
+Gateway content: a fenced code block in its horizontally scrollable region and a
+long multi-block message, each on the phone viewport in the light and the dark
+token set.
+
+| State | Window | Reason for inclusion |
+| --- | --- | --- |
+| `markdown_code_block_light` | `w411dp-h891dp-notnight` | Code block with its language label, its Copy action, and an inert rejected-scheme link |
+| `markdown_code_block_dark` | `w411dp-h891dp-night` | The same state on the dark token set |
+| `markdown_long_content_light` | `w411dp-h891dp-notnight` | Long multi-block response that scrolls natively instead of truncating |
+| `markdown_long_content_dark` | `w411dp-h891dp-night` | The same state on the dark token set |
+
 The current implementation has no dialog overlay such as `Dialog` or
 `AlertDialog`. Here, "modal" means a conditional confirmation mode in the
 existing Compose state model. The rename and delete confirmation modes are
@@ -88,12 +103,12 @@ screenshot.
 
 The matrix uses Robolectric SDK 35, a fixed `w411dp-h891dp-notnight` viewport,
 native graphics mode, the light `HermesTheme`, and synthetic in-memory values.
-The shell contract class uses the viewport qualifiers above and selects the
-light or dark token set explicitly, so each capture proves one designed theme
-instead of the ambient system setting. Both classes exclude timestamps, live
-Gateway/provider data, credentials, animated loading states, Activity lifecycle
-behavior, and other system-dependent rendering. Behavior and semantics tests
-remain in their existing test classes.
+The shell contract and markdown contract classes use the viewport qualifiers
+above and select the light or dark token set explicitly, so each capture proves
+one designed theme instead of the ambient system setting. All three classes
+exclude timestamps, live Gateway/provider data, credentials, animated loading
+states, Activity lifecycle behavior, and other system-dependent rendering.
+Behavior and semantics tests remain in their existing test classes.
 
 The pull-request Compose job first runs
 `verifyRoborazziBaselineManifest`. It reports `Missing baselines` and

@@ -40,13 +40,15 @@ Data owns transport DTO parsing, the authenticated HTTP and SSE adapter, concret
 
 Presentation owns immutable UI state, UI events, state transitions, the Compose theme, and rendering. Events enter `EntryStateHolder`; state flows down to `EntryScreen`. A composable does not call a repository or a network adapter.
 
+Untrusted Gateway message content is rendered by a presentation-local Markdown subset: paragraphs, lists, emphasis, HTTPS links, and fenced code blocks (`SafeMarkdown.kt`, `MarkdownContent.kt`). Every unsupported construct stays literal text, no WebView or executable content is involved, and only a destination that `allowedExternalLinkDestination` accepts can leave the client through the external-browser intent in `MessageIntents.kt`. Copy and Share are explicit user selections over the chosen message content.
+
 ### Wiring
 
 Wiring selects concrete datasource and repository implementations and creates the presentation state holder. This is the only feature module that assembles the bootstrap data path.
 
 ## Architecture checks
 
-`./gradlew architectureCheck` scans domain and application Kotlin source for forbidden framework, transport, serialization, dependency-injection, and concrete-data references, including fully qualified references. It also scans both module build scripts and fails on forbidden dependency declarations. `./gradlew architectureRuleTests` runs focused failure tests for these rules. `./gradlew verifyNoMocks` rejects mock framework names and mock construction in main, unit-test, and instrumentation source.
+`./gradlew architectureCheck` scans domain and application Kotlin source for forbidden framework, transport, serialization, dependency-injection, and concrete-data references, including fully qualified references. It also scans both module build scripts and fails on forbidden dependency declarations. Presentation, which renders untrusted Gateway content, is scanned for executable web content and for network clients, so the renderer cannot reach a web view or a link destination's server. `./gradlew architectureRuleTests` runs focused failure tests for these rules. `./gradlew verifyNoMocks` rejects mock framework names and mock construction in main, unit-test, and instrumentation source.
 
 The typed Gateway contract adapter is verified by deterministic data-layer tests against the checked-in JSON and SSE fixtures. These tests assert the versioned capability manifest, exact profile routes, bearer authentication, all supported Session/Run operations, additive fields and events, malformed responses, and safe transport error categories.
 

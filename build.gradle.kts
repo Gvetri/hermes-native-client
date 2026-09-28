@@ -31,6 +31,19 @@ val architectureModuleBuildFiles = listOf(
     file("feature/entry/application/build.gradle.kts"),
 )
 
+val presentationSourceRoot = file("feature/entry/presentation/src/main/kotlin")
+
+/**
+ * Presentation renders untrusted Gateway content, so it must never reach for executable web
+ * content or for a network client on a link destination: no embedded web view, and no HTTP
+ * stack that could prefetch or inspect where a link points. The patterns name qualified
+ * references, so documentation prose that mentions them does not fail the check.
+ */
+val presentationForbiddenReferences = listOf(
+    Regex("""android\.webkit|androidx\.webkit"""),
+    Regex("""java\.net\.|okhttp3\.|HttpURLConnection|URLConnection"""),
+)
+
 val architectureRuleTestSource =
     file("buildSrc/src/test/kotlin/org/hermesnative/client/buildlogic/ArchitectureCheckTest.kt")
 val architectureRuleTestClass = "org.hermesnative.client.buildlogic.ArchitectureCheckTest"
@@ -179,7 +192,7 @@ fun requireFixtureDescriptorTestEvidence() {
 
 tasks.register("architectureCheck") {
     group = "verification"
-    description = "Checks the inward dependency rules for domain and application code."
+    description = "Checks the inward dependency rules and the untrusted-content boundary."
     doLast {
         val sourceFiles = architectureSourceRoots.flatMap { root ->
             if (root.isDirectory) root.walkTopDown().filter { it.extension == "kt" }.toList() else emptyList()
@@ -213,7 +226,25 @@ tasks.register("architectureCheck") {
             }
             tokenViolations + namedProjectViolations
         }
-        val violations = sourceViolations + dependencyViolations
+        val presentationSourceFiles =
+            if (presentationSourceRoot.isDirectory) {
+                presentationSourceRoot.walkTopDown().filter { it.extension == "kt" }.toList()
+            } else {
+                emptyList()
+            }
+        check(presentationSourceFiles.isNotEmpty()) {
+            "Architecture check found no presentation Kotlin sources."
+        }
+        val presentationViolations = presentationSourceFiles.flatMap { sourceFile ->
+            sourceFile.readLines().mapIndexedNotNull { index, line ->
+                if (presentationForbiddenReferences.any { pattern -> pattern.containsMatchIn(line) }) {
+                    "${sourceFile.relativeTo(projectDir)}:${index + 1}: forbidden executable or network reference: $line"
+                } else {
+                    null
+                }
+            }
+        }
+        val violations = sourceViolations + dependencyViolations + presentationViolations
         check(violations.isEmpty()) { "Architecture violations:\n${violations.joinToString("\n")}" }
     }
 }

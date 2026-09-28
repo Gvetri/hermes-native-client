@@ -1211,10 +1211,11 @@ private fun SessionDetailSummary(
 }
 
 @Composable
-private fun SessionMessageContent(
+internal fun SessionMessageContent(
     message: SessionMessageUiState,
     retryEnabled: Boolean,
     onRetry: (RunId) -> Unit,
+    actions: MessageActions = rememberMessageActions(),
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         message.role?.takeIf(String::isNotBlank)?.let { role ->
@@ -1223,7 +1224,9 @@ private fun SessionMessageContent(
         message.content
             ?.takeIf { message.failureSafeMessage == null && it.isNotBlank() }
             ?.let { content ->
-                Text(text = content)
+                MarkdownContent(markdown = content, actions = actions)
+                Spacer(modifier = Modifier.height(4.dp))
+                MessageActionControls(content = content, actions = actions)
             }
         message.runId?.let { runId ->
             Text(text = "Run ID: ${runId.value}")
@@ -1288,6 +1291,36 @@ private fun SessionMessageContent(
         }
         message.timestamp?.let { timestamp ->
             Text(text = "Timestamp: ${formatGatewayTimestamp(timestamp)}")
+        }
+    }
+}
+
+/**
+ * The message-level actions. Both carry exactly the selected message content and run
+ * only when the user selects them, so no credential, hidden diagnostic detail, or
+ * other Session content can leave the client through them.
+ */
+@Composable
+private fun MessageActionControls(
+    content: String,
+    actions: MessageActions,
+) {
+    val spacing = LocalHermesDesignTokens.current.spacing
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(spacing.s),
+    ) {
+        OutlinedButton(
+            onClick = { actions.copy(content) },
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Text(text = "Copy message")
+        }
+        OutlinedButton(
+            onClick = { actions.share(content) },
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Text(text = "Share message")
         }
     }
 }

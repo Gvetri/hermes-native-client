@@ -32,12 +32,17 @@
         {
           "id": "message-markdown-2",
           "role": "assistant",
-          "content": "Visit the safe HTTPS link https://example.com/secure"
+          "content": "Visit the safe HTTPS link [the secure page](https://example.com/secure)"
         },
         {
           "id": "message-markdown-3",
           "role": "assistant",
-          "content": "Unsafe scheme javascript:alert(1) stays plain text"
+          "content": "Unsafe scheme [inert label](javascript:alert(1)) stays plain text"
+        },
+        {
+          "id": "message-markdown-4",
+          "role": "assistant",
+          "content": "- first rendered item\n- second rendered item\n\n```kotlin\nval total = 1\n```"
         }
       ]
     }

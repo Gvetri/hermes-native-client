@@ -18,13 +18,30 @@ name: markdown-links
 - extendedWaitUntil:
     visible: "Back to Sessions"
     timeout: 30000
-- assertVisible: "Safe **Markdown** text"
-- assertVisible: "Visit the safe HTTPS link https://example.com/secure"
-- swipe:
-    start: "50%, 71%"
-    end: "50%, 62%"
-    duration: 400
-- extendedWaitUntil:
-    visible: "Unsafe scheme javascript:alert(1) stays plain text"
-    timeout: 30000
+# Emphasis renders natively: the markers are never part of the shown text, and
+# each message card carries its own explicit actions.
+- assertVisible: "Safe Markdown text"
+- assertVisible: "Copy message"
+- assertVisible: "Share message"
+# An HTTPS link renders as its label, and its literal target is never displayed.
+# The transcript scrolls, so every later message is reached by scrolling to it.
+- scrollUntilVisible:
+    element:
+      text: ".*the secure page.*"
+    direction: DOWN
+- assertVisible: ".*Visit the safe HTTPS link.*"
+- assertNotVisible: ".*example.com/secure.*"
+# A rejected Markdown destination renders as its inert label, not as a target.
+- scrollUntilVisible:
+    element:
+      text: ".*stays plain text.*"
+    direction: DOWN
+- assertVisible: ".*inert label.*"
+- assertNotVisible: ".*javascript:.*"
+# A fenced code block renders literally in its own scrollable region.
+- scrollUntilVisible:
+    element:
+      text: ".*val total = 1.*"
+    direction: DOWN
+- assertVisible: "Copy code"
 - assertVisible: "Message"

@@ -85,7 +85,8 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Role: assistant").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Message").assertIsDisplayed().assertIsEnabled()
         composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
-        composeTestRule.onNodeWithText("Refresh history").assertIsDisplayed().assertIsEnabled()
+        // The summary scrolls with the transcript, so the control is reached by scrolling.
+        composeTestRule.onNodeWithText("Refresh history").performScrollTo().assertIsDisplayed().assertIsEnabled()
     }
 
     @Test
