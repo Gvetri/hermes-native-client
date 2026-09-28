@@ -129,6 +129,40 @@ class ArchitectureCheckTest {
         )
     }
 
+    @Test
+    fun rejects_a_file_uri_handed_to_another_app() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/wiring/src/main/kotlin/org/hermesnative/client/feature/entry/wiring/AndroidLocalDiagnosticsExporter.kt",
+            content = "\nval forbiddenSnapshotUri = android.net.Uri.fromFile(snapshotFile)\n",
+        )
+    }
+
+    @Test
+    fun rejects_a_file_scheme_reference_to_another_app() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/wiring/src/main/kotlin/org/hermesnative/client/feature/entry/wiring/AndroidLocalDiagnosticsExporter.kt",
+            content = "\nval forbiddenFileSchemeUri = android.net.Uri.parse(\"file:///data/data/snapshot.jsonl\")\n",
+        )
+    }
+
+    @Test
+    fun rejects_a_writable_grant_on_an_exported_snapshot() {
+        assertArchitectureViolation(
+            relativePath = "feature/entry/wiring/src/main/kotlin/org/hermesnative/client/feature/entry/wiring/AndroidLocalDiagnosticsExporter.kt",
+            content = "\nval forbiddenWriteGrant = Intent.FLAG_GRANT_WRITE_URI_PERMISSION\n",
+        )
+    }
+
+    @Test
+    fun accepts_a_read_only_provider_export_of_a_snapshot() {
+        assertArchitectureAccepted(
+            relativePath = "feature/entry/wiring/src/main/kotlin/org/hermesnative/client/feature/entry/wiring/AndroidLocalDiagnosticsExporter.kt",
+            content =
+                "\nval allowedSnapshotUri = androidx.core.content.FileProvider.getUriForFile(context, authority, snapshotFile)\n" +
+                    "\nval allowedGrant = Intent.FLAG_GRANT_READ_URI_PERMISSION\n",
+        )
+    }
+
     private fun assertArchitectureAccepted(
         relativePath: String,
         content: String,
