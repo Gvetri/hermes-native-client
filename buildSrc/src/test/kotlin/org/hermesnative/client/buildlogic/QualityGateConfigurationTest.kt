@@ -883,6 +883,67 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun coverage_and_mutation_wiring_is_declared_once_in_a_convention_plugin() {
+        val moduleScripts =
+            listOf(
+                "feature/entry/domain/build.gradle.kts",
+                "feature/entry/application/build.gradle.kts",
+                "feature/entry/data/build.gradle.kts",
+            )
+        val conventionPlugin =
+            repositoryRoot.resolve("buildSrc/src/main/kotlin/hermes-quality-gate.gradle.kts").readText()
+        val buildScript = repositoryRoot.resolve("build.gradle.kts").readText()
+        val catalog = repositoryRoot.resolve("gradle/libs.versions.toml").readText()
+
+        moduleScripts.forEach { moduleScript ->
+            val script = repositoryRoot.resolve(moduleScript).readText()
+            assertTrue(
+                "$moduleScript must apply the shared quality-gate plugin.",
+                script.contains("id(\"hermes-quality-gate\")"),
+            )
+            listOf("kover {", "PitestTask", "mutationThreshold", "CoverageUnit", "QualityPolicy").forEach { wiring ->
+                assertTrue(
+                    "$moduleScript must keep no $wiring wiring of its own.",
+                    !script.contains(wiring),
+                )
+            }
+        }
+
+        listOf(
+            "QualityPolicy.coverageFor(project.path)",
+            "QualityPolicy.mutationFor(project.path)",
+            "CoverageUnit.LINE",
+            "CoverageUnit.BRANCH",
+            "mutationThreshold.set",
+            "testStrengthThreshold.set",
+            "timestampedReports.set(false)",
+            "outputFormats.set(setOf(\"XML\", \"HTML\"))",
+            "childProcessJvmArgs.set",
+            "fixture.repositoryRoot",
+        ).forEach { declaration ->
+            assertTrue(
+                "The convention plugin must declare $declaration.",
+                conventionPlugin.contains(declaration),
+            )
+        }
+
+        listOf("libs.plugins.kover", "libs.plugins.pitest").forEach { alias ->
+            assertTrue(
+                "The root build script must not declare $alias: the build logic supplies that plugin, so a " +
+                    "versioned request fails with 'already on the classpath with an unknown version'.",
+                !buildScript.contains(alias),
+            )
+        }
+
+        listOf("kover-gradle-plugin", "gradle-pitest-plugin").forEach { alias ->
+            assertTrue(
+                "The version catalog must declare the $alias artifact that the build logic depends on.",
+                catalog.contains(alias),
+            )
+        }
+    }
+
+    @Test
     fun checkout_steps_are_immutable_and_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->

@@ -47,6 +47,13 @@ is the single declaration of the enforced scope. The Gradle tasks read their thr
 the tables below mirror those declared values; the "(measured …)" figures record what each module
 measured when its scope was declared.
 
+The Gradle wiring is declared once as well. `buildSrc/src/main/kotlin/hermes-quality-gate.gradle.kts`
+is a convention plugin: each modified module applies `id("hermes-quality-gate")` and keeps no Kover or
+PIT block of its own. The plugin reads the module scope from `QualityPolicy` and fails on a module that
+has no declared scope, so no module can run the tools with thresholds of its own. It also gives each
+test task and the PIT test minion the `fixture.repositoryRoot` property that the fixture-driven tests
+resolve their fixtures with.
+
 ### Coverage
 
 Kover measures the declared Kotlin/JVM production modules. Presentation is out of the covered
