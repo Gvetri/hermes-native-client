@@ -264,11 +264,23 @@ private fun SessionListPaneHeader(
     onSearchFocusChanged: (Boolean) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Sessions",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.semantics { heading() },
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "Sessions",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.semantics { heading() },
+            )
+            TextButton(
+                onClick = { onEvent(EntryUiEvent.ChangeGatewayCredentialClicked) },
+                enabled = state.createSession == null,
+            ) {
+                Text(text = "Change credential")
+            }
+        }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(
             onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },

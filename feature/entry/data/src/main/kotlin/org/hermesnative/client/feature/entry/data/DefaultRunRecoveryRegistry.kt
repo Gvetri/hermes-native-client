@@ -8,6 +8,10 @@ interface RunRecoveryStorage {
     fun load(): Set<RunRecoveryEntry>
 
     fun save(entries: Set<RunRecoveryEntry>)
+
+    fun clear() {
+        save(emptySet())
+    }
 }
 
 internal object RunRecoveryStorageTransactions {
@@ -33,6 +37,12 @@ class DefaultRunRecoveryRegistry(
 
     override fun remove(entry: RunRecoveryEntry) {
         updateEntries { it - entry }
+    }
+
+    fun clear() {
+        synchronized(storageTransactionLock) {
+            storage.clear()
+        }
     }
 
     private fun updateEntries(transform: (Set<RunRecoveryEntry>) -> Set<RunRecoveryEntry>) {

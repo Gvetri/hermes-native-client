@@ -49,6 +49,13 @@ class EndpointScopedRunRecoveryRegistry(
         }
     }
 
+    fun clearForEndpoint(endpoint: String?) {
+        synchronized(RunRecoveryStorageTransactions.lock) {
+            registry(endpoint).clear()
+            pendingEntries.remove(endpoint)
+        }
+    }
+
     fun registryForEndpoint(endpoint: String): RunRecoveryRegistry =
         synchronized(registryLock) {
             endpointViews.getOrPut(endpoint) {

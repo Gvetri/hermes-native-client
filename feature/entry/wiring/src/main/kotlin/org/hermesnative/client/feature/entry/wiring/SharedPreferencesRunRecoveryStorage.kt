@@ -39,6 +39,12 @@ class SharedPreferencesRunRecoveryStorage(
         ) { "Could not persist Gateway Run recovery metadata." }
     }
 
+    override fun clear() {
+        check(preferences.edit().remove(entriesKey()).commit()) {
+            "Could not remove Gateway Run recovery metadata."
+        }
+    }
+
     private fun encode(entry: RunRecoveryEntry): String = "${encode(entry.sessionId.value)}.${encode(entry.runId.value)}"
 
     private fun decode(value: String): RunRecoveryEntry? {

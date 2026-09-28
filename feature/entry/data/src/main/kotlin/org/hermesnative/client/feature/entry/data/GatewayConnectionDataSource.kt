@@ -1,5 +1,7 @@
 package org.hermesnative.client.feature.entry.data
 
+import org.hermesnative.client.feature.entry.domain.GatewayCredentialStore
+
 interface GatewayConnectionDataSource {
     fun loadEndpoint(): String?
 
@@ -19,5 +21,19 @@ class InMemoryGatewayConnectionDataSource(
 
     override fun clearEndpoint() {
         endpoint = null
+    }
+}
+
+class InMemoryGatewayCredentialStore(
+    private var credential: String? = null,
+) : GatewayCredentialStore {
+    override fun load(): String? = credential
+
+    override fun save(credential: String) {
+        this.credential = credential
+    }
+
+    override fun clear() {
+        credential = null
     }
 }

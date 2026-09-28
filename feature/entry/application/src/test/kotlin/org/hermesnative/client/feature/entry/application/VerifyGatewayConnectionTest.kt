@@ -75,6 +75,48 @@ class VerifyGatewayConnectionTest {
     }
 
     @Test
+    fun failed_replacement_verification_preserves_the_working_credential() {
+        val repository =
+            FakeGatewayConnectionRepository().apply {
+                saved = GatewayConnection("https://gateway.example", "working-token")
+            }
+        val verifier =
+            VerifyGatewayConnection(repository) { _, _ ->
+                throw GatewayException(GatewayErrorCategory.AUTHENTICATION_FAILED)
+            }
+
+        captureFailure {
+            verifier.execute(
+                endpoint = "https://gateway.example",
+                bearerCredential = "replacement-token",
+                saveCredential = true,
+            )
+        }
+
+        assertEquals(GatewayConnection("https://gateway.example", "working-token"), repository.saved)
+    }
+
+    @Test
+    fun successful_replacement_verification_atomically_persists_the_proposed_credential() {
+        val repository =
+            FakeGatewayConnectionRepository().apply {
+                saved = GatewayConnection("https://gateway.example", "working-token")
+            }
+        val verifier =
+            VerifyGatewayConnection(repository) { _, _ ->
+                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+            }
+
+        verifier.execute(
+            endpoint = "https://gateway.example",
+            bearerCredential = "replacement-token",
+            saveCredential = true,
+        )
+
+        assertEquals(GatewayConnection("https://gateway.example", "replacement-token"), repository.saved)
+    }
+
+    @Test
     fun rejects_blank_endpoint_and_credential_before_verification() {
         val repository = FakeGatewayConnectionRepository()
         val verifier = VerifyGatewayConnection(repository) { _, _ -> error("must not verify") }
