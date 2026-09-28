@@ -81,6 +81,7 @@ import org.hermesnative.client.feature.entry.domain.runs
 import org.hermesnative.client.feature.entry.domain.shouldPostRunStatusNotification
 import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val LEGACY_ATTEMPT_ID = "legacy"
 
@@ -508,6 +509,7 @@ class EntryStateHolder(
     private val sessionRequestLock = Any()
     private val recoveryPersistenceLock = Any()
     private val connectionPersistenceLock = Any()
+    private val localDiagnosticsClearInFlight = AtomicBoolean(false)
     private var sessionRequestGeneration = 0L
     private var connectionGeneration = 0L
     private val mutationJobs = mutableMapOf<SessionId, Job>()
@@ -1088,23 +1090,35 @@ class EntryStateHolder(
     /**
      * Clears only the local diagnostic records, off the caller's thread.
      *
-     * The confirmation stays open when the clear fails, so a failed clear is never
-     * reported as done. A successful clear leaves no records, so the visible count
-     * needs no read.
+     * One clear runs at a time, so a second confirmation cannot remove a record the first
+     * clear never saw. The confirmation stays open when the clear fails, so a failed clear
+     * is never reported as done, and a completion that lands after the surface closed
+     * leaves the closed state alone.
      */
     private fun confirmClearLocalDiagnostics() {
         val store = localDiagnostics?.store ?: return
+        val current = _uiState.value.localDiagnostics
+        if (!current.isOpen || !current.isClearConfirmationOpen) return
+        if (!localDiagnosticsClearInFlight.compareAndSet(false, true)) return
         scope.launch {
-            val cleared = runCatching { store.clear() }.isSuccess
-            _uiState.update { state ->
-                state.copy(
-                    localDiagnostics =
-                        if (cleared) {
-                            state.localDiagnostics.copy(isClearConfirmationOpen = false, recordCount = 0)
-                        } else {
-                            state.localDiagnostics
-                        },
-                )
+            try {
+                val cleared = runCatching { store.clear() }.isSuccess
+                _uiState.update { state ->
+                    if (!state.localDiagnostics.isOpen) {
+                        state
+                    } else {
+                        state.copy(
+                            localDiagnostics =
+                                if (cleared) {
+                                    state.localDiagnostics.copy(isClearConfirmationOpen = false, recordCount = 0)
+                                } else {
+                                    state.localDiagnostics
+                                },
+                        )
+                    }
+                }
+            } finally {
+                localDiagnosticsClearInFlight.set(false)
             }
         }
     }

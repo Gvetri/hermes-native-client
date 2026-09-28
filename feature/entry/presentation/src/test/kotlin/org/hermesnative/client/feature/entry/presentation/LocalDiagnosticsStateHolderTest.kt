@@ -349,6 +349,51 @@ class LocalDiagnosticsStateHolderTest {
         }
     }
 
+    @Test
+    fun a_second_confirmation_while_a_clear_is_in_flight_starts_only_one_clear() {
+        val dispatcher = DeferredDispatcher()
+        val diagnostics = FakeLocalDiagnostics(records = listOf(executedEvent))
+        val holder = holder(diagnostics, scope = CoroutineScope(SupervisorJob() + dispatcher))
+
+        try {
+            holder.onEvent(EntryUiEvent.OpenLocalDiagnosticsClicked)
+            dispatcher.runPending()
+            holder.onEvent(EntryUiEvent.ClearDiagnosticsClicked)
+            holder.onEvent(EntryUiEvent.ConfirmClearDiagnosticsClicked)
+            holder.onEvent(EntryUiEvent.ConfirmClearDiagnosticsClicked)
+
+            dispatcher.runPending()
+
+            assertEquals(1, diagnostics.clearCalls)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun a_failed_clear_leaves_the_confirmation_open_for_another_attempt() {
+        val dispatcher = DeferredDispatcher()
+        val diagnostics = FakeLocalDiagnostics(records = listOf(executedEvent), failClear = true)
+        val holder = holder(diagnostics, scope = CoroutineScope(SupervisorJob() + dispatcher))
+
+        try {
+            holder.onEvent(EntryUiEvent.OpenLocalDiagnosticsClicked)
+            dispatcher.runPending()
+            holder.onEvent(EntryUiEvent.ClearDiagnosticsClicked)
+            holder.onEvent(EntryUiEvent.ConfirmClearDiagnosticsClicked)
+            dispatcher.runPending()
+
+            assertTrue(holder.uiState.value.localDiagnostics.isClearConfirmationOpen)
+
+            holder.onEvent(EntryUiEvent.ConfirmClearDiagnosticsClicked)
+            dispatcher.runPending()
+
+            assertEquals(2, diagnostics.clearCalls)
+        } finally {
+            holder.close()
+        }
+    }
+
     private fun holder(
         diagnostics: FakeLocalDiagnostics,
         verifyGatewayConnection: VerifyGatewayConnection? = null,
