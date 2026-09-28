@@ -78,17 +78,24 @@ PIT mutates the declared Kotlin/JVM production modules. The mutators are the def
 Arcmutate Kotlin plugin is not part of the build, so the surfaced mutations are the ones PIT can
 apply to plain JVM bytecode.
 
+The measured values use PIT's own definitions, so the declared threshold and the tool's threshold
+judge the same quantity: the mutation score is the detected mutants out of every analysed mutant,
+and the test strength is the detected mutants out of the mutants the tests reached at all. A mutant
+counts as detected when the tests killed it or it timed out, which is why the report records the
+detected count next to the status breakdown.
+
 | Module | Mutants | Mutated classes | Mutation score | Test strength |
 | --- | --- | --- | --- | --- |
 | `:feature:entry:domain` | 185 (measured 197) | 32 (measured 34) | 46% (measured 48.2%) | 82% (measured 85.6%) |
 | `:feature:entry:application` | 115 (measured 121) | 10 (measured 11) | 78% (measured 81.0%) | 82% (measured 85.2%) |
-| `:feature:entry:data` | 480 (measured 503) | 31 (measured 33) | 70% (measured 73.0%) | 82% (measured 86.2%) |
+| `:feature:entry:data` | 480 (measured 503) | 31 (measured 33) | 70% (measured 76.1%) | 82% (measured 86.7%) |
 
 `./gradlew mutationVerify` runs the mutation task for each module, then re-reads each report and
 fails unless the report exists, is at least as new as the compiled classes it measures, analyses at
 least the declared number of mutants over at least the declared number of classes, keeps every
-mutated class inside the declared target package, and meets the declared mutation score and test
-strength. It then cross-checks the two report kinds: every class the mutation run mutated must appear
+mutated class inside the declared target package, states for each mutant whether the tests detected
+it, and meets the declared mutation score and test strength. It then cross-checks the two report
+kinds: every class the mutation run mutated must appear
 in the coverage report, so a class that silently left the covered scope fails the gate even when the
 remaining coverage percentage stays above its threshold.
 

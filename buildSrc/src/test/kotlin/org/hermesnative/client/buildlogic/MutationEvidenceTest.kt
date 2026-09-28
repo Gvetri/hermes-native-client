@@ -23,12 +23,49 @@ class MutationEvidenceTest {
         val summary = MutationEvidenceVerifier.verify(scope, repository)
 
         assertEquals(10, summary.total)
-        assertEquals(8, summary.killed)
-        assertEquals(1, summary.survived)
+        assertEquals(8, summary.detected)
+        assertEquals(1, summary.statuses["SURVIVED"])
         assertEquals(1, summary.noCoverage)
         assertEquals(80.0, summary.mutationScorePercent, 0.1)
         assertEquals(88.9, summary.testStrengthPercent, 0.1)
         assertEquals(2, summary.mutatedClasses.size)
+    }
+
+    @Test
+    fun counts_a_timed_out_mutant_as_detected_like_the_tool_does() {
+        // PIT counts a timed-out mutation as detected and compares its own thresholds against that
+        // count, so a report it passes must also pass this verification. Counting only the KILLED
+        // status would measure a test strength of 75% here and fail the run.
+        val repository = fixtureRepository(pitReport(killed = 6, survived = 2, noCoverage = 2, timedOut = 4))
+
+        val summary = MutationEvidenceVerifier.verify(scope, repository)
+
+        assertEquals(14, summary.total)
+        assertEquals(10, summary.detected)
+        assertEquals(71.4, summary.mutationScorePercent, 0.1)
+        assertEquals(83.3, summary.testStrengthPercent, 0.1)
+    }
+
+    @Test
+    fun rejects_a_mutation_that_does_not_say_whether_the_tests_detected_it() {
+        val repository =
+            fixtureRepository(
+                buildString {
+                    appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+                    appendLine("<mutations partial=\"true\">")
+                    appendLine(
+                        "<mutation status=\"KILLED\" numberOfTestsRun=\"1\">" +
+                            "<sourceFile>FixtureOne.kt</sourceFile>" +
+                            "<mutatedClass>${scope.targetPackage}.FixtureOne</mutatedClass>" +
+                            "<mutatedMethod>fixture</mutatedMethod><methodDescription>()V</methodDescription>" +
+                            "<mutatedLineNumber>1</mutatedLineNumber></mutation>",
+                    )
+                    appendLine("</mutations>")
+                },
+            )
+        assertVerificationFails("missing or unrecognised detected attribute") {
+            MutationEvidenceVerifier.verify(scope, repository)
+        }
     }
 
     @Test
@@ -137,10 +174,8 @@ class MutationEvidenceTest {
             MutationSummary(
                 modulePath = scope.modulePath,
                 total = 10,
-                killed = 10,
-                survived = 0,
-                noCoverage = 0,
-                otherStatuses = emptyMap(),
+                detected = 10,
+                statuses = emptyMap(),
                 mutatedClasses =
                     setOf(
                         "org.hermesnative.client.feature.entry.fixture.FixtureOne",
@@ -168,10 +203,8 @@ class MutationEvidenceTest {
             MutationSummary(
                 modulePath = scope.modulePath,
                 total = 10,
-                killed = 10,
-                survived = 0,
-                noCoverage = 0,
-                otherStatuses = emptyMap(),
+                detected = 10,
+                statuses = emptyMap(),
                 mutatedClasses = setOf("org.hermesnative.client.feature.entry.fixture.FixtureOne\$observeRun\$3"),
             )
 
@@ -199,21 +232,27 @@ class MutationEvidenceTest {
         return repository
     }
 
-    private fun pitReport(killed: Int, survived: Int, noCoverage: Int): String =
+    private fun pitReport(killed: Int, survived: Int, noCoverage: Int, timedOut: Int = 0): String =
         buildString {
             appendLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
             appendLine("<mutations partial=\"true\">")
             appendLine(mutation("FixtureOne", "KILLED", killed))
             appendLine(mutation("FixtureOne", "SURVIVED", survived))
+            appendLine(mutation("FixtureOne", "TIMED_OUT", timedOut, detected = true))
             appendLine(mutation("FixtureTwo", "NO_COVERAGE", noCoverage))
             appendLine("</mutations>")
         }
 
-    private fun mutation(className: String, status: String, count: Int): String =
+    private fun mutation(
+        className: String,
+        status: String,
+        count: Int,
+        detected: Boolean = status == "KILLED",
+    ): String =
         (1..count).joinToString("\n") { index ->
             val qualified =
                 if (className.startsWith("org.")) className else "${scope.targetPackage}.$className"
-            "<mutation detected=\"${status == "KILLED"}\" status=\"$status\" numberOfTestsRun=\"1\">" +
+            "<mutation detected=\"$detected\" status=\"$status\" numberOfTestsRun=\"1\">" +
                 "<sourceFile>$className.kt</sourceFile><mutatedClass>$qualified</mutatedClass>" +
                 "<mutatedMethod>fixture</mutatedMethod><methodDescription>()V</methodDescription>" +
                 "<mutatedLineNumber>$index</mutatedLineNumber></mutation>"

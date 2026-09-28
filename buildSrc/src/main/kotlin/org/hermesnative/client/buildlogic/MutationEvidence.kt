@@ -6,19 +6,21 @@ import org.w3c.dom.Element
 data class MutationSummary(
     val modulePath: String,
     val total: Int,
-    val killed: Int,
-    val survived: Int,
-    val noCoverage: Int,
-    val otherStatuses: Map<String, Int>,
+    val detected: Int,
+    val statuses: Map<String, Int>,
     val mutatedClasses: Set<String>,
 ) {
-    val mutationScorePercent: Double get() = percentOf(killed, total)
+    val noCoverage: Int get() = statuses["NO_COVERAGE"] ?: 0
 
-    val testStrengthPercent: Double get() = percentOf(killed, killed + survived)
+    /** PIT's mutation score: the mutants the tests detected, out of every analysed mutant. */
+    val mutationScorePercent: Double get() = percentOf(detected, total)
+
+    /** PIT's test strength: the detected mutants, out of the mutants the tests reached at all. */
+    val testStrengthPercent: Double get() = percentOf(detected, total - noCoverage)
 
     fun describe(): String =
-        "$modulePath: $total mutant(s), killed $killed, survived $survived, no coverage $noCoverage" +
-            otherStatuses.entries.sortedBy { it.key }.joinToString("") { (status, count) ->
+        "$modulePath: $total mutant(s), detected $detected" +
+            statuses.entries.sortedBy { it.key }.joinToString("") { (status, count) ->
                 ", $status $count"
             } +
             ", mutation score ${format(mutationScorePercent)}%, test strength ${format(testStrengthPercent)}%, " +
@@ -29,6 +31,8 @@ data class MutationSummary(
  * Enforces one declared mutation scope from the PIT XML report. The report is evidence, not a
  * summary: a missing, empty, unparsable, stale, narrowed, or out-of-package report fails the
  * verification, and so does a measured mutation score or test strength below its declared threshold.
+ * Both measured values use PIT's own definitions, so the tool's threshold and the declared threshold
+ * judge the same quantity.
  */
 object MutationEvidenceVerifier {
     fun verify(
@@ -56,6 +60,19 @@ object MutationEvidenceVerifier {
         }
 
         val statuses = mutations.groupingBy { it.getAttribute("status") }.eachCount()
+        // PIT marks a mutation as detected when the tests killed it or it timed out, and its own
+        // thresholds compare against that count. Counting only the KILLED status would enforce a
+        // stricter number than the tool's, so the same declared threshold would mean two different
+        // things in one run.
+        val detected =
+            mutations.count { mutation ->
+                val flag = mutation.getAttribute("detected")
+                check(flag == "true" || flag == "false") {
+                    "Mutation verification (${scope.modulePath}) found a mutation with a missing or " +
+                        "unrecognised detected attribute, so it cannot say which mutants the tests detected."
+                }
+                flag == "true"
+            }
         val outsideScope = mutations.map { it.text("mutatedClass") }
             .filterNot { it.startsWith("${scope.targetPackage}.") }
             .toSet()
@@ -67,11 +84,8 @@ object MutationEvidenceVerifier {
         val summary = MutationSummary(
             modulePath = scope.modulePath,
             total = mutations.size,
-            killed = statuses["KILLED"] ?: 0,
-            survived = statuses["SURVIVED"] ?: 0,
-            noCoverage = statuses["NO_COVERAGE"] ?: 0,
-            otherStatuses =
-                statuses.filterKeys { it !in setOf("KILLED", "SURVIVED", "NO_COVERAGE") },
+            detected = detected,
+            statuses = statuses,
             mutatedClasses = mutations.map { it.text("mutatedClass") }.toSet(),
         )
         check(summary.total >= scope.minMutants) {

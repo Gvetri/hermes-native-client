@@ -316,6 +316,13 @@ tasks.register("architectureRuleTests") {
     }
 }
 
+// Set by the verification tasks below and read by `qualityGate`, which fails when one of them did
+// not execute in the invocation.
+var coverageVerified = false
+var mutationVerified = false
+var mocksVerified = false
+var boundaryDoublesVerified = false
+
 tasks.register("verifyNoMocks") {
     group = "verification"
     description = "Fails when mock frameworks or mock-based test doubles are present."
@@ -363,11 +370,6 @@ tasks.register("verifyNoMocks") {
         mocksVerified = true
     }
 }
-
-var coverageVerified = false
-var mutationVerified = false
-var mocksVerified = false
-var boundaryDoublesVerified = false
 
 tasks.register("coverageVerify") {
     group = "verification"
