@@ -5,6 +5,9 @@ local.properties
 .externalNativeBuild/
 .cxx/
 
+# Kotlin build session directories
+**/.kotlin/
+
 # IDE and operating-system files
 .idea/
 *.iml

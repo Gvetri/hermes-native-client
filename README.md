@@ -38,7 +38,7 @@ Run the deterministic local gate:
 ./gradlew qualityGate
 ```
 
-The gate runs Kotlin formatting, Android lint, unit tests, architecture checks, mock detection, and debug/release Android builds. Android instrumentation requires a running compatible emulator:
+The gate runs Kotlin formatting, Android lint, unit tests, architecture checks, mock detection, deterministic boundary-double verification, coverage and mutation verification of the declared production modules, and debug/release Android builds. The required checks, the covered and mutated scopes, and every declared threshold are documented in [Quality gates](docs/quality-gates.md). Android instrumentation requires a running compatible emulator:
 
 ```text
 ./gradlew :app:verifyConnectedAndroidTests

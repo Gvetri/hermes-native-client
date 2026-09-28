@@ -6,6 +6,7 @@ fixture_lifecycle
 fixture_contract
 android_build
 architecture_check
+coverage_mutation
 compose_test
 api24_instrumentation
 maestro_journeys

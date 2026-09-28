@@ -378,8 +378,8 @@ redact_file "$runner_output" || status=$?
         required = [
             "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
             "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
-            "ARCHITECTURE_CHECK", "COMPOSE_TEST", "API24_INSTRUMENTATION",
-            "MAESTRO_JOURNEYS",
+            "ARCHITECTURE_CHECK", "COVERAGE_MUTATION", "COMPOSE_TEST",
+            "API24_INSTRUMENTATION", "MAESTRO_JOURNEYS",
         ]
         for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
             env = {**os.environ, **{f"{job}_RESULT": "success" for job in required}}

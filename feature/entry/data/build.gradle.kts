@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.kotlinJvm)
     alias(libs.plugins.ktlint)
+    id("hermes-quality-gate")
 }
 
 kotlin {
@@ -19,5 +20,4 @@ dependencies {
 
 tasks.test {
     useJUnit()
-    systemProperty("fixture.repositoryRoot", rootProject.projectDir.absolutePath)
 }

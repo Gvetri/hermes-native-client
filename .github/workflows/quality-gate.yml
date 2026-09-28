@@ -131,6 +131,7 @@ jobs:
   architecture_check:
     name: architecture-check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -140,9 +141,35 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew architectureCheck architectureRuleTests verifyNoMocks --no-daemon
+      - run: ./gradlew architectureCheck architectureRuleTests verifyNoMocks verifyDeterministicFakes --no-daemon
       - name: Verify CI test job contracts
         run: ./gradlew -p buildSrc test --tests org.hermesnative.client.buildlogic.QualityGateConfigurationTest --no-daemon
+      - name: Verify fail-closed quality verification
+        run: ./gradlew -p buildSrc test --tests org.hermesnative.client.buildlogic.QualityVerificationFailClosedTest --no-daemon
+      - name: Verify the coverage, mutation, and boundary evidence rules
+        run: >-
+          ./gradlew -p buildSrc test
+          --tests org.hermesnative.client.buildlogic.CoverageEvidenceTest
+          --tests org.hermesnative.client.buildlogic.MutationEvidenceTest
+          --tests org.hermesnative.client.buildlogic.BoundaryDoubleVerifierTest
+          --tests org.hermesnative.client.buildlogic.ReportEvidenceTest
+          --no-daemon
+
+  coverage_mutation:
+    name: coverage-mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Verify coverage and mutation thresholds
+        run: ./gradlew coverageVerify mutationVerify --no-daemon --console=plain
 
   compose_test:
     name: compose-jvm-tests
@@ -474,6 +501,7 @@ jobs:
       - fixture_contract
       - android_build
       - architecture_check
+      - coverage_mutation
       - compose_test
       - api24_instrumentation
       - maestro_journeys
@@ -492,6 +520,7 @@ jobs:
           FIXTURE_CONTRACT_RESULT: ${{ needs.fixture_contract.result }}
           ANDROID_BUILD_RESULT: ${{ needs.android_build.result }}
           ARCHITECTURE_CHECK_RESULT: ${{ needs.architecture_check.result }}
+          COVERAGE_MUTATION_RESULT: ${{ needs.coverage_mutation.result }}
           COMPOSE_TEST_RESULT: ${{ needs.compose_test.result }}
           API24_INSTRUMENTATION_RESULT: ${{ needs.api24_instrumentation.result }}
           MAESTRO_JOURNEYS_RESULT: ${{ needs.maestro_journeys.result }}
@@ -506,6 +535,7 @@ jobs:
           fixture_contract
           android_build
           architecture_check
+          coverage_mutation
           compose_test
           api24_instrumentation
           maestro_journeys'
@@ -523,6 +553,7 @@ jobs:
             "$FIXTURE_CONTRACT_RESULT" \
             "$ANDROID_BUILD_RESULT" \
             "$ARCHITECTURE_CHECK_RESULT" \
+            "$COVERAGE_MUTATION_RESULT" \
             "$COMPOSE_TEST_RESULT"; do
             if [ "$result" != success ]; then
               printf 'Required quality check result: %s\n' "$result" >&2

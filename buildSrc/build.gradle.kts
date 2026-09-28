@@ -8,6 +8,10 @@ repositories {
 }
 
 dependencies {
+    // The convention plugin in this source set applies both plugins, so they must be on the build
+    // logic classpath. The versions come from the main build's version catalog.
+    implementation(libs.kover.gradle.plugin)
+    implementation(libs.gradle.pitest.plugin)
     testImplementation("junit:junit:4.13.2")
 }
 
