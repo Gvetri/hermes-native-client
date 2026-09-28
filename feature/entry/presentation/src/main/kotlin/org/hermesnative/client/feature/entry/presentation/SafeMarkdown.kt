@@ -217,10 +217,13 @@ private fun parseInline(text: String): List<MarkdownSpan> {
             text.startsWith(IMAGE_PREFIX, index) -> {
                 // An image is not a supported construct: it stays inert source text
                 // instead of turning into a link that carries the image target. The label's
-                // bracket follows the '!' this branch matched, so the lookup starts there and
-                // the whole construct is consumed as literal text.
+                // bracket follows the '!' this branch matched, so the lookup starts there, and
+                // the construct ends where that label's own brackets balance: a label holding a
+                // link of its own has a nearer closing bracket, and stopping there hands the
+                // rest of the construct to the inline parser, whose links become clickable.
                 val labelBracket = index + 1
-                val image = linkAt(text, labelBracket, linkBrackets)
+                val labelEnd = linkBrackets?.matchingLabelEnds?.get(labelBracket) ?: -1
+                val image = linkAt(text, labelBracket, linkBrackets, labelEnd)
                 val end = image?.endIndex ?: index + IMAGE_PREFIX.length
                 literal.append(text, index, end)
                 index = end
@@ -271,15 +274,23 @@ private data class LinkMatch(
 
 /**
  * The bracket pairings of one text run, computed once per run so that no link candidate scans
- * the text for itself: the nearest closing bracket after every position, and the destination
- * end of every opening parenthesis. A candidate that scanned for itself made parsing quadratic
- * on bracket-heavy content, which a crafted message could use to stall rendering.
+ * the text for itself: the nearest closing bracket after every position, the closing bracket each
+ * opening bracket balances at, and the destination end of every opening parenthesis. A candidate
+ * that scanned for itself made parsing quadratic on bracket-heavy content, which a crafted message
+ * could use to stall rendering.
  */
 private class LinkBrackets(
     text: String,
 ) {
     /** The closing bracket that ends a label opened at each position, or -1 when there is none. */
     val labelEnds = IntArray(text.length)
+
+    /**
+     * The closing bracket that the bracket opened at each position balances against, counting the
+     * brackets inside it, or -1 when they never balance. A label holding a link of its own has a
+     * nearer closing bracket, so only this pairing ends the whole construct.
+     */
+    val matchingLabelEnds = IntArray(text.length) { -1 }
 
     /** The index just past the destination opened at each position, or -1 when it never closes. */
     val destinationEnds = IntArray(text.length) { -1 }
@@ -289,6 +300,17 @@ private class LinkBrackets(
         for (position in text.lastIndex downTo 0) {
             if (text[position] == ']') nextClosingBracket = position
             labelEnds[position] = nextClosingBracket
+        }
+
+        // A bracket ends at the first closing bracket to its right that no inner opening bracket
+        // has taken, which one right-to-left pass of the free closings finds.
+        val freeClosings = IntArray(text.length)
+        var freeCount = 0
+        for (position in text.lastIndex downTo 0) {
+            when (text[position]) {
+                ']' -> freeClosings[freeCount++] = position
+                '[' -> if (freeCount > 0) matchingLabelEnds[position] = freeClosings[--freeCount]
+            }
         }
 
         // A destination ends at the first closing parenthesis to its right that no other opening
@@ -308,15 +330,17 @@ private class LinkBrackets(
  * The link construct that starts at [index], or null when the brackets or the
  * parentheses are unpaired and the text must stay literal. The destination end comes
  * from the run's pairings, which balance parentheses, so a `)` inside the target
- * cannot end it early.
+ * cannot end it early. [labelEnd] is the pairing that closes the label: the nearest
+ * closing bracket for a link, and the one a label's own brackets balance at for the
+ * inert image run.
  */
 private fun linkAt(
     text: String,
     index: Int,
     linkBrackets: LinkBrackets?,
+    labelEnd: Int = linkBrackets?.labelEnds?.get(index) ?: -1,
 ): LinkMatch? {
     if (linkBrackets == null || !text.startsWith(LINK_OPEN, index)) return null
-    val labelEnd = linkBrackets.labelEnds[index]
     if (labelEnd < 0) return null
     val destinationStart = labelEnd + 2
     if (destinationStart >= text.length || text[labelEnd + 1] != '(') return null
