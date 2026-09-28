@@ -33,6 +33,19 @@ Run the local deterministic gate before submitting a change:
 ./gradlew qualityGate
 ```
 
+The gate enforces the scopes and thresholds declared in
+`buildSrc/src/main/kotlin/org/hermesnative/client/buildlogic/QualityPolicy.kt`; see
+[Quality gates](docs/quality-gates.md) for the required checks and how to change a declared value.
+The verification tasks also run on their own:
+
+```text
+./gradlew coverageVerify mutationVerify verifyDeterministicFakes
+```
+
+A declared threshold is evidence, not a summary: a missing, empty, stale, narrowed, or unparsable
+report fails the verification that reads it, so skipping a report-producing task cannot make the gate
+pass.
+
 If an emulator is available, also run the app instrumentation scope:
 
 ```text

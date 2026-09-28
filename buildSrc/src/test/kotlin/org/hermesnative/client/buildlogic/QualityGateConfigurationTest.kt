@@ -746,6 +746,143 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun coverage_and_mutation_checks_are_declared_required_and_enforced() {
+        val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
+        val requiredChecks = repositoryRoot.resolve(".github/quality-gate/required-checks.txt").readLines()
+        val buildScript = repositoryRoot.resolve("build.gradle.kts").readText()
+        val policy =
+            repositoryRoot.resolve(
+                "buildSrc/src/main/kotlin/org/hermesnative/client/buildlogic/QualityPolicy.kt",
+            ).readText()
+        val documentation = repositoryRoot.resolve("docs/quality-gates.md")
+        val coverageMutationJob =
+            workflow.substringAfter("  coverage_mutation:").substringBefore("  compose_test:")
+
+        assertTrue("The workflow must define a coverage and mutation job.", workflow.contains("  coverage_mutation:"))
+        assertTrue(
+            "The coverage and mutation job must be named explicitly.",
+            workflow.contains("    name: coverage-mutation"),
+        )
+        assertTrue(
+            "The declared job must verify coverage and mutation thresholds.",
+            coverageMutationJob.contains("./gradlew coverageVerify mutationVerify --no-daemon --console=plain"),
+        )
+        assertTrue(
+            "The coverage and mutation job must pin setup-java to the repository-approved commit.",
+            coverageMutationJob.contains("actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3"),
+        )
+        assertTrue(
+            "The coverage and mutation job must pin setup-gradle to the repository-approved commit.",
+            coverageMutationJob.contains("gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a"),
+        )
+        assertTrue(
+            "The aggregate declaration must include coverage_mutation.",
+            requiredChecks.contains("coverage_mutation"),
+        )
+        assertTrue("The aggregate gate must require the coverage and mutation job.", workflow.contains("      - coverage_mutation\n"))
+        assertTrue(
+            "The aggregate gate must receive the coverage and mutation result.",
+            workflow.contains("COVERAGE_MUTATION_RESULT: \${{ needs.coverage_mutation.result }}"),
+        )
+        assertTrue(
+            "The aggregate gate must fail on a non-successful coverage and mutation result.",
+            workflow.contains("\"\$COVERAGE_MUTATION_RESULT\" \\"),
+        )
+        assertTrue(
+            "The architecture job must run the deterministic boundary check.",
+            workflow.contains("architectureCheck architectureRuleTests verifyNoMocks verifyDeterministicFakes"),
+        )
+        assertTrue(
+            "The workflow must run the fail-closed quality verification tests.",
+            workflow.contains("--tests org.hermesnative.client.buildlogic.QualityVerificationFailClosedTest"),
+        )
+        listOf("verifyDeterministicFakes", "coverageVerify", "mutationVerify").forEach { task ->
+            assertTrue("The local gate must depend on $task.", buildScript.contains("\"$task\","))
+        }
+        assertTrue(
+            "The local gate must require coverage verification to execute.",
+            buildScript.contains("qualityGate requires coverageVerify to execute in this invocation."),
+        )
+        assertTrue(
+            "The local gate must require mutation verification to execute.",
+            buildScript.contains("qualityGate requires mutationVerify to execute in this invocation."),
+        )
+        assertTrue(
+            "The local gate must require the mock check to execute.",
+            buildScript.contains("qualityGate requires verifyNoMocks to execute in this invocation."),
+        )
+        assertTrue(
+            "The local gate must require the boundary-double check to execute.",
+            buildScript.contains("qualityGate requires verifyDeterministicFakes to execute in this invocation."),
+        )
+        assertTrue(
+            "The verifications must refuse an invocation that excluded the report-producing tasks.",
+            buildScript.contains("requireTasksInInvocation("),
+        )
+        listOf("val coverageScope", "val mutationScope", "val boundaryDoubles", "val allowedDoubleReferences").forEach { declaration ->
+            assertTrue("The gate must declare $declaration in the shared policy.", policy.contains(declaration))
+        }
+        assertTrue("Documentation must identify the required checks and thresholds.", documentation.isFile)
+        val declaredValues =
+            Regex(
+                "(minReportedClasses|minLineCoveragePercent|minBranchCoveragePercent|minMutants|" +
+                    "minMutatedClasses|minMutationScorePercent|minTestStrengthPercent) = ([0-9]+)",
+            ).findAll(policy).map { match -> match.groupValues[2] }.toList()
+        assertEquals(
+            "The policy must declare the seven thresholds of every one of its three scoped modules.",
+            21,
+            declaredValues.size,
+        )
+        val documentationText = documentation.readText()
+        declaredValues.forEach { value ->
+            assertTrue(
+                "Documentation must record the declared threshold value $value.",
+                documentationText.contains(value),
+            )
+        }
+        QualityPolicy.coverageScope.forEach { scope ->
+            scope.documentationCells.forEach { cell ->
+                assertTrue(
+                    "Documentation must record the declared coverage cell '$cell'.",
+                    documentationText.contains(cell),
+                )
+            }
+        }
+        QualityPolicy.mutationScope.forEach { scope ->
+            scope.documentationCells.forEach { cell ->
+                assertTrue(
+                    "Documentation must record the declared mutation cell '$cell'.",
+                    documentationText.contains(cell),
+                )
+            }
+        }
+        listOf(
+            "CoverageEvidenceTest",
+            "MutationEvidenceTest",
+            "BoundaryDoubleVerifierTest",
+            "ReportEvidenceTest",
+            "QualityVerificationFailClosedTest",
+        ).forEach { testClass ->
+            assertTrue(
+                "The workflow must run the buildSrc quality self-test $testClass.",
+                workflow.contains("--tests org.hermesnative.client.buildlogic.$testClass"),
+            )
+        }
+        assertTrue(
+            "The architecture job must keep a bounded timeout for its nested test runs.",
+            workflow.contains(
+                "  architecture_check:\n    name: architecture-check\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n",
+            ),
+        )
+        listOf("coverageVerify", "mutationVerify", "verifyDeterministicFakes").forEach { entryPoint ->
+            assertTrue(
+                "Documentation must name the $entryPoint entry point.",
+                documentationText.contains(entryPoint),
+            )
+        }
+    }
+
+    @Test
     fun checkout_steps_are_immutable_and_disable_persisted_credentials() {
         val lines = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readLines()
         val checkoutStepIndices = lines.indices.filter { index ->
@@ -753,7 +890,7 @@ class QualityGateConfigurationTest {
         }
         val immutableReference = Regex("[0-9a-fA-F]{40}")
 
-        assertEquals("The workflow must keep all thirteen checkout steps explicit.", 13, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all fourteen checkout steps explicit.", 14, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
             val reference = lines[index].trim().substringAfter("actions/checkout@")
             assertTrue(

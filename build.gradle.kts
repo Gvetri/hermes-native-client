@@ -1,5 +1,10 @@
+import org.hermesnative.client.buildlogic.BoundaryDoubleVerifier
+import org.hermesnative.client.buildlogic.CoverageEvidenceVerifier
 import org.hermesnative.client.buildlogic.FixtureDescriptorValidator
+import org.hermesnative.client.buildlogic.MutationEvidenceVerifier
+import org.hermesnative.client.buildlogic.QualityPolicy
 import org.hermesnative.client.buildlogic.gradleWrapperCommand
+import org.hermesnative.client.buildlogic.requireTasksInInvocation
 import org.gradle.kotlin.dsl.register
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -12,6 +17,8 @@ plugins {
     alias(libs.plugins.kotlinJvm) apply false
     alias(libs.plugins.composeCompiler) apply false
     alias(libs.plugins.ktlint) apply false
+    alias(libs.plugins.kover) apply false
+    alias(libs.plugins.pitest) apply false
     alias(libs.plugins.roborazzi) apply false
 }
 
@@ -315,27 +322,121 @@ tasks.register("verifyNoMocks") {
     group = "verification"
     description = "Fails when mock frameworks or mock-based test doubles are present."
     doLast {
+        // This check reads every module build script, including this one, so each rejected framework
+        // name is assembled from fragments instead of appearing literally in the file that rejects it.
+        val mockFrameworks =
+            listOf("mock" + "ito", "mock" + "k", "mock" + "webserver", "easy" + "mock", "mock" + "-server")
+        val forbiddenSourcePatterns =
+            mockFrameworks.map { framework -> Regex("(?i)$framework") } +
+                Regex("(?i)\\b" + "mock" + "\\s*\\(")
         val sourceFiles = fileTree(projectDir) {
             include("**/src/main/**/*.kt")
             include("**/src/test/**/*.kt")
             include("**/src/androidTest/**/*.kt")
         }
-        val forbiddenMockPatterns = listOf(
-            Regex("(?i)mockito"),
-            Regex("(?i)mockk"),
-            Regex("(?i)mockwebserver"),
-            Regex("(?i)\\bmock\\s*\\("),
-        )
         val violations = sourceFiles.flatMap { sourceFile ->
             sourceFile.readLines().mapIndexedNotNull { index, line ->
-                if (forbiddenMockPatterns.any { it.containsMatchIn(line) }) {
+                if (forbiddenSourcePatterns.any { it.containsMatchIn(line) }) {
                     "${sourceFile.relativeTo(projectDir)}:${index + 1}: mock-based test code is not allowed"
                 } else {
                     null
                 }
             }
         }
-        check(violations.isEmpty()) { violations.joinToString("\n") }
+        // A mocking framework can also enter through a dependency declaration, which no source line
+        // would show, so every module build script is scanned for the same framework names.
+        val buildScripts =
+            fileTree(projectDir) {
+                include("**/build.gradle.kts")
+            }.files
+        check(buildScripts.isNotEmpty()) { "Mock check found no module build scripts." }
+        val dependencyViolations = buildScripts.flatMap { buildScript ->
+            buildScript.readLines().mapIndexedNotNull { index, line ->
+                if (mockFrameworks.any { framework -> line.contains(framework, ignoreCase = true) }) {
+                    "${buildScript.relativeTo(projectDir)}:${index + 1}: mock framework dependency is not allowed"
+                } else {
+                    null
+                }
+            }
+        }
+        check((violations + dependencyViolations).isEmpty()) {
+            (violations + dependencyViolations).joinToString("\n")
+        }
+        mocksVerified = true
+    }
+}
+
+var coverageVerified = false
+var mutationVerified = false
+var mocksVerified = false
+var boundaryDoublesVerified = false
+
+tasks.register("coverageVerify") {
+    group = "verification"
+    description =
+        "Enforces the declared Kover line and branch thresholds for the declared tested production scope."
+    dependsOn(
+        QualityPolicy.coverageScope.flatMap { scope ->
+            listOf("${scope.modulePath}:koverXmlReport", "${scope.modulePath}:koverVerify")
+        },
+    )
+    doLast {
+        requireTasksInInvocation(
+            label = "Coverage verification",
+            requiredTasks = QualityPolicy.coverageScope.map { scope -> "${scope.modulePath}:test" },
+            invocationTasks = gradle.taskGraph.allTasks.map { task -> task.path }.toSet(),
+        )
+        val summaries = QualityPolicy.coverageScope.map { scope ->
+            CoverageEvidenceVerifier.verify(scope, projectDir)
+        }
+        summaries.forEach { logger.lifecycle("Coverage verified. ${it.describe()}") }
+        coverageVerified = true
+    }
+}
+
+tasks.register("mutationVerify") {
+    group = "verification"
+    description =
+        "Enforces the declared PIT mutation score and test strength for the declared mutation-testable scope."
+    dependsOn(
+        QualityPolicy.mutationScope.map { scope -> "${scope.modulePath}:pitest" },
+    )
+    dependsOn(QualityPolicy.coverageScope.map { scope -> "${scope.modulePath}:koverXmlReport" })
+    doLast {
+        requireTasksInInvocation(
+            label = "Mutation verification",
+            requiredTasks =
+                QualityPolicy.coverageScope.map { scope -> "${scope.modulePath}:test" } +
+                    QualityPolicy.mutationScope.map { scope -> "${scope.modulePath}:pitest" },
+            invocationTasks = gradle.taskGraph.allTasks.map { task -> task.path }.toSet(),
+        )
+        val mutations = QualityPolicy.mutationScope.map { scope ->
+            MutationEvidenceVerifier.verify(scope, projectDir)
+        }
+        val coverages = QualityPolicy.coverageScope.map { scope ->
+            CoverageEvidenceVerifier.verify(scope, projectDir)
+        }
+        MutationEvidenceVerifier.requireCoveredByCoverage(mutations, coverages)
+        mutations.forEach { logger.lifecycle("Mutation verified. ${it.describe()}") }
+        mutationVerified = true
+    }
+}
+
+tasks.register("verifyDeterministicFakes") {
+    group = "verification"
+    description =
+        "Requires a deterministic test double for every declared datasource and repository boundary."
+    doLast {
+        logger.lifecycle(
+            BoundaryDoubleVerifier.verify(
+                repositoryRoot = projectDir,
+                requirements = QualityPolicy.boundaryDoubles,
+                forbiddenReferences = QualityPolicy.forbiddenDoubleReferences,
+                allowedReferences = QualityPolicy.allowedDoubleReferences,
+                moduleRoots = QualityPolicy.scannedModuleRoots,
+            ),
+        )
+        boundaryDoublesVerified = true
     }
 }
 
@@ -354,7 +455,7 @@ val requiredUnitTestTasks = listOf(
 
 tasks.register("verifyRequiredUnitTests") {
     group = "verification"
-    description = "Fails when a declared unit-test scope is empty or did not produce results."
+    description = "Fails when a declared unit-test scope is empty, skipped, or did not produce results."
     dependsOn(requiredUnitTestTasks)
     doLast {
         val resultDirectories = listOf(
@@ -371,14 +472,18 @@ tasks.register("verifyRequiredUnitTests") {
                 if (reports.isEmpty()) {
                     listOf("empty test result directory: ${resultDirectory.relativeTo(projectDir)}")
                 } else {
-                    val executedTests = reports.sumOf { report ->
+                    var executedTests = 0
+                    var skippedTests = 0
+                    reports.forEach { report ->
                         val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(report)
-                        document.documentElement.getAttribute("tests").toIntOrNull() ?: 0
+                        executedTests += document.documentElement.getAttribute("tests").toIntOrNull() ?: 0
+                        skippedTests += document.documentElement.getAttribute("skipped").toIntOrNull() ?: 0
                     }
-                    if (executedTests == 0) {
-                        listOf("zero executed tests: ${resultDirectory.relativeTo(projectDir)}")
-                    } else {
-                        emptyList()
+                    val directory = resultDirectory.relativeTo(projectDir)
+                    when {
+                        executedTests == 0 -> listOf("zero executed tests: $directory")
+                        skippedTests > 0 -> listOf("$skippedTests skipped test(s): $directory")
+                        else -> emptyList()
                     }
                 }
             }
@@ -478,6 +583,9 @@ tasks.register("qualityGate") {
         "architectureCheck",
         "architectureRuleTests",
         "verifyNoMocks",
+        "verifyDeterministicFakes",
+        "coverageVerify",
+        "mutationVerify",
         "fixtureDescriptorTests",
         "fixtureLifecycleTests",
         "fixtureContractTests",
@@ -489,6 +597,18 @@ tasks.register("qualityGate") {
         ":app:assembleRelease",
     )
     doLast {
+        check(coverageVerified) {
+            "qualityGate requires coverageVerify to execute in this invocation."
+        }
+        check(mutationVerified) {
+            "qualityGate requires mutationVerify to execute in this invocation."
+        }
+        check(mocksVerified) {
+            "qualityGate requires verifyNoMocks to execute in this invocation."
+        }
+        check(boundaryDoublesVerified) {
+            "qualityGate requires verifyDeterministicFakes to execute in this invocation."
+        }
         check(architectureRuleTestsExecuted) {
             "qualityGate requires architectureRuleTests to execute in this invocation."
         }
