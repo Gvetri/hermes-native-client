@@ -27,6 +27,8 @@ interface RunSubmissionUncertaintyStore {
 
     fun contains(key: PendingRunSubmissionKey): Boolean
 
+    fun clearEndpoint(endpoint: String) = Unit
+
     fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = emptySet()
 
     fun attemptId(key: PendingRunSubmissionKey): String? = null

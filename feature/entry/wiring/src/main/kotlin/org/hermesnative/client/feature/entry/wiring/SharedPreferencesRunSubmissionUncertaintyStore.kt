@@ -44,6 +44,15 @@ private class SharedPreferencesRunSubmissionUncertaintyStorage(
         }
     }
 
+    override fun clearEndpoint(endpoint: String) {
+        val prefix = "$RECORDS_KEY.${endpointNamespace(endpoint)}."
+        val editor = preferences.edit()
+        preferences.all.keys.filter { it.startsWith(prefix) }.forEach(editor::remove)
+        check(editor.commit()) {
+            "Could not remove the Gateway Run submission uncertainty markers."
+        }
+    }
+
     private fun encode(record: RunSubmissionUncertaintySnapshot): String =
         listOf(
             FORMAT_VERSION,

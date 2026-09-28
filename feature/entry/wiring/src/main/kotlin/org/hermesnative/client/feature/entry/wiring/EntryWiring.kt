@@ -25,7 +25,8 @@ object EntryWiring {
         coroutineScope: CoroutineScope? = null,
     ): EntryStateHolder {
         val dataSource = SharedPreferencesGatewayConnectionDataSource(context)
-        val repository = DefaultGatewayConnectionRepository(dataSource)
+        val credentialStore = AndroidKeyStoreGatewayCredentialStore(context)
+        val repository = DefaultGatewayConnectionRepository(dataSource, credentialStore)
         val recoveryEndpoint = AtomicReference(dataSource.loadEndpoint())
         val runRecoveryRegistry =
             EndpointScopedRunRecoveryRegistry(
@@ -40,6 +41,7 @@ object EntryWiring {
                 capabilityDiscovery?.invoke(endpoint, bearerCredential)
                     ?: DefaultGatewayClient(endpoint, bearerCredential).discoverCapabilities()
             }
+        val runSubmissionUncertaintyStore = SharedPreferencesRunSubmissionUncertaintyStore(context)
         return EntryStateHolder(
             initialState = initialState,
             verifyGatewayConnection = verifyGatewayConnection,
@@ -60,8 +62,12 @@ object EntryWiring {
             removeRunRecoveryEntry = { endpoint, entry ->
                 runRecoveryRegistry.removeForEndpoint(endpoint, entry)
             },
-            removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-            runSubmissionUncertaintyStore = SharedPreferencesRunSubmissionUncertaintyStore(context),
+            removeGatewayConnectionUseCase =
+                RemoveGatewayConnection(repository) { endpoint ->
+                    runRecoveryRegistry.clearForEndpoint(endpoint)
+                    endpoint?.let(runSubmissionUncertaintyStore::clearEndpoint)
+                },
+            runSubmissionUncertaintyStore = runSubmissionUncertaintyStore,
             runStatusNotificationSettingsStore =
                 SharedPreferencesRunStatusNotificationSettingsStore(context),
             runStatusNotificationPermission = AndroidRunStatusNotificationPermission(context),

@@ -3,6 +3,7 @@ package org.hermesnative.client.feature.entry.presentation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -52,7 +54,7 @@ fun EntryScreen(
                     .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)),
         ) {
             val sessionList = state.sessionList
-            if (sessionList != null) {
+            if (sessionList != null && !state.isChangingCredential) {
                 SessionShell(
                     state = sessionList,
                     runStatusNotifications = state.runStatusNotifications,
@@ -102,6 +104,7 @@ private fun ConnectionContent(
         )
         Spacer(modifier = Modifier.height(24.dp))
         when {
+            state.isChangingCredential -> GatewayConnectionForm(state = state, onEvent = onEvent)
             state.isConnected -> ConnectedGatewayContent(onEvent)
             state.connectionSetupRequested ->
                 GatewayConnectionForm(
@@ -131,7 +134,7 @@ private fun GatewayConnectionForm(
         value = state.endpoint,
         onValueChange = { onEvent(EntryUiEvent.EndpointChanged(it)) },
         modifier = Modifier.fillMaxWidth(),
-        enabled = !state.isVerifying,
+        enabled = !state.isVerifying && !state.isChangingCredential,
         label = { Text("Gateway HTTPS endpoint") },
         singleLine = true,
     )
@@ -145,6 +148,17 @@ private fun GatewayConnectionForm(
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
     )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = state.saveCredential,
+            onCheckedChange = { onEvent(EntryUiEvent.SaveCredentialChanged(it)) },
+            enabled = !state.isVerifying,
+        )
+        Text(text = "Save securely on this device")
+    }
     Spacer(modifier = Modifier.height(16.dp))
     Button(
         onClick = {
@@ -164,7 +178,17 @@ private fun GatewayConnectionForm(
     ) {
         Text(text = if (state.errorCategory == null) state.actionLabel else "Try again")
     }
-    Spacer(modifier = Modifier.height(8.dp))
+    if (state.isChangingCredential) {
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.CancelGatewayCredentialChangeClicked) },
+            enabled = !state.isVerifying,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Cancel")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+    }
     OutlinedButton(
         onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
         enabled = !state.isVerifying,
@@ -206,6 +230,13 @@ private fun ConnectedGatewayContent(onEvent: (EntryUiEvent) -> Unit) {
             },
     )
     Spacer(modifier = Modifier.height(16.dp))
+    OutlinedButton(
+        onClick = { onEvent(EntryUiEvent.ChangeGatewayCredentialClicked) },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) {
+        Text(text = "Change Gateway credential")
+    }
+    Spacer(modifier = Modifier.height(8.dp))
     OutlinedButton(
         onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),

@@ -36,6 +36,25 @@ class SharedPreferencesRunSubmissionUncertaintyStoreTest {
     }
 
     @Test
+    fun clearing_one_endpoint_removes_its_uncertainty_markers_only() {
+        val context = RuntimeEnvironment.getApplication()
+        val endpoint = "https://gateway.example/profile-a"
+        val otherEndpoint = "https://gateway.example/profile-b"
+        val store = SharedPreferencesRunSubmissionUncertaintyStore(context)
+        val key = PendingRunSubmissionKey(endpoint, SessionId("session-1"))
+        val otherKey = PendingRunSubmissionKey(otherEndpoint, SessionId("session-2"))
+
+        store.add(key, emptySet(), "attempt-1")
+        store.add(otherKey, emptySet(), "attempt-2")
+
+        store.clearEndpoint(endpoint)
+
+        assertFalse(store.contains(key))
+        assertTrue(store.contains(otherKey))
+        store.remove(otherKey)
+    }
+
+    @Test
     fun an_accepted_add_stays_successful_when_a_listener_removes_the_written_marker() {
         val context = RuntimeEnvironment.getApplication()
         val key = PendingRunSubmissionKey("https://gateway.example/profile", SessionId("session-1"))

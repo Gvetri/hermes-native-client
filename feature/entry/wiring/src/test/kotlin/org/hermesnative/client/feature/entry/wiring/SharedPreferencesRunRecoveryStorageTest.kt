@@ -32,6 +32,25 @@ class SharedPreferencesRunRecoveryStorageTest {
     }
 
     @Test
+    fun clearing_one_endpoint_removes_its_session_and_run_identifiers_only() {
+        val context = RuntimeEnvironment.getApplication()
+        val endpoint = "https://gateway.example/profile-a"
+        val otherEndpoint = "https://gateway.example/profile-b"
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        val otherStorage = SharedPreferencesRunRecoveryStorage(context) { otherEndpoint }
+        val entry = RunRecoveryEntry(SessionId("session-1"), RunId("run-1"))
+        val otherEntry = RunRecoveryEntry(SessionId("session-2"), RunId("run-2"))
+
+        storage.save(setOf(entry))
+        otherStorage.save(setOf(otherEntry))
+
+        storage.clear()
+
+        assertTrue(storage.load().isEmpty())
+        assertEquals(setOf(otherEntry), otherStorage.load())
+    }
+
+    @Test
     fun equivalent_endpoint_spellings_share_the_recovery_namespace() {
         val context = RuntimeEnvironment.getApplication()
         var endpoint: String? = " HTTPS://GATEWAY.EXAMPLE:0443/profile/ "

@@ -109,6 +109,7 @@ class EntryScreenTest {
 
         composeTestRule.onNodeWithText("Gateway HTTPS endpoint").assertIsDisplayed()
         composeTestRule.onNodeWithText("Bearer credential").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Save securely on this device").assertIsDisplayed()
         composeTestRule
             .onNodeWithText("Verify Gateway Connection")
             .assertHasClickAction()
@@ -161,6 +162,7 @@ class EntryScreenTest {
 
     @Test
     fun connected_state_is_rendered_without_a_second_connection_action() {
+        val events = mutableListOf<EntryUiEvent>()
         composeTestRule.setContent {
             HermesTheme {
                 EntryScreen(
@@ -172,12 +174,14 @@ class EntryScreenTest {
                             connectionSetupRequested = true,
                             isConnected = true,
                         ),
-                    onEvent = {},
+                    onEvent = events::add,
                 )
             }
         }
 
         composeTestRule.onNodeWithText("Connected to Gateway").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Change Gateway credential").performClick()
+        assertEquals(listOf(EntryUiEvent.ChangeGatewayCredentialClicked), events)
     }
 
     @Test

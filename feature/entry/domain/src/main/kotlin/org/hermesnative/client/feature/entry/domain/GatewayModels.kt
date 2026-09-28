@@ -14,6 +14,7 @@ value class RunId(
 
 data class GatewayConnection(
     val endpoint: String,
+    val bearerCredential: String? = null,
 )
 
 data class SessionListRequest(

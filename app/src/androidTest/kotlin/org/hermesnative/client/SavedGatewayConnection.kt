@@ -1,6 +1,7 @@
 package org.hermesnative.client
 
 import androidx.test.platform.app.InstrumentationRegistry
+import org.hermesnative.client.feature.entry.wiring.AndroidKeyStoreGatewayCredentialStore
 import org.hermesnative.client.feature.entry.wiring.SharedPreferencesGatewayConnectionDataSource
 
 /**
@@ -12,4 +13,7 @@ internal fun clearSavedGatewayConnection() {
     SharedPreferencesGatewayConnectionDataSource(
         InstrumentationRegistry.getInstrumentation().targetContext,
     ).clearEndpoint()
+    AndroidKeyStoreGatewayCredentialStore(
+        InstrumentationRegistry.getInstrumentation().targetContext,
+    ).clear()
 }

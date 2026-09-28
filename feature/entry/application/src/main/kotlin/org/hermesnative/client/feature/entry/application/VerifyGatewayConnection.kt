@@ -3,6 +3,7 @@ package org.hermesnative.client.feature.entry.application
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.GatewayConnection
+import org.hermesnative.client.feature.entry.domain.GatewayConnectionPersistenceException
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
@@ -17,9 +18,14 @@ class VerifyGatewayConnection(
     fun execute(
         endpoint: String,
         bearerCredential: String,
+        saveCredential: Boolean = false,
     ): GatewayCapabilities {
         val capabilities = verify(endpoint, bearerCredential)
-        gatewayConnectionRepository.save(GatewayConnection(normalizeGatewayEndpoint(endpoint)))
+        persist(
+            endpoint = endpoint,
+            bearerCredential = bearerCredential,
+            saveCredential = saveCredential,
+        )
         return capabilities
     }
 
@@ -28,8 +34,23 @@ class VerifyGatewayConnection(
         bearerCredential: String,
     ): GatewayCapabilities = verify(endpoint, bearerCredential)
 
-    fun persist(endpoint: String) {
-        gatewayConnectionRepository.save(GatewayConnection(normalizeGatewayEndpoint(endpoint)))
+    fun persist(
+        endpoint: String,
+        bearerCredential: String? = null,
+        saveCredential: Boolean = false,
+    ) {
+        val connection =
+            GatewayConnection(
+                endpoint = normalizeGatewayEndpoint(endpoint),
+                bearerCredential = bearerCredential?.takeIf { saveCredential },
+            )
+        try {
+            gatewayConnectionRepository.save(connection)
+        } catch (error: GatewayConnectionPersistenceException) {
+            throw error
+        } catch (error: Exception) {
+            throw GatewayConnectionPersistenceException(error)
+        }
     }
 
     private fun verify(

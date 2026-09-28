@@ -14,6 +14,8 @@ interface RunSubmissionUncertaintyStorage {
     )
 
     fun remove(key: PendingRunSubmissionKey)
+
+    fun clearEndpoint(endpoint: String) = Unit
 }
 
 class DefaultRunSubmissionUncertaintyStore(
@@ -49,6 +51,12 @@ class DefaultRunSubmissionUncertaintyStore(
     }
 
     override fun contains(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { storage.read(key) != null }
+
+    override fun clearEndpoint(endpoint: String) {
+        synchronized(lock) {
+            storage.clearEndpoint(endpoint)
+        }
+    }
 
     override fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = synchronized(lock) { storage.read(key)?.knownRunIds.orEmpty() }
 
