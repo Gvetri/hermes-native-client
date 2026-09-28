@@ -108,12 +108,15 @@ class SecureGatewayCredentialStorageTest {
     ): List<String> {
         val parser = context.resources.getXml(resourceId)
         val exclusions = mutableListOf<String>()
-        var section = parser.name.orEmpty()
+        var section = ""
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
             if (event == XmlPullParser.START_TAG) {
                 when (parser.name) {
-                    "cloud-backup", "device-transfer" -> section = parser.name
+                    // `full-backup-content` is the sole section of the
+                    // pre-Android 12 rules; the extraction rules nest their
+                    // exclusions one level deeper.
+                    "full-backup-content", "cloud-backup", "device-transfer" -> section = parser.name
                     "exclude" -> {
                         val domain = parser.getAttributeValue(null, "domain")
                         val path = parser.getAttributeValue(null, "path")
