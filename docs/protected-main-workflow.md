@@ -34,10 +34,11 @@ Use one issue-scoped branch per change, in the form `<type>/<issue>-<short-descr
 re-evaluate the head, so a result from an earlier state of a pull request never stands for the
 current one.
 
-The concurrency group is the pull-request number, and a new commit cancels the run of the obsolete
-head. Results are published per check, and only the aggregate job named `quality-gate` is a required
-status. The aggregate fails unless every check declared in `.github/quality-gate/required-checks.txt`
-reports the outcome the event expects.
+The concurrency group is the pull-request number with `cancel-in-progress`, so the runs of one pull
+request never race: a newer run replaces the obsolete pending one, and only the current head's own
+run publishes the required status. Results are published per check, and only the aggregate job named
+`quality-gate` is a required status. The aggregate fails unless every check declared in
+`.github/quality-gate/required-checks.txt` reports the outcome the event expects.
 
 | Run | Checks that execute | Checks that stay skipped |
 | --- | --- | --- |
@@ -49,7 +50,8 @@ reports the outcome the event expects.
 `draft-validation` runs for every in-repository pull request: on a draft it is the whole validation,
 and on a ready pull request it adds a fast formatting and lint result beside the complete gate. The
 aggregate also requires that a pull request targets `main`, so a pull request against another branch
-fails even when its checks pass.
+fails even when its checks pass. For an external-fork pull request the aggregate fails closed: the
+head never ran the complete gate, so it must never hold a passing required status.
 
 ## Merging
 
@@ -59,6 +61,8 @@ A pull request may be merged or auto-merged only when all of the following hold:
 - it targets `main`;
 - its exact current head passed the required `quality-gate` status, and the branch is up to date
   with `main`;
+- it comes from the repository itself, because an external-fork head never holds a passing required
+  status;
 - it is merged with a squash merge, which is the only enabled strategy.
 
 The squash merge writes the pull-request title onto `main`, so the title and every commit the pull
@@ -76,10 +80,12 @@ An external-fork pull request is untrusted input, so it never runs the complete 
 - the repository requires maintainer approval before a run from an external contributor starts, so no
   external change consumes runner time on its own;
 - only `fork-guard` executes, and it reports which handling applies;
+- the aggregate fails closed, so an external head never holds a passing required status and neither
+  an automatic nor a manual merge of the fork head is possible;
 - external-fork artifacts are not release or compatibility inputs;
-- the pull request never merges automatically. A maintainer validates the change by carrying it onto
-  an in-repository branch, where the complete gate runs against a commit-verified head, and merges
-  that pull request explicitly.
+- a maintainer validates the change by carrying it onto an in-repository branch, where the complete
+  gate runs against a commit-verified head, and merges that pull request explicitly. That explicit
+  merge is the only merge an external change can lead to.
 
 ## Verifying the configuration
 
@@ -96,9 +102,9 @@ GITHUB_REPOSITORY=Gvetri/hermes-native-client GITHUB_TOKEN="$(gh auth token)" \
   python3 .github/scripts/verify-repository-conformance.py --owner
 ```
 
-Without `--owner` the check verifies everything a read-only credential can read, which is the whole
-protected-branch contract: the ruleset, the required status, the declaration, the read-only token,
-and the absence of secrets.
+Without `--owner` the check verifies everything a read-only credential can read: the enforced rules
+and the rulesets' bypass actors, the required status, the required-check declaration, the declared
+read-only token scope, and the absence of secrets.
 
 ## The contracts are themselves tested
 

@@ -21,8 +21,8 @@ on:
 permissions:
   contents: read
 
-# A new commit on the same pull request cancels the obsolete run, so no result from an older head is
-# read as the result of the current head.
+# One concurrency group per pull request, so the runs of a pull request never race: a newer run
+# replaces an obsolete one, and the required status always belongs to the current head's own run.
 concurrency:
   group: quality-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
-            printf '%s\n' 'External-fork pull request: this run is read-only and secret-free. A maintainer must carry the change onto an in-repository branch before the complete gate can validate it.'
+            printf '%s\n' 'External-fork pull request: this run is read-only and secret-free, and it does not hold a passing required status. A maintainer must carry the change onto an in-repository branch, where the complete gate validates it.'
           else
             printf '%s\n' 'In-repository pull request: the complete quality gate is required for this head.'
           fi
@@ -676,11 +676,12 @@ jobs:
             fi
             require fork_guard "$FORK_GUARD_RESULT"
             if [ "$EVENT_FORK" = true ]; then
-              # An external fork never runs the complete gate: the read-only guard is its result, and
-              # a maintainer validates the change on an in-repository branch before merging it.
+              # An external fork never runs the complete gate, and its required status must never be
+              # green: the only merge path is an in-repository branch a maintainer validates.
               expect draft_validation "$DRAFT_VALIDATION_RESULT" skipped
               expect commit_message "$COMMIT_MESSAGE_RESULT" skipped
-              expected_state=skipped
+              printf '%s\n' 'External-fork pull request: the complete gate did not run, so this head has no passing required status. Carry the change onto an in-repository branch, where the complete gate validates it before a maintainer merges it.' >&2
+              exit 1
             elif [ "$EVENT_DRAFT" = true ]; then
               # A draft runs the lightweight validation only; the complete gate is skipped until the
               # pull request is ready for review.
@@ -711,9 +712,6 @@ jobs:
             done
             test "$API24_INSTRUMENTATION_RESULT" = skipped
             test "$MAESTRO_JOURNEYS_RESULT" = skipped
-            if [ "$EVENT_FORK" = true ]; then
-              printf '%s\n' 'External-fork pull request: read-only, secret-free handling verified. The complete gate runs on the in-repository branch a maintainer validates.'
-            fi
           else
             for result in \
               "$FORMATTING_RESULT" \

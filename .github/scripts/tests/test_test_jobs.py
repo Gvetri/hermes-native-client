@@ -448,7 +448,12 @@ redact_file "$runner_output" || status=$?
             with self.subTest(mode=name):
                 result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env,
                                         capture_output=True, text=True, timeout=10)
-                self.assertEqual(0, result.returncode, result.stderr)
+                if name == "external fork":
+                    # A head that never ran the complete gate must not hold a passing status.
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("the complete gate did not run", result.stderr)
+                else:
+                    self.assertEqual(0, result.returncode, result.stderr)
         for name, env in scenarios.items():
             with self.subTest(mode=name, drifted="heavy job ran"):
                 drifted = {**env, "FORMATTING_RESULT": "success"}

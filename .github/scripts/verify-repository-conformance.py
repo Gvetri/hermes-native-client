@@ -19,6 +19,8 @@ import urllib.request
 from pathlib import Path
 
 REQUIRED_CHECK_CONTEXT = "quality-gate"
+# The one lane that runs on the schedule alone, so its write scope never reaches pull-request code.
+NIGHTLY_LANE = "create_nightly_failure_issue"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPOSITORY_ROOT / ".github/workflows/quality-gate.yml"
 REQUIRED_CHECKS = REPOSITORY_ROOT / ".github/quality-gate/required-checks.txt"
@@ -62,6 +64,17 @@ def rule_parameters(rules, rule_type):
             parameters = rule.get("parameters")
             return parameters if isinstance(parameters, dict) else {}
     return None
+
+
+def job_blocks(text):
+    """Map every job id of the workflow to its block, using the two-space job keys as boundaries."""
+    body = text.split("\njobs:\n", 1)[-1]
+    matches = list(re.finditer(r"^  ([a-z0-9_-]+):\n", body, flags=re.MULTILINE))
+    blocks = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        blocks[match.group(1)] = body[match.end() : end]
+    return blocks
 
 
 def verify_ruleset():
@@ -239,6 +252,18 @@ def verify_workflow_declaration():
         )
     if "cancel-in-progress: true" not in text:
         violations.append("The workflow must cancel an obsolete run")
+    if "permissions:\n  contents: read\n" not in text:
+        violations.append("The workflow must hold the read-only contents scope for every job")
+    write_scope = re.compile(r"^\s+[a-z-]+: write$", flags=re.MULTILINE)
+    for job, block in job_blocks(text).items():
+        if not write_scope.search(block):
+            continue
+        if job != NIGHTLY_LANE or "github.event_name == 'schedule'" not in block:
+            # A pull-request run must hold no write token, so the only write scope belongs to the job
+            # that runs on the schedule alone.
+            violations.append(
+                f"The {job} job requests a write scope, which pull-request code must never hold"
+            )
 
     required = [line.strip() for line in REQUIRED_CHECKS.read_text(encoding="utf-8").splitlines() if line.strip()]
     needs_block = text.split("  quality-gate:\n", 1)[1].split("    runs-on:", 1)[0] + "\n"
