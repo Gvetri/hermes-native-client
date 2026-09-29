@@ -684,7 +684,10 @@ class QualityGateConfigurationTest {
         val composeJob = workflow.substringAfter("  compose_test:").substringBefore("  api24_instrumentation:")
         val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
 
-        assertTrue("The workflow must run for pull requests.", workflow.contains("on:\n  pull_request:\n"))
+        assertTrue(
+            "The workflow must run for pull requests, including a draft transition and a title edit.",
+            workflow.contains("  pull_request:\n    types:\n"),
+        )
         assertTrue("The workflow must run for main pushes.", workflow.contains("  push:\n    branches:\n      - main\n"))
         assertTrue("The workflow must schedule the API 24 suite nightly.", workflow.contains("  schedule:\n    - cron:"))
         assertTrue("The workflow must support manual API 24 execution.", workflow.contains("  workflow_dispatch:"))
@@ -868,11 +871,15 @@ class QualityGateConfigurationTest {
                 workflow.contains("--tests org.hermesnative.client.buildlogic.$testClass"),
             )
         }
+        val architectureJobHeader =
+            "  architecture_check:\n" +
+                "    name: architecture-check\n" +
+                "    if: \${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}\n" +
+                "    runs-on: ubuntu-latest\n" +
+                "    timeout-minutes: 30\n"
         assertTrue(
-            "The architecture job must keep a bounded timeout for its nested test runs.",
-            workflow.contains(
-                "  architecture_check:\n    name: architecture-check\n    runs-on: ubuntu-latest\n    timeout-minutes: 30\n",
-            ),
+            "The architecture job must run for a ready in-repository pull request under a bounded timeout.",
+            workflow.contains(architectureJobHeader),
         )
         listOf("coverageVerify", "mutationVerify", "verifyDeterministicFakes").forEach { entryPoint ->
             assertTrue(
@@ -951,7 +958,7 @@ class QualityGateConfigurationTest {
         }
         val immutableReference = Regex("[0-9a-fA-F]{40}")
 
-        assertEquals("The workflow must keep all fourteen checkout steps explicit.", 14, checkoutStepIndices.size)
+        assertEquals("The workflow must keep all seventeen checkout steps explicit.", 17, checkoutStepIndices.size)
         checkoutStepIndices.forEach { index ->
             val reference = lines[index].trim().substringAfter("actions/checkout@")
             assertTrue(

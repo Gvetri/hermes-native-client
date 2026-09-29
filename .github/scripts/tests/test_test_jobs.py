@@ -379,26 +379,105 @@ redact_file "$runner_output" || status=$?
             "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
             "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
             "ARCHITECTURE_CHECK", "COVERAGE_MUTATION", "COMPOSE_TEST",
+            "CONFORMANCE", "COMMIT_MESSAGE", "DRAFT_VALIDATION", "FORK_GUARD",
             "API24_INSTRUMENTATION", "MAESTRO_JOURNEYS",
         ]
         for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
-            env = {**os.environ, **{f"{job}_RESULT": "success" for job in required}}
+            # The outcome the aggregate accepts for each declared check on this event.
+            expected = {job: "success" for job in required}
+            if event == "pull_request":
+                expected["API24_INSTRUMENTATION"] = "skipped"
+                expected["MAESTRO_JOURNEYS"] = "skipped"
+            else:
+                for job in ("COMMIT_MESSAGE", "DRAFT_VALIDATION", "FORK_GUARD"):
+                    expected[job] = "skipped"
+            env = {**os.environ, **{f"{job}_RESULT": outcome for job, outcome in expected.items()}}
             env["EVENT_NAME"] = event
             if event == "pull_request":
-                env["API24_INSTRUMENTATION_RESULT"] = "skipped"
-                env["MAESTRO_JOURNEYS_RESULT"] = "skipped"
+                env["EVENT_BASE_REF"] = "main"
+                env["EVENT_FORK"] = "false"
+                env["EVENT_DRAFT"] = "false"
             result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env,
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(0, result.returncode, result.stderr)
             for job in required:
                 for outcome in ("failure", "cancelled", "skipped", ""):
-                    if event == "pull_request" and job in {"API24_INSTRUMENTATION", "MAESTRO_JOURNEYS"} and outcome == "skipped":
+                    if outcome == expected[job]:
+                        # The outcome this event accepts is the accepted one, not a drift.
                         continue
                     with self.subTest(event=event, job=job, outcome=outcome):
                         failed_env = {**env, f"{job}_RESULT": outcome}
                         result = subprocess.run(["bash", "-c", script], cwd=ROOT,
                                                 env=failed_env, capture_output=True, timeout=10)
                         self.assertNotEqual(0, result.returncode)
+
+    def test_aggregate_routes_draft_ready_and_external_fork_pull_requests(self):
+        block = WORKFLOW.read_text().split(
+            "      - name: Verify declared checks and results", 1
+        )[1].split("        run: |\n", 1)[1]
+        script = textwrap.dedent(block)
+        required = [
+            "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
+            "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
+            "ARCHITECTURE_CHECK", "COVERAGE_MUTATION", "COMPOSE_TEST", "CONFORMANCE",
+        ]
+        heavy = {f"{job}_RESULT": "success" for job in required}
+        base = {
+            **os.environ,
+            **heavy,
+            "EVENT_NAME": "pull_request",
+            "EVENT_BASE_REF": "main",
+            "FORK_GUARD_RESULT": "success",
+            "API24_INSTRUMENTATION_RESULT": "skipped",
+            "MAESTRO_JOURNEYS_RESULT": "skipped",
+        }
+        draft = {**base, "EVENT_DRAFT": "true", "EVENT_FORK": "false",
+                 "DRAFT_VALIDATION_RESULT": "success", "COMMIT_MESSAGE_RESULT": "skipped",
+                 **{f"{job}_RESULT": "skipped" for job in required}}
+        fork = {**base, "EVENT_DRAFT": "false", "EVENT_FORK": "true",
+                "DRAFT_VALIDATION_RESULT": "skipped", "COMMIT_MESSAGE_RESULT": "skipped",
+                **{f"{job}_RESULT": "skipped" for job in required}}
+        ready = {**base, "EVENT_DRAFT": "false", "EVENT_FORK": "false",
+                 "DRAFT_VALIDATION_RESULT": "success", "COMMIT_MESSAGE_RESULT": "success"}
+        scenarios = {
+            "draft": draft,
+            "external fork": fork,
+            "ready": ready,
+        }
+        for name, env in scenarios.items():
+            with self.subTest(mode=name):
+                result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=env,
+                                        capture_output=True, text=True, timeout=10)
+                if name == "external fork":
+                    # A head that never ran the complete gate must not hold a passing status.
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("the complete gate did not run", result.stderr)
+                else:
+                    self.assertEqual(0, result.returncode, result.stderr)
+        for name, env in scenarios.items():
+            with self.subTest(mode=name, drifted="heavy job ran"):
+                drifted = {**env, "FORMATTING_RESULT": "success"}
+                result = subprocess.run(["bash", "-c", script], cwd=ROOT, env=drifted,
+                                        capture_output=True, timeout=10)
+                if name == "ready":
+                    self.assertEqual(0, result.returncode)
+                else:
+                    self.assertNotEqual(0, result.returncode)
+        with self.subTest(drifted="lightweight validation ran on a ready pull request"):
+            result = subprocess.run(["bash", "-c", script], cwd=ROOT,
+                                    env={**ready, "DRAFT_VALIDATION_RESULT": "skipped"},
+                                    capture_output=True, timeout=10)
+            self.assertNotEqual(0, result.returncode)
+        with self.subTest(drifted="pull request targets another branch"):
+            result = subprocess.run(["bash", "-c", script], cwd=ROOT,
+                                    env={**ready, "EVENT_BASE_REF": "release"},
+                                    capture_output=True, timeout=10)
+            self.assertNotEqual(0, result.returncode)
+        with self.subTest(drifted="fork guard did not run"):
+            result = subprocess.run(["bash", "-c", script], cwd=ROOT,
+                                    env={**ready, "FORK_GUARD_RESULT": "skipped"},
+                                    capture_output=True, timeout=10)
+            self.assertNotEqual(0, result.returncode)
 
 
 if __name__ == "__main__":

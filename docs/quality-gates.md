@@ -14,7 +14,9 @@ Run the whole gate locally:
 ## Required checks
 
 `quality-gate` is the single required GitHub status. It fails unless every declared check below
-executed and passed for the event that triggered the run.
+executed and passed for the event that triggered the run. A check the event routes out of the run
+must report `skipped`, and any other outcome fails the aggregate; see
+[The protected main branch and the pull-request workflow](protected-main-workflow.md) for the routing.
 
 | GitHub status | Gradle entry point | Fails when |
 | --- | --- | --- |
@@ -28,6 +30,10 @@ executed and passed for the event that triggered the run.
 | `architecture-check` | `architectureCheck architectureRuleTests verifyNoMocks verifyDeterministicFakes` | An inward-dependency, untrusted-content, app-external file, mock, or boundary-double rule is violated |
 | `compose-jvm-tests` | `:feature:entry:presentation:verifyRoborazziBaselineManifest :feature:entry:presentation:verifyRoborazziDebug` | A pinned Compose surface drifts from its approved baseline, or the baseline manifest and the snapshots disagree |
 | `coverage-mutation` | `coverageVerify mutationVerify` | Coverage or mutation evidence is missing, empty, stale, narrowed, below a declared threshold, or outside the declared production scope |
+| `conformance` | `.github/scripts/verify-repository-conformance.py` | A protected-branch rule, the required status, an active ruleset bypass, the required-check declaration, or the read-only, secret-free workflow declaration drifts from the declared protected-main contract |
+| `commit-message` | `.github/scripts/verify-conventional-commits.py` | The squash-merge title or a commit of the pull request is not a Conventional Commit, or the API answer is unavailable, empty, or truncated |
+| `draft-validation` | `formatCheck :app:lintDebug` | The head of a draft pull request is unformatted or fails Android lint |
+| `fork-guard` | `.github/workflows/quality-gate.yml` | Never on its own: it reports the handling of an external-fork pull request, and the aggregate requires it for every pull request, then fails closed for an external fork |
 | `api24-instrumentation` | `:app:verifyConnectedAndroidTests` | Instrumentation produced no tests, skipped a test, or reported a failure. Required on push, schedule, and manual runs; skipped on pull requests by design |
 | `maestro-journeys` | `.github/scripts/journey-run.sh` | A deterministic emulator journey fails against the controlled fake Gateway. Required on push, schedule, and manual runs; skipped on pull requests by design |
 
