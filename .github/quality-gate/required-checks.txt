@@ -8,5 +8,9 @@ android_build
 architecture_check
 coverage_mutation
 compose_test
+conformance
+commit_message
+draft_validation
+fork_guard
 api24_instrumentation
 maestro_journeys

@@ -1,7 +1,16 @@
 name: quality-gate
 
 on:
+  # A draft transition re-evaluates the head, so a draft run can never stand in for the complete
+  # gate of a ready pull request, and a title edit re-verifies the squash-merge title.
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+      - edited
   push:
     branches:
       - main
@@ -12,13 +21,56 @@ on:
 permissions:
   contents: read
 
+# A new commit on the same pull request cancels the obsolete run, so no result from an older head is
+# read as the result of the current head.
 concurrency:
-  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
+  group: quality-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # External forks are untrusted: this run is read-only, secret-free, and carries no repository
+  # state, and it stops here. A maintainer validates an external change by carrying it onto an
+  # in-repository branch, where the complete gate runs against a commit-verified head.
+  fork_guard:
+    name: fork-guard
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report external-fork handling
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            printf '%s\n' 'External-fork pull request: this run is read-only and secret-free. A maintainer must carry the change onto an in-repository branch before the complete gate can validate it.'
+          else
+            printf '%s\n' 'In-repository pull request: the complete quality gate is required for this head.'
+          fi
+
+  # A draft pull request runs this lightweight, secret-free validation instead of the complete
+  # deterministic gate, which the aggregate gate requires once the pull request is ready.
+  draft_validation:
+    name: draft-validation
+    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validate the draft pull request
+        run: ./gradlew formatCheck :app:lintDebug --no-daemon
+
+  # Every pull-request-scoped check below runs for a ready in-repository pull request, for a push to
+  # main, and for the nightly and manual runs. A draft pull request runs the lightweight validation
+  # only, and an external fork runs the read-only guard only.
   formatting:
     name: formatting
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -33,6 +85,7 @@ jobs:
 
   static_analysis:
     name: static-analysis
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -47,6 +100,7 @@ jobs:
 
   unit_tests:
     name: unit-tests
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -74,6 +128,7 @@ jobs:
 
   fixture_descriptor:
     name: fixture-descriptor
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -88,6 +143,7 @@ jobs:
 
   fixture_lifecycle:
     name: fixture-lifecycle
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -102,6 +158,7 @@ jobs:
 
   fixture_contract:
     name: fixture-contract
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -116,6 +173,7 @@ jobs:
 
   android_build:
     name: android-build
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -130,6 +188,7 @@ jobs:
 
   architecture_check:
     name: architecture-check
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -157,6 +216,7 @@ jobs:
 
   coverage_mutation:
     name: coverage-mutation
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -171,9 +231,22 @@ jobs:
       - name: Verify coverage and mutation thresholds
         run: ./gradlew coverageVerify mutationVerify --no-daemon --console=plain
 
+  # The squash merge writes the pull-request title onto main, so the title and every commit that
+  # reaches the branch must be a valid Conventional Commit.
+  commit_message:
+    name: commit-message
+    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork && !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify the squash and commit messages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/verify-conventional-commits.py
+
   compose_test:
     name: compose-jvm-tests
-    if: ${{ always() }}
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -207,6 +280,24 @@ jobs:
             feature/entry/presentation/build/intermediates/roborazzi/*.png
           if-no-files-found: warn
           retention-days: 14
+
+  # Repository settings are part of the protected-main contract, so this run reads them back and
+  # fails when the ruleset, the merge policy, or the fork policy drifts from the declared rules.
+  conformance:
+    name: conformance
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify the repository configuration
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/verify-repository-conformance.py
 
   api24_instrumentation:
     name: api24-instrumentation
@@ -493,6 +584,8 @@ jobs:
     name: quality-gate
     if: ${{ always() }}
     needs:
+      - fork_guard
+      - draft_validation
       - formatting
       - static_analysis
       - unit_tests
@@ -502,7 +595,9 @@ jobs:
       - android_build
       - architecture_check
       - coverage_mutation
+      - commit_message
       - compose_test
+      - conformance
       - api24_instrumentation
       - maestro_journeys
     runs-on: ubuntu-latest
@@ -524,10 +619,18 @@ jobs:
           COMPOSE_TEST_RESULT: ${{ needs.compose_test.result }}
           API24_INSTRUMENTATION_RESULT: ${{ needs.api24_instrumentation.result }}
           MAESTRO_JOURNEYS_RESULT: ${{ needs.maestro_journeys.result }}
+          FORK_GUARD_RESULT: ${{ needs.fork_guard.result }}
+          DRAFT_VALIDATION_RESULT: ${{ needs.draft_validation.result }}
+          COMMIT_MESSAGE_RESULT: ${{ needs.commit_message.result }}
+          CONFORMANCE_RESULT: ${{ needs.conformance.result }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_DRAFT: ${{ github.event.pull_request.draft }}
+          EVENT_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          expected='formatting
+          expected="$(awk 'NF' .github/quality-gate/required-checks.txt)"
+          expected_declaration='formatting
           static_analysis
           unit_tests
           fixture_descriptor
@@ -537,33 +640,95 @@ jobs:
           architecture_check
           coverage_mutation
           compose_test
+          conformance
+          commit_message
+          draft_validation
+          fork_guard
           api24_instrumentation
           maestro_journeys'
-          actual="$(tr -d '\r' < .github/quality-gate/required-checks.txt)"
-          if [ "$actual" != "$expected" ]; then
+          if [ "$expected" != "$expected_declaration" ]; then
             printf '%s\n' 'Required check declaration does not match the aggregate gate.' >&2
             exit 1
           fi
-          for result in \
-            "$FORMATTING_RESULT" \
-            "$STATIC_ANALYSIS_RESULT" \
-            "$UNIT_TESTS_RESULT" \
-            "$FIXTURE_DESCRIPTOR_RESULT" \
-            "$FIXTURE_LIFECYCLE_RESULT" \
-            "$FIXTURE_CONTRACT_RESULT" \
-            "$ANDROID_BUILD_RESULT" \
-            "$ARCHITECTURE_CHECK_RESULT" \
-            "$COVERAGE_MUTATION_RESULT" \
-            "$COMPOSE_TEST_RESULT"; do
-            if [ "$result" != success ]; then
-              printf 'Required quality check result: %s\n' "$result" >&2
+          require() {
+            if [ "$2" != success ]; then
+              printf 'Required quality check %s result: %s\n' "$1" "$2" >&2
               exit 1
             fi
-          done
+          }
+          expect() {
+            if [ "$2" != "$3" ]; then
+              printf 'Check %s must report %s for this run, but reported %s.\n' "$1" "$3" "$2" >&2
+              exit 1
+            fi
+          }
           if [ "$EVENT_NAME" = pull_request ]; then
+            # A pull request reaches the protected branch only when it targets it.
+            if [ "$EVENT_BASE_REF" != main ]; then
+              printf 'The protected-main workflow accepts pull requests that target main, but this one targets %s.\n' "$EVENT_BASE_REF" >&2
+              exit 1
+            fi
+            require fork_guard "$FORK_GUARD_RESULT"
+            if [ "$EVENT_FORK" = true ]; then
+              # An external fork never runs the complete gate: the read-only guard is its result, and
+              # a maintainer validates the change on an in-repository branch before merging it.
+              expect draft_validation "$DRAFT_VALIDATION_RESULT" skipped
+              expect commit_message "$COMMIT_MESSAGE_RESULT" skipped
+              expected_state=skipped
+            elif [ "$EVENT_DRAFT" = true ]; then
+              # A draft runs the lightweight validation only; the complete gate is skipped until the
+              # pull request is ready for review.
+              require draft_validation "$DRAFT_VALIDATION_RESULT"
+              expect commit_message "$COMMIT_MESSAGE_RESULT" skipped
+              expected_state=skipped
+            else
+              require draft_validation "$DRAFT_VALIDATION_RESULT"
+              require commit_message "$COMMIT_MESSAGE_RESULT"
+              expected_state=success
+            fi
+            for result in \
+              "$FORMATTING_RESULT" \
+              "$STATIC_ANALYSIS_RESULT" \
+              "$UNIT_TESTS_RESULT" \
+              "$FIXTURE_DESCRIPTOR_RESULT" \
+              "$FIXTURE_LIFECYCLE_RESULT" \
+              "$FIXTURE_CONTRACT_RESULT" \
+              "$ANDROID_BUILD_RESULT" \
+              "$ARCHITECTURE_CHECK_RESULT" \
+              "$COVERAGE_MUTATION_RESULT" \
+              "$COMPOSE_TEST_RESULT" \
+              "$CONFORMANCE_RESULT"; do
+              if [ "$result" != "$expected_state" ]; then
+                printf 'Required quality check result: %s\n' "$result" >&2
+                exit 1
+              fi
+            done
             test "$API24_INSTRUMENTATION_RESULT" = skipped
             test "$MAESTRO_JOURNEYS_RESULT" = skipped
+            if [ "$EVENT_FORK" = true ]; then
+              printf '%s\n' 'External-fork pull request: read-only, secret-free handling verified. The complete gate runs on the in-repository branch a maintainer validates.'
+            fi
           else
+            for result in \
+              "$FORMATTING_RESULT" \
+              "$STATIC_ANALYSIS_RESULT" \
+              "$UNIT_TESTS_RESULT" \
+              "$FIXTURE_DESCRIPTOR_RESULT" \
+              "$FIXTURE_LIFECYCLE_RESULT" \
+              "$FIXTURE_CONTRACT_RESULT" \
+              "$ANDROID_BUILD_RESULT" \
+              "$ARCHITECTURE_CHECK_RESULT" \
+              "$COVERAGE_MUTATION_RESULT" \
+              "$COMPOSE_TEST_RESULT" \
+              "$CONFORMANCE_RESULT"; do
+              if [ "$result" != success ]; then
+                printf 'Required quality check result: %s\n' "$result" >&2
+                exit 1
+              fi
+            done
+            expect commit_message "$COMMIT_MESSAGE_RESULT" skipped
+            expect fork_guard "$FORK_GUARD_RESULT" skipped
+            expect draft_validation "$DRAFT_VALIDATION_RESULT" skipped
             test "$API24_INSTRUMENTATION_RESULT" = success
             test "$MAESTRO_JOURNEYS_RESULT" = success
           fi
