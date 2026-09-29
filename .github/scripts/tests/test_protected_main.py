@@ -147,6 +147,13 @@ class TestProtectedMainWorkflow(unittest.TestCase):
         commit_message = job_block(self.workflow, "commit_message")
         self.assertEqual("commit-message", jobs_of(self.workflow)["commit_message"][0])
         self.assertIn("run: python3 .github/scripts/verify-conventional-commits.py\n", commit_message)
+        self.assertIn(
+            "    permissions:\n      contents: read\n      pull-requests: read\n",
+            commit_message,
+            "the check reads the pull request and its commits",
+        )
+        self.assertIn("      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262\n", commit_message)
+        self.assertIn("          persist-credentials: false\n", commit_message)
         self.assertEqual(
             "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork "
             "&& !github.event.pull_request.draft }}",
@@ -180,7 +187,7 @@ class TestProtectedMainWorkflow(unittest.TestCase):
     def test_checkout_steps_stay_immutable_and_credential_free(self):
         jobs = jobs_of(self.workflow)
         with_checkout = [job for job in jobs if "actions/checkout@" in job_block(self.workflow, job)]
-        self.assertEqual(sorted(set(jobs) - {"fork_guard", "commit_message"}), sorted(with_checkout))
+        self.assertEqual(sorted(set(jobs) - {"fork_guard"}), sorted(with_checkout))
         # The declared checks, the aggregate gate, and the nightly issue lane that is not a check.
         self.assertEqual(len(DECLARED_CHECKS) + 2, len(jobs))
         self.assertIn("quality-gate", with_checkout)
