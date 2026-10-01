@@ -80,9 +80,9 @@ Only the protected environment holds these Actions secrets:
 | `ANDROID_RELEASE_KEYSTORE_PASSWORD` | Keystore and private-key password |
 
 Do not create repository- or organization-scoped copies of these secrets. Do not
-put provider credentials, Gateway credentials, or Local Live Smoke Test secrets
-in the environment. Neither validation nor release preparation runs the Local
-Live Smoke Test.
+put provider credentials, Gateway credentials, or live-provider smoke-test secrets
+in the environment. Neither validation nor release preparation runs live-provider
+smoke tests.
 
 Keep exactly **one recovery bundle** in the operator's approved encrypted vault.
 The initial operator-approved custody decision uses a recovery vault pending a
