@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 ALIAS = "hermes-native-client-release"
 
@@ -35,6 +36,17 @@ def run_tool(arguments, environment):
     return result.stdout.decode("utf-8")
 
 
+def apk_metadata(apk, tools, environment):
+    """Read public version and ABI metadata from the APK, not caller assertions."""
+    badging = run_tool([str(tools / "aapt2"), "dump", "badging", str(apk)], environment)
+    package = re.search(r"^package: name='([^']+)' versionCode='([0-9]+)' versionName='([^']*)'", badging, re.MULTILINE)
+    if package is None or package[1] != "org.hermesnative.client":
+        raise SigningError("Unexpected APK application identity")
+    with zipfile.ZipFile(apk) as archive:
+        abis = sorted({name.split("/")[1] for name in archive.namelist() if name.startswith("lib/") and not name.endswith("/")})
+    return {"version_code": int(package[2]), "version_name": package[3], "native_abis": abis}
+
+
 def sign(apk, output, certificate):
     expected_certificate = certificate.read_text().strip()
     require(re.fullmatch(r"[0-9a-f]{64}", expected_certificate), "Invalid release certificate identity")
@@ -48,14 +60,20 @@ def sign(apk, output, certificate):
         value = os.environ[variable]
         require(re.fullmatch(r"[0-9a-f]{40}" if name == "source_sha" else r"[1-9][0-9]*", value), "Invalid source metadata")
         metadata[name] = value if name == "source_sha" else int(value)
+    tools = Path(os.environ["ANDROID_HOME"]) / "build-tools/35.0.0"
+    environment = {name: os.environ[name] for name in ("PATH", "JAVA_HOME")}
+    metadata.update(apk_metadata(apk, tools, environment))
+    expected_code = os.environ.get("RELEASE_VERSION_CODE", "")
+    if expected_code:
+        require(str(metadata["version_code"]) == expected_code, "APK version code does not match the Nightly")
+        require(metadata["version_name"] == f"nightly-{expected_code}-{metadata['source_sha'][:12]}", "APK version name does not match the source")
+        require(set(metadata["native_abis"]) <= {"arm64-v8a"}, "Nightly APK contains a non-ARM64 device ABI")
     encoded = os.environ["ANDROID_RELEASE_KEYSTORE_BASE64"]
     password = os.environ["ANDROID_RELEASE_KEYSTORE_PASSWORD"]
     require(encoded and password, "Signing material is unavailable")
     keystore = base64.b64decode(encoded, validate=True)
     require(keystore, "Signing material is unavailable")
-    tools = Path(os.environ["ANDROID_HOME"]) / "build-tools/35.0.0"
     # No GitHub token or encoded keystore reaches the signing tool's environment.
-    environment = {name: os.environ[name] for name in ("PATH", "JAVA_HOME")}
     environment["ANDROID_RELEASE_KEYSTORE_PASSWORD"] = password
     require(not output.exists(), "Refusing to overwrite a signing output")
     with tempfile.TemporaryDirectory(prefix="release-signing-", dir=os.environ["RUNNER_TEMP"]) as directory:
@@ -96,7 +114,7 @@ def main():
         require(len(sys.argv) == 4, "Expected input APK, output directory, and pinned certificate file")
         sign(*(Path(value) for value in sys.argv[1:]))
         return 0
-    except (SigningError, KeyError, ValueError, binascii.Error, OSError, subprocess.TimeoutExpired) as error:
+    except (SigningError, KeyError, ValueError, binascii.Error, zipfile.BadZipFile, OSError, subprocess.TimeoutExpired) as error:
         message = str(error) if isinstance(error, SigningError) else "Missing or invalid signing material, input, or tool"
         print(f"Release signing refused: {message}", file=sys.stderr)
         return 1

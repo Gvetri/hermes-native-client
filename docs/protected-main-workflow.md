@@ -45,7 +45,13 @@ run publishes the required status. Results are published per check, and only the
 | Ready in-repository pull request | The complete gate: `formatting`, `static-analysis`, `unit-tests`, `fixture-descriptor`, `fixture-lifecycle`, `fixture-contract`, `android-build`, `architecture-check`, `coverage-mutation`, `compose-jvm-tests`, `conformance`, `commit-message`, `draft-validation`, `fork-guard` | `api24-instrumentation`, `maestro-journeys` |
 | Draft in-repository pull request | `draft-validation` (`formatCheck` and `:app:lintDebug` only), `fork-guard` | Every other check |
 | External-fork pull request | `fork-guard` | Every other check |
-| Push to `main`, nightly, manual | The complete gate plus `api24-instrumentation` and `maestro-journeys` | `draft-validation`, `commit-message`, `fork-guard` |
+| Push to `main` | JVM, static, fixture, architecture, coverage/mutation and conformance validation; `android-build` compiles debug/release Kotlin without packaging the application | `api24-instrumentation`, `maestro-journeys`, `draft-validation`, `commit-message`, `fork-guard` |
+| Nightly validation, manual validation | The complete gate plus `api24-instrumentation` and `maestro-journeys` | `draft-validation`, `commit-message`, `fork-guard` |
+
+A merge does not package or publish an application APK or generate a product version.
+Signing-policy tests may create minimal disposable APK fixtures; those are not application
+builds or distribution artifacts. Full scheduled/manual validation is required before
+[the separate Nightly publisher](nightly-releases.md) can select a source commit.
 
 `draft-validation` runs for every in-repository pull request: on a draft it is the whole validation,
 and on a ready pull request it adds a fast formatting and lint result beside the complete gate. The

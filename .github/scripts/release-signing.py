@@ -48,6 +48,23 @@ def verify_context():
     require(os.environ.get("GITHUB_EVENT_NAME") in {"workflow_dispatch", "schedule"}, "Unsafe release event")
 
 
+def generation_code():
+    """Reserve a distinct Android code for each Nightly run and full rerun."""
+    number = positive_integer(os.environ.get("GITHUB_RUN_NUMBER"))
+    attempt = positive_integer(os.environ.get("GITHUB_RUN_ATTEMPT"))
+    require(attempt < 1000, "Nightly attempt range exhausted; start a new workflow run")
+    code = number * 1000 + attempt
+    require(code <= 2100000000, "Android version-code range exhausted")
+    return code
+
+
+def verify_generation():
+    """Reject outputs retained from an earlier attempt or an arbitrary version selection."""
+    verify_context()
+    require(os.environ.get("RELEASE_VERSION_CODE") == str(generation_code()), "Nightly version does not belong to this run attempt")
+    require(os.environ.get("RELEASE_GENERATION_ATTEMPT") == os.environ["GITHUB_RUN_ATTEMPT"], "Partial rerun cannot reuse a prepared version; rerun all jobs")
+
+
 def verify_source():
     verify_context()
     run_id = positive_integer(os.environ.get("RELEASE_VALIDATION_RUN_ID"))
@@ -162,6 +179,8 @@ def main():
             verify_environment()
         elif sys.argv[1:] == ["approval"]:
             verify_approval()
+        elif sys.argv[1:] == ["generation"]:
+            verify_generation()
         else:
             raise ReleaseError("Unsupported release operation")
         print("Release evidence verified.")

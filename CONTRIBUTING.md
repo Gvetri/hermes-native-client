@@ -68,7 +68,8 @@ or cherry-pick an external fork directly: carry the change onto an in-repository
 Release keys are available only to the human-approved signing job, never to pull-request or build
 jobs. See [Protected Android release signing](docs/release-signing.md) for source validation, secret
 custody, recovery, and the controlled key-incident process. Do not add local signing credentials or
-provider credentials to a contribution.
+provider credentials to a contribution. [Nightly releases](docs/nightly-releases.md) use
+workflow-generated versions; do not edit the local development version to publish a Nightly.
 
 ## Visual regression baselines
 

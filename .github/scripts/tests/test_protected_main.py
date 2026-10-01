@@ -135,7 +135,7 @@ class TestProtectedMainWorkflow(unittest.TestCase):
             self.assertEqual(HEAVY_JOBS_RUN, jobs[job][1], f"{job} must run for a ready in-repository pull request")
         aggregate = job_block(self.workflow, "quality-gate")
         self.assertIn('expected_state=success', aggregate)
-        emulator_condition = "${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}"
+        emulator_condition = "${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}"
         for job in ("api24_instrumentation", "maestro_journeys"):
             self.assertEqual(emulator_condition, job_key(job_block(self.workflow, job), "if"), f"{job} must stay outside pull requests")
         self.assertIn('expected_state=skipped', aggregate)
@@ -488,14 +488,17 @@ class ApiStub:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                request_path = self.path.split("?", 1)[0]
+                request_path = self.path if self.path in routes else self.path.split("?", 1)[0]
                 if request_path not in routes:
                     self.send_response(404)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
                     self.wfile.write(b'{"message":"Not Found"}')
                     return
-                body = json.dumps(routes[request_path]).encode()
+                payload = routes[request_path]
+                if callable(payload):
+                    payload = payload()
+                body = json.dumps(payload).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))

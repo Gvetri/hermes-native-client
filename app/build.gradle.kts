@@ -8,6 +8,21 @@ plugins {
     alias(libs.plugins.ktlint)
 }
 
+val nightlyVersionCode =
+    providers.gradleProperty("nightlyVersionCode").orNull?.let { value ->
+        require(value.matches(Regex("[1-9][0-9]*"))) { "Invalid generated Nightly version code." }
+        requireNotNull(value.toIntOrNull()) { "Nightly version code is out of range." }.also { code ->
+            require(code in 2..2100000000) { "Nightly version code is out of range." }
+        }
+    }
+val nightlySourceSha = providers.gradleProperty("nightlySourceSha").orNull
+require((nightlyVersionCode == null) == (nightlySourceSha == null)) {
+    "Nightly builds require both a generated version code and an exact source commit."
+}
+require(nightlySourceSha == null || nightlySourceSha.matches(Regex("[0-9a-f]{40}"))) {
+    "Nightly builds require a full source commit SHA."
+}
+
 android {
     namespace = "org.hermesnative.client"
     compileSdk = 35
@@ -16,14 +31,14 @@ android {
         applicationId = "org.hermesnative.client"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = nightlyVersionCode ?: 1
+        versionName = nightlySourceSha?.let { "nightly-$nightlyVersionCode-${it.take(12)}" } ?: "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
         ndk {
-            abiFilters += setOf("arm64-v8a", "x86_64")
+            abiFilters += if (nightlyVersionCode == null) setOf("arm64-v8a", "x86_64") else setOf("arm64-v8a")
         }
     }
 
