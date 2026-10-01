@@ -28,7 +28,7 @@ Build the debug and release APKs:
 ./gradlew :app:assembleDebug :app:assembleRelease
 ```
 
-The application package is `org.hermesnative.client`. Do not use a release APK from this bootstrap as a signed distribution artifact. Release signing is outside this issue.
+The application package is `org.hermesnative.client`. Local release builds are unsigned and are not distribution artifacts. The [protected release signing workflow](docs/release-signing.md) signs only an exact validated `main` source after explicit human approval; it does not publish a release.
 
 ## Validation
 

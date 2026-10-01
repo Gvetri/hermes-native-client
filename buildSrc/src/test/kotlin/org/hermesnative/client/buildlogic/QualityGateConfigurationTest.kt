@@ -44,6 +44,21 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun release_signing_fails_closed_and_verifies_apk_identity() {
+        assumePosixWrapperSupport()
+        val process =
+            ProcessBuilder(
+                "python3", "-m", "unittest", "discover",
+                "-s", ".github/scripts/tests", "-p", "test_*sign*.py",
+            )
+                .directory(repositoryRoot)
+                .redirectErrorStream(true)
+                .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        assertEquals(output, 0, process.waitFor())
+    }
+
+    @Test
     fun gradle_wrapper_declares_official_distribution_checksum() {
         val checksum =
             repositoryRoot.resolve("gradle/wrapper/gradle-wrapper.properties").readLines()
