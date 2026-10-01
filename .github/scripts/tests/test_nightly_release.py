@@ -99,6 +99,10 @@ class NightlyPreparationTest(unittest.TestCase):
             f"{prefix}/compare/{self.selected}...main": {"status": "ahead", "merge_base_commit": {"sha": self.selected}},
             f"{prefix}/releases": self.releases,
         }
+        for sha, parents in ((self.new, [self.selected]), (self.selected, [self.old]), (self.old, [])):
+            self.routes[f"{prefix}/commits/{sha}"] = {"sha": sha, "parents": [{"sha": parent} for parent in parents]}
+            matching = [run for run in self.runs if run["head_sha"] == sha]
+            self.routes[self.run_page(sha)] = {"total_count": len(matching), "workflow_runs": matching}
         self.api = ApiStub(self.routes)
         self.api.start()
         self.addCleanup(self.api.stop)
@@ -109,6 +113,10 @@ class NightlyPreparationTest(unittest.TestCase):
             "GITHUB_API_URL": self.api.url, "GITHUB_RUN_NUMBER": "7", "GITHUB_RUN_ATTEMPT": "2",
             "GITHUB_OUTPUT": str(Path(self.directory.name) / "output"),
         }
+
+    def run_page(self, sha, page=1):
+        return (f"/repos/{self.repository}/actions/workflows/quality-gate.yml/runs"
+                f"?branch=main&status=success&head_sha={sha}&per_page=100&page={page}")
 
     def prepare(self):
         output = Path(self.environment["GITHUB_OUTPUT"])
@@ -174,8 +182,40 @@ class NightlyPreparationTest(unittest.TestCase):
         self.assertEqual({}, values)
         self.assertIn("Required validation evidence failed", result.stderr)
 
+    def test_source_lookup_is_not_limited_by_unrelated_workflow_history(self):
+        # Repository-wide filtered history is capped at 1,000, even with pagination.
+        self.routes[f"/repos/{self.repository}/actions/workflows/quality-gate.yml/runs"] = {
+            "total_count": 1001, "workflow_runs": self.runs,
+        }
+        result, values = self.prepare()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(self.selected, values["source_sha"])
+        self.assertEqual("123", values["validation_run_id"])
+
+    def test_paginated_evidence_stays_bound_to_one_source(self):
+        earlier = [{**self.selected_run, "id": identity, "event": "push"} for identity in range(1000, 1100)]
+        self.routes[self.run_page(self.selected)] = {"total_count": 101, "workflow_runs": earlier}
+        self.routes[self.run_page(self.selected, 2)] = {"total_count": 101, "workflow_runs": [self.selected_run]}
+        result, values = self.prepare()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(self.selected, values["source_sha"])
+        self.assertEqual("123", values["validation_run_id"])
+
+    def test_wrong_commit_response_and_ancestry_cycle_fail_closed(self):
+        commit = self.routes[f"/repos/{self.repository}/commits/{self.new}"]
+        commit["sha"] = self.old
+        result, values = self.prepare()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("wrong commit", result.stderr)
+        self.assertEqual({}, values)
+        commit.update(sha=self.new, parents=[{"sha": self.new}])
+        result, values = self.prepare()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("Incomplete main ancestry", result.stderr)
+        self.assertEqual({}, values)
+
     def test_truncated_validation_history_is_not_treated_as_complete(self):
-        self.routes[f"/repos/{self.repository}/actions/workflows/quality-gate.yml/runs"]["total_count"] = 4
+        self.routes[self.run_page(self.new)]["total_count"] = 4
         result, values = self.prepare()
         self.assertNotEqual(0, result.returncode)
         self.assertIn("Truncated Nightly history", result.stderr)

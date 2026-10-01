@@ -14,8 +14,10 @@ APK, create a release, or generate a product version. Pull-request APK builds an
 scheduled/manual device tests keep their existing validation roles.
 
 The publisher starts from the current `main` tip and walks its first-parent history.
-It selects the newest source with a successful scheduled or manually dispatched
-`quality-gate.yml` run from this repository. A late rerun of an older source does
+It queries workflow runs separately for each exact source SHA, so unrelated run
+history cannot exhaust GitHub's 1,000-result filtered-search limit. It selects the
+newest source with a successful scheduled or manually dispatched `quality-gate.yml`
+run from this repository. A late rerun of an older source does
 not outrank a newer validated source. It verifies the exact workflow ID, source SHA,
 run attempt, and every declared deterministic job, including API 24 instrumentation
 and Maestro journeys. Push-only and pull-request results are not sufficient.

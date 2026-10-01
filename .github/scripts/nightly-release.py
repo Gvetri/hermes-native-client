@@ -42,12 +42,13 @@ def pages(path, key=None):
 def select_source():
     """Prefer main ancestry, not the completion time of a rerun of an older commit."""
     head = api_get("branches/main")["commit"]["sha"]
-    commits = {commit["sha"]: commit for commit in pages("commits?sha=main")}
-    runs = pages("actions/workflows/quality-gate.yml/runs?branch=main&status=success", "workflow_runs")
     visited = set()
     while head:
-        require(head not in visited and head in commits, "Incomplete main ancestry")
+        require(isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head)
+                and head not in visited, "Incomplete main ancestry")
         visited.add(head)
+        # GitHub caps filtered run searches at 1,000; unrelated history must not fill it.
+        runs = pages(f"actions/workflows/quality-gate.yml/runs?branch=main&status=success&head_sha={head}", "workflow_runs")
         eligible = [run for run in runs if (
             run.get("head_sha") == head and run.get("head_branch") == "main"
             and run.get("event") in {"schedule", "workflow_dispatch"}
@@ -58,7 +59,9 @@ def select_source():
             selected = max(eligible, key=lambda run: run["id"])
             os.environ["RELEASE_VALIDATION_RUN_ID"] = str(selected["id"])
             return POLICY["verify_source"]()
-        parents = commits[head]["parents"]
+        commit = api_get(f"commits/{head}")
+        require(commit.get("sha") == head, "Main ancestry response has the wrong commit")
+        parents = commit["parents"]
         head = parents[0]["sha"] if parents else None
     raise ReleaseError("No fully validated main commit is available for a Nightly")
 

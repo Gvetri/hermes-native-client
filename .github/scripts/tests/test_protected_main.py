@@ -488,7 +488,7 @@ class ApiStub:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                request_path = self.path.split("?", 1)[0]
+                request_path = self.path if self.path in routes else self.path.split("?", 1)[0]
                 if request_path not in routes:
                     self.send_response(404)
                     self.send_header("Content-Type", "application/json")
