@@ -57,8 +57,8 @@ on missing approval controls, administrator bypass, an unprotected main branch,
 or an expanded branch policy. It never receives signing secrets. Read failures
 are failures, not proof that a setting is safe.
 
-To prepare an artifact, select a completed successful `quality-gate` run on
-`main`, then dispatch:
+To prepare an artifact, select a completed successful scheduled or manually dispatched
+`quality-gate` run on `main` (not a push-only run), then dispatch:
 
 ```text
 gh workflow run release-signing.yml --ref main -f validation_run_id=<run-id>
