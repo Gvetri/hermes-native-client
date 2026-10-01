@@ -184,7 +184,12 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon
+      - name: Compile main without packaging an APK
+        if: ${{ github.event_name == 'push' }}
+        run: ./gradlew :app:compileDebugKotlin :app:compileReleaseKotlin --no-daemon
+      - name: Build APKs for pull-request and full scheduled validation
+        if: ${{ github.event_name != 'push' }}
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon
 
   architecture_check:
     name: architecture-check
@@ -312,7 +317,7 @@ jobs:
 
   api24_instrumentation:
     name: api24-instrumentation
-    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -497,7 +502,7 @@ jobs:
 
   maestro_journeys:
     name: maestro-journeys
-    if: ${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 80
     env:
@@ -738,7 +743,12 @@ jobs:
             expect commit_message "$COMMIT_MESSAGE_RESULT" skipped
             expect fork_guard "$FORK_GUARD_RESULT" skipped
             expect draft_validation "$DRAFT_VALIDATION_RESULT" skipped
-            test "$API24_INSTRUMENTATION_RESULT" = success
-            test "$MAESTRO_JOURNEYS_RESULT" = success
+            if [ "$EVENT_NAME" = push ]; then
+              test "$API24_INSTRUMENTATION_RESULT" = skipped
+              test "$MAESTRO_JOURNEYS_RESULT" = skipped
+            else
+              test "$API24_INSTRUMENTATION_RESULT" = success
+              test "$MAESTRO_JOURNEYS_RESULT" = success
+            fi
           fi
           printf '%s\n' 'All checks required for this event passed.'

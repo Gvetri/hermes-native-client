@@ -4,8 +4,8 @@
 
 `release-signing.yml` is a manual or reusable workflow, not a pull-request or
 push workflow. It prepares a signed artifact; it does not publish a GitHub release.
-Automatic versioning and Nightly publication belong to issue #26. Stable Public
-Beta publication is a separate release decision.
+Automatic versioning and publication use the separate [Nightly workflow](nightly-releases.md).
+Stable Public Beta publication is a separate release decision.
 
 The workflow has three jobs:
 
@@ -29,8 +29,11 @@ required validation result stops preparation. A changed validation attempt stops
 signing after the approval wait. There is no override switch for these checks.
 
 The workflow and its caller must run from protected `refs/heads/main` in this
-repository. A reusable caller uses the same repository's workflow and passes only
-`validation_run_id`; do not use `secrets: inherit`. The reusable result exposes the
+repository. A reusable caller uses the same repository's workflow and passes
+`validation_run_id`; the Nightly caller also passes its generated `nightly_version_code`
+and `generation_attempt`. The signer verifies these against the caller's run number and
+current attempt, not a manual version choice. Do not use `secrets: inherit`.
+The reusable result exposes the
 validated `source_sha` and the verified `signed_artifact_id`. It does not let the
 caller supply an APK, arbitrary source ref, certificate, environment name, or key.
 
@@ -107,8 +110,8 @@ failure, and uploads only the verified APK, `SHA256SUMS`, and
 `signing-metadata.json`. Abrupt runner termination relies on disposal of the
 GitHub-hosted runner; there is no signing cache or persistent signing runner.
 The unsigned intermediate expires after one day; signed verification artifacts
-expire after 14 days. Only the APK certificate, APK checksum, source commit, and
-run/attempt identities enter the public metadata.
+expire after 14 days. Only the APK certificate, APK checksum, source commit,
+embedded Android version, native ABI list, and run/attempt identities enter the public metadata.
 
 Verify a downloaded signed artifact with Android Build Tools 35.0.0:
 

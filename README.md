@@ -30,6 +30,15 @@ Build the debug and release APKs:
 
 The application package is `org.hermesnative.client`. Local release builds are unsigned and are not distribution artifacts. The [protected release signing workflow](docs/release-signing.md) signs only an exact validated `main` source after explicit human approval; it does not publish a release.
 
+## Nightly releases
+
+[Development Nightlies](docs/nightly-releases.md) select a fully validated `main` commit,
+generate an increasing Android version code, and build an ARM64 device APK. Publication
+still requires explicit human approval at the protected signing boundary. Releases are
+prereleases named **Nightly**, with source, version, checksum, and certificate metadata.
+A Nightly is not a Stable Public Beta or a stable-support promise. Merging to `main`
+runs validation without packaging an application APK or generating a product version.
+
 ## Validation
 
 Run the deterministic local gate:

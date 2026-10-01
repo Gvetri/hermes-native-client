@@ -391,6 +391,9 @@ redact_file "$runner_output" || status=$?
             else:
                 for job in ("COMMIT_MESSAGE", "DRAFT_VALIDATION", "FORK_GUARD"):
                     expected[job] = "skipped"
+                if event == "push":
+                    expected["API24_INSTRUMENTATION"] = "skipped"
+                    expected["MAESTRO_JOURNEYS"] = "skipped"
             env = {**os.environ, **{f"{job}_RESULT": outcome for job, outcome in expected.items()}}
             env["EVENT_NAME"] = event
             if event == "pull_request":
@@ -401,7 +404,7 @@ redact_file "$runner_output" || status=$?
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(0, result.returncode, result.stderr)
             for job in required:
-                for outcome in ("failure", "cancelled", "skipped", ""):
+                for outcome in ("success", "failure", "cancelled", "skipped", ""):
                     if outcome == expected[job]:
                         # The outcome this event accepts is the accepted one, not a drift.
                         continue

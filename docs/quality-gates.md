@@ -26,7 +26,7 @@ must report `skipped`, and any other outcome fails the aggregate; see
 | `fixture-descriptor` | `fixtureDescriptorTests verifyFixtureDescriptor` | The pinned fixture provenance or its descriptor contract changed |
 | `fixture-lifecycle` | `fixtureLifecycleTests journeyScenarioTests` | An executed fixture lifecycle or journey-scenario test fails, or the runner task did not execute |
 | `fixture-contract` | `fixtureContractTests` | A client-owned Gateway JSON or SSE contract fixture test fails |
-| `android-build` | `:app:assembleDebug :app:assembleRelease` | A debug or release APK does not build |
+| `android-build` | `:app:compileDebugKotlin :app:compileReleaseKotlin` on main pushes; `:app:assembleDebug :app:assembleRelease` otherwise | A debug/release compilation fails, or a non-push application APK does not build |
 | `architecture-check` | `architectureCheck architectureRuleTests verifyNoMocks verifyDeterministicFakes` | An inward-dependency, untrusted-content, app-external file, mock, or boundary-double rule is violated |
 | `compose-jvm-tests` | `:feature:entry:presentation:verifyRoborazziBaselineManifest :feature:entry:presentation:verifyRoborazziDebug` | A pinned Compose surface drifts from its approved baseline, or the baseline manifest and the snapshots disagree |
 | `coverage-mutation` | `coverageVerify mutationVerify` | Coverage or mutation evidence is missing, empty, stale, narrowed, below a declared threshold, or outside the declared production scope |
@@ -34,8 +34,8 @@ must report `skipped`, and any other outcome fails the aggregate; see
 | `commit-message` | `.github/scripts/verify-conventional-commits.py` | The squash-merge title or a commit of the pull request is not a Conventional Commit, or the API answer is unavailable, empty, or truncated |
 | `draft-validation` | `formatCheck :app:lintDebug` | The head of a draft pull request is unformatted or fails Android lint |
 | `fork-guard` | `.github/workflows/quality-gate.yml` | Never on its own: it reports the handling of an external-fork pull request, and the aggregate requires it for every pull request, then fails closed for an external fork |
-| `api24-instrumentation` | `:app:verifyConnectedAndroidTests` | Instrumentation produced no tests, skipped a test, or reported a failure. Required on push, schedule, and manual runs; skipped on pull requests by design |
-| `maestro-journeys` | `.github/scripts/journey-run.sh` | A deterministic emulator journey fails against the controlled fake Gateway. Required on push, schedule, and manual runs; skipped on pull requests by design |
+| `api24-instrumentation` | `:app:verifyConnectedAndroidTests` | Instrumentation produced no tests, skipped a test, or reported a failure. Required on schedule and manual runs; skipped on main pushes and pull requests by design |
+| `maestro-journeys` | `.github/scripts/journey-run.sh` | A deterministic emulator journey fails against the controlled fake Gateway. Required on schedule and manual runs; skipped on main pushes and pull requests by design |
 
 The aggregate job compares `.github/quality-gate/required-checks.txt` with its own `needs` list, so
 a check can neither be dropped from the declaration silently nor added without updating the

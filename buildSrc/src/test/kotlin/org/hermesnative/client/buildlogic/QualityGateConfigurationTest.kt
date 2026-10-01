@@ -44,6 +44,17 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun nightly_release_selects_validated_source_and_publishes_verified_metadata() {
+        assumePosixWrapperSupport()
+        val process = ProcessBuilder("python3", repositoryRoot.resolve(".github/scripts/tests/test_nightly_release.py").absolutePath)
+            .directory(repositoryRoot)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        assertEquals(output, 0, process.waitFor())
+    }
+
+    @Test
     fun release_signing_fails_closed_and_verifies_apk_identity() {
         assumePosixWrapperSupport()
         val process =
@@ -155,7 +166,7 @@ class QualityGateConfigurationTest {
         assertTrue(
             "The API 24 job must combine always() with its event filter for cancellation finalization.",
             emulatorJob.contains(
-                "    if: \${{ always() && (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}",
+                "    if: \${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}",
             ),
         )
         assertTrue(
@@ -707,8 +718,8 @@ class QualityGateConfigurationTest {
         assertTrue("The workflow must schedule the API 24 suite nightly.", workflow.contains("  schedule:\n    - cron:"))
         assertTrue("The workflow must support manual API 24 execution.", workflow.contains("  workflow_dispatch:"))
         assertTrue(
-            "The API 24 suite must run outside pull requests and preserve main pushes.",
-            api24Job.contains("github.event_name == 'push'") &&
+            "The API 24 suite must run only on scheduled and manual validation, not main pushes.",
+            !api24Job.contains("github.event_name == 'push'") &&
                 api24Job.contains("github.event_name == 'schedule'") &&
                 api24Job.contains("github.event_name == 'workflow_dispatch'") &&
                 !api24Job.contains("github.event_name == 'pull_request'"),
@@ -1001,7 +1012,7 @@ class QualityGateConfigurationTest {
         assertTrue(
             "The Maestro journey job must run only outside pull requests.",
             workflow.contains(
-                "github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+                "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
             ),
         )
         assertTrue(

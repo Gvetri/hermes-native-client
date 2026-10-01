@@ -1,12 +1,13 @@
 """Sign a minimal APK with a disposable key; no production secret is read."""
-import base64
 import hashlib
 import json
-import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import zipfile
+
+from signing_fixture import make_signing_fixture
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / ".github/scripts/sign-release-apk.py"
@@ -18,43 +19,12 @@ class SignApkTest(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.directory.cleanup)
         cls.root = Path(cls.directory.name)
-        sdk = Path(os.environ["ANDROID_HOME"])
-        cls.tools = sdk / "build-tools/35.0.0"
-        cls.environment = {
-            "PATH": os.environ["PATH"], "JAVA_HOME": os.environ["JAVA_HOME"],
-            "ANDROID_HOME": str(sdk), "RUNNER_TEMP": str(cls.root),
-            "ANDROID_RELEASE_KEYSTORE_PASSWORD": "disposable-test-password",
-            "RELEASE_SOURCE_SHA": "a" * 40, "RELEASE_VALIDATION_RUN_ID": "123",
-            "RELEASE_VALIDATION_RUN_ATTEMPT": "1", "GITHUB_RUN_ID": "456", "GITHUB_RUN_ATTEMPT": "1",
-        }
-        cls.keystore = cls.root / "disposable.p12"
-        cls.run_tool([
-            "keytool", "-genkeypair", "-alias", "hermes-native-client-release",
-            "-keyalg", "RSA", "-keysize", "2048", "-validity", "2", "-storetype", "PKCS12",
-            "-dname", "CN=Disposable Test Key", "-keystore", str(cls.keystore),
-            "-storepass:env", "ANDROID_RELEASE_KEYSTORE_PASSWORD",
-        ])
-        certificate = cls.run_tool([
-            "keytool", "-exportcert", "-alias", "hermes-native-client-release",
-            "-keystore", str(cls.keystore), "-storepass:env", "ANDROID_RELEASE_KEYSTORE_PASSWORD",
-        ]).stdout
-        cls.fingerprint = hashlib.sha256(certificate).hexdigest()
-        cls.certificate_file = cls.root / "certificate.sha256"
-        cls.certificate_file.write_text(cls.fingerprint + "\n")
-        cls.environment["ANDROID_RELEASE_KEYSTORE_BASE64"] = base64.b64encode(cls.keystore.read_bytes()).decode()
-        manifest = cls.root / "AndroidManifest.xml"
-        manifest.write_text(
-            '<manifest xmlns:android="http://schemas.android.com/apk/res/android" '
-            'package="org.hermesnative.client" android:versionCode="1" android:versionName="test">'
-            '<uses-sdk android:minSdkVersion="24" android:targetSdkVersion="35"/>'
-            '<application android:label="Signing test"/></manifest>'
-        )
-        cls.apk = cls.root / "unsigned.apk"
-        cls.run_tool([
-            str(cls.tools / "aapt2"), "link", "--manifest", str(manifest),
-            "-I", str(sdk / "platforms/android-35/android.jar"), "-o", str(cls.apk),
-        ])
-        cls.environment["RELEASE_UNSIGNED_SHA256"] = hashlib.sha256(cls.apk.read_bytes()).hexdigest()
+        fixture = make_signing_fixture(cls.root)
+        cls.tools = fixture.tools
+        cls.environment = fixture.environment
+        cls.fingerprint = fixture.fingerprint
+        cls.certificate_file = fixture.certificate_file
+        cls.apk = fixture.apk
 
     @classmethod
     def run_tool(cls, arguments):
@@ -82,6 +52,9 @@ class SignApkTest(unittest.TestCase):
         metadata = json.loads((self.output / "signing-metadata.json").read_text())
         self.assertEqual(self.fingerprint, metadata["certificate_sha256"])
         self.assertEqual("a" * 40, metadata["source_sha"])
+        self.assertEqual(1, metadata["version_code"])
+        self.assertEqual("test", metadata["version_name"])
+        self.assertEqual([], metadata["native_abis"])
         self.assertEqual(hashlib.sha256(artifact.read_bytes()).hexdigest(), metadata["apk_sha256"])
         self.assertEqual(
             {"hermes-native-client.apk", "SHA256SUMS", "signing-metadata.json"},
@@ -108,6 +81,26 @@ class SignApkTest(unittest.TestCase):
                 self.assertEqual([], list(self.root.glob("release-signing-*")))
                 self.assertNotIn(self.environment["ANDROID_RELEASE_KEYSTORE_BASE64"], result.stdout + result.stderr)
                 self.assertNotIn(self.environment["ANDROID_RELEASE_KEYSTORE_PASSWORD"], result.stdout + result.stderr)
+
+    def test_rejects_a_nightly_apk_with_the_wrong_embedded_version(self):
+        self.env["RELEASE_VERSION_CODE"] = "7002"
+        result = self.sign()
+        self.assertNotEqual(0, result.returncode)
+        self.assertFalse(self.output.exists())
+        self.assertIn("version", result.stderr)
+
+    def test_rejects_emulator_native_libraries_in_a_nightly(self):
+        fixture = make_signing_fixture(self.root / "emulator", 7002, "nightly-7002-aaaaaaaaaaaa")
+        with zipfile.ZipFile(fixture.apk, "a") as archive:
+            archive.writestr("lib/x86_64/libfixture.so", b"synthetic-ABI-fixture")
+        self.apk = fixture.apk
+        self.certificate_file = fixture.certificate_file
+        self.env = {**fixture.environment, "RELEASE_VERSION_CODE": "7002"}
+        self.env["RELEASE_UNSIGNED_SHA256"] = hashlib.sha256(self.apk.read_bytes()).hexdigest()
+        result = self.sign()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("non-ARM64", result.stderr)
+        self.assertFalse(self.output.exists())
 
     def test_wrong_certificate_is_rejected_before_any_artifact_is_published(self):
         certificate = self.certificate_file
