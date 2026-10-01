@@ -63,6 +63,13 @@ pull-request title, and both that title and every commit must be a Conventional 
 or cherry-pick an external fork directly: carry the change onto an in-repository branch first. See
 [The protected main branch and the pull-request workflow](docs/protected-main-workflow.md).
 
+## Release signing
+
+Release keys are available only to the human-approved signing job, never to pull-request or build
+jobs. See [Protected Android release signing](docs/release-signing.md) for source validation, secret
+custody, recovery, and the controlled key-incident process. Do not add local signing credentials or
+provider credentials to a contribution.
+
 ## Visual regression baselines
 
 The presentation module keeps the approved Roborazzi reference images in
