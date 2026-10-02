@@ -3,6 +3,7 @@ package org.hermesnative.client.feature.entry.presentation
 import android.graphics.Rect
 import android.os.Build
 import android.view.ViewTreeObserver
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -37,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -978,6 +981,30 @@ private fun SessionDetailHeader(state: OpenSessionUiState) {
     }
 }
 
+/**
+ * The transcript follow control: it starts on, so an opened Session shows its newest content and
+ * follows the messages that arrive while the reader stays at that content. A drag away from the
+ * newest content holds the follow off, so a reader who scrolled back is never pulled away
+ * mid-read; settling back at the newest content restores it.
+ */
+@Composable
+private fun rememberTranscriptFollow(
+    listState: LazyListState,
+    sessionId: SessionId,
+): Boolean {
+    var follow by remember(sessionId) { mutableStateOf(true) }
+    val isDragged by listState.interactionSource.collectIsDraggedAsState()
+    val atNewestContent by remember(listState) { derivedStateOf { !listState.canScrollForward } }
+    LaunchedEffect(sessionId, isDragged, atNewestContent) {
+        if (isDragged) {
+            follow = false
+        } else if (atNewestContent) {
+            follow = true
+        }
+    }
+    return follow
+}
+
 @Composable
 internal fun SessionDetailContent(
     state: OpenSessionUiState,
@@ -1009,6 +1036,26 @@ internal fun SessionDetailContent(
     // scrolls as one surface and the composer and Send stay reachable in short windows.
     val paneScrollState = rememberScrollState()
     val tailScrollState = rememberScrollState()
+    val transcriptState = rememberLazyListState()
+    val followTranscript = rememberTranscriptFollow(transcriptState, state.session.id)
+    // The summary is item 0, so the item count is also the last message's index.
+    val newestMessageIndex = displayedMessages.size
+    val streamedResponseContent = state.activeResponse?.content
+    // Keep the end of the newest message in view: the transcript opens at it, follows a message
+    // that arrives, and follows a streamed response that grows in place. A changed key cancels
+    // the previous scroll, so a burst of chunks cannot fight an older one, and a reader who
+    // dragged away stays where they are.
+    LaunchedEffect(
+        transcriptState,
+        state.session.id,
+        newestMessageIndex,
+        streamedResponseContent,
+        followTranscript,
+    ) {
+        if (followTranscript && displayedMessages.isNotEmpty()) {
+            transcriptState.scrollToItem(newestMessageIndex, Int.MAX_VALUE)
+        }
+    }
     Column(
         modifier =
             if (displayedMessages.isEmpty()) {
@@ -1046,6 +1093,7 @@ internal fun SessionDetailContent(
             Text(text = "No messages in this Session.")
         } else {
             LazyColumn(
+                state = transcriptState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {

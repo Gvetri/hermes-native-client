@@ -573,7 +573,9 @@ class SessionHistoryScreenTest {
             }
         }
 
-        composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(2)
+        // The transcript opens at its newest message, so the whole short message history is
+        // composed and every message carries its timestamp in the same composition.
+        composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(3)
         // Index 0 is the Session summary, so the message items start at 1.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
         composeTestRule.onNodeWithText("Run ID: run-failed").assertIsDisplayed()
