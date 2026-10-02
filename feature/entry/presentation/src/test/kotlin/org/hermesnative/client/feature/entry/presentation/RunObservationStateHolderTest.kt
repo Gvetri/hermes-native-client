@@ -54,12 +54,11 @@ class RunObservationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(SessionHistory(session.id, emptyList()))
                 enqueueHistory(
                     SessionHistory(
                         session.id,
                         listOf(GatewayHistoryMessage("assistant-1", "assistant", "Hello world", run.id, "succeeded")),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "succeeded"))
@@ -361,10 +360,9 @@ class RunObservationStateHolderTest {
     }
 
     @Test
-    fun reopening_reconciles_a_local_run_when_a_newer_history_run_is_latest() {
+    fun reopening_reconciles_the_locally_created_run_without_history_run_metadata() {
         val session = session("session-1")
         val localRun = Run(RunId("run-local"), session.id, "running")
-        val externalRun = Run(RunId("run-external"), session.id, "succeeded")
         val initialObservation = BlockingObservation()
         val reopenedObservation = BlockingObservation()
         val gateway =
@@ -384,23 +382,21 @@ class RunObservationStateHolderTest {
             assertTrue(initialObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             gateway.observation = reopenedObservation
-            gateway.enqueueStatus(externalRun)
             gateway.enqueueStatus(localRun)
             gateway.enqueueHistory(
                 SessionHistory(
                     session.id,
-                    listOf(GatewayHistoryMessage("external-result", "assistant", "Remote result", externalRun.id, "succeeded")),
-                    null,
+                    listOf(GatewayHistoryMessage("result", "assistant", "Local result")),
                 ),
             )
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
 
             awaitState(holder) {
                 val opened = it.sessionList?.openedSession
-                gateway.statusRequests == listOf(externalRun.id, localRun.id) &&
+                gateway.statusRequests == listOf(localRun.id) &&
                     opened?.activeRuns?.any { run -> run.id == localRun.id } == true &&
                     opened.latestRun?.id == localRun.id &&
-                    opened.messages.map { message -> message.runId } == listOf(externalRun.id) &&
+                    opened.messages.map { message -> message.runId } == listOf(null) &&
                     opened.activeResponse?.runId == localRun.id &&
                     !opened.isReconciliationInProgress
             }
@@ -667,7 +663,6 @@ class RunObservationStateHolderTest {
                     SessionHistory(
                         session.id,
                         listOf(GatewayHistoryMessage("result", "assistant", "Done", run.id, "succeeded")),
-                        null,
                     ),
                 )
             }
@@ -697,12 +692,11 @@ class RunObservationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(SessionHistory(session.id, emptyList()))
                 enqueueHistory(
                     SessionHistory(
                         session.id,
                         listOf(GatewayHistoryMessage("result", "assistant", "Done", run.id, "succeeded")),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "succeeded"))
@@ -758,13 +752,11 @@ class RunObservationStateHolderTest {
                     SessionHistory(
                         firstSession.id,
                         listOf(GatewayHistoryMessage("first-result", "assistant", "Done", firstRun.id, "succeeded")),
-                        null,
                     )
                 historyBySession[secondSession.id] =
                     SessionHistory(
                         secondSession.id,
                         listOf(GatewayHistoryMessage("second-result", "assistant", "Done", secondRun.id, "succeeded")),
-                        null,
                     )
             }
         val holder = holder(gateway, Dispatchers.Default, recoveryRegistry)
@@ -807,7 +799,6 @@ class RunObservationStateHolderTest {
                     SessionHistory(
                         session.id,
                         listOf(GatewayHistoryMessage("result", "assistant", "Done", run.id, "succeeded")),
-                        null,
                     ),
                 )
             }
@@ -842,7 +833,7 @@ class RunObservationStateHolderTest {
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
                 VerifyGatewayConnection(repository) { _, _ ->
-                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                 },
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
@@ -892,7 +883,6 @@ class RunObservationStateHolderTest {
             title = "Session $id",
             preview = "Preview",
             pinned = false,
-            updatedAt = null,
         )
 
     private class ScriptedGateway(
@@ -948,7 +938,7 @@ class RunObservationStateHolderTest {
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
             historyBySession[sessionId]
                 ?: if (historyResults.isEmpty()) {
-                    SessionHistory(sessionId, emptyList(), null)
+                    SessionHistory(sessionId, emptyList())
                 } else {
                     historyResults.removeFirst()
                 }

@@ -128,6 +128,14 @@ class TestJobs(unittest.TestCase):
             classpath_file = workspace / "fixtures/hermes/runner/build/journey-classpath.txt"
             classpath_file.parent.mkdir(parents=True)
             classpath_file.write_text("fixture-classpath")
+            for relative in (
+                ".github/scripts/verify-journey-capabilities.py",
+                "fixtures/hermes/contracts/capabilities/success.json",
+            ):
+                copied = workspace / relative
+                copied.parent.mkdir(parents=True, exist_ok=True)
+                copied.write_text((ROOT / relative).read_text())
+            capabilities = json.loads((ROOT / "fixtures/hermes/contracts/capabilities/success.json").read_text())["response"]["body"]
 
             def add_executable(name, body):
                 executable = workspace / name
@@ -152,7 +160,7 @@ class TestJobs(unittest.TestCase):
                 #!/usr/bin/env bash
                 printf '%s\\n' "$*" >> "$CURL_CALLS_FILE"
                 if [[ "$*" == *"/v1/capabilities"* ]]; then
-                    printf '{"capabilities":["session.list","session.create","session.open","session.history","session.rename","session.delete","session.pin","session.unpin","run.create","run.status","run.sse"]}\\n'
+                    printf '%s\\n' "$CAPABILITIES_BODY"
                     exit 0
                 fi
                 if [[ "$*" == *"/__fixture/telemetry"* ]]; then
@@ -195,6 +203,7 @@ class TestJobs(unittest.TestCase):
                 "TELEMETRY_PID_FILE": str(workspace / "telemetry.pids"),
                 "HOME": str(workspace),
                 "MAESTRO_CLI_VERSION": "test",
+                "CAPABILITIES_BODY": json.dumps(capabilities),
             }
             result = subprocess.run(
                 ["bash", str(ROOT / ".github/scripts/journey-run.sh")],

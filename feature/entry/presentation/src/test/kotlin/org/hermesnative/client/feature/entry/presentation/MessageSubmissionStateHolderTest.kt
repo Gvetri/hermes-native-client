@@ -77,7 +77,6 @@ class MessageSubmissionStateHolderTest {
                             SessionHistory(
                                 session.id,
                                 listOf(GatewayHistoryMessage("run-message", "user", "Run this", RunId("run-1"), "running")),
-                                null,
                             ),
                     ),
             )
@@ -287,7 +286,6 @@ class MessageSubmissionStateHolderTest {
                                         "succeeded",
                                     ),
                                 ),
-                                null,
                             ),
                     ),
             )
@@ -327,7 +325,6 @@ class MessageSubmissionStateHolderTest {
                                         "succeeded",
                                     ),
                                 ),
-                                null,
                             ),
                     ),
                 runStatuses = mapOf(RunId("run-old") to Run(RunId("run-old"), session.id, "succeeded")),
@@ -379,7 +376,6 @@ class MessageSubmissionStateHolderTest {
                                         "succeeded",
                                     ),
                                 ),
-                                null,
                             ),
                     ),
                 runStatuses = mapOf(RunId("run-1") to Run(RunId("run-1"), session.id, "succeeded")),
@@ -427,7 +423,6 @@ class MessageSubmissionStateHolderTest {
                 SessionHistory(
                     session.id,
                     listOf(GatewayHistoryMessage("old-result", "assistant", "Old result", oldRun.id, "succeeded")),
-                    null,
                 ),
             )
 
@@ -495,7 +490,6 @@ class MessageSubmissionStateHolderTest {
                 SessionHistory(
                     session.id,
                     listOf(GatewayHistoryMessage("late-result", "assistant", "Late result", run.id, "succeeded")),
-                    null,
                 ),
             )
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
@@ -648,7 +642,7 @@ class MessageSubmissionStateHolderTest {
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
                 VerifyGatewayConnection(repository) { _, _ ->
-                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                 },
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
@@ -699,7 +693,6 @@ class MessageSubmissionStateHolderTest {
             title = "Session $id",
             preview = "Preview",
             pinned = false,
-            updatedAt = null,
         )
 
     private class FakeGateway(
@@ -739,7 +732,7 @@ class MessageSubmissionStateHolderTest {
         override fun openSession(sessionId: SessionId): Session = sessions.single { it.id == sessionId }
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            mutableHistories[sessionId] ?: SessionHistory(sessionId, emptyList(), null)
+            mutableHistories[sessionId] ?: SessionHistory(sessionId, emptyList())
 
         override fun renameSession(
             sessionId: SessionId,

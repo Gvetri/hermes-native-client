@@ -248,7 +248,7 @@ class SessionPinDeleteStateHolderTest {
                 initialState = EntryState(isGatewayConnectionConfigured = false),
                 verifyGatewayConnection =
                     VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                     },
                 scope =
                     CoroutineScope(
@@ -295,7 +295,6 @@ class SessionPinDeleteStateHolderTest {
             title = title,
             preview = "Preview",
             pinned = pinned,
-            updatedAt = "server-time",
         )
 
     private class FakeGatewayConnectionRepository : GatewayConnectionRepository {
@@ -341,7 +340,7 @@ class SessionPinDeleteStateHolderTest {
         }
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>(), null)
+            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>())
 
         override fun renameSession(
             sessionId: SessionId,
@@ -389,10 +388,10 @@ class SessionPinDeleteStateHolderTest {
         var pinCalls = 0
 
         override fun listSessions(request: SessionListRequest): SessionPage {
-            if (request.cursor != null) {
+            if (request.offset > 0) {
                 loadMoreStarted.countDown()
             }
-            return SessionPage(listOf(currentSession), if (request.cursor == null) "next" else null)
+            return SessionPage(listOf(currentSession), if (request.offset == 0) 1 else null)
         }
 
         override fun createSession(title: String?): Session = error("not used")
@@ -403,7 +402,7 @@ class SessionPinDeleteStateHolderTest {
         }
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>(), null)
+            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>())
 
         override fun renameSession(
             sessionId: SessionId,

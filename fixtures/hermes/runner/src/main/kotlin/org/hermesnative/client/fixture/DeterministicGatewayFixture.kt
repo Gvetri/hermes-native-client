@@ -1,5 +1,9 @@
 package org.hermesnative.client.fixture
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -269,6 +273,8 @@ class DeterministicGatewayFixture(
     }
 }
 
+private const val CLIENT_MANIFEST = "client-manifest"
+
 private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
     override fun verify(
         process: GatewayProcess,
@@ -288,9 +294,30 @@ private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
             response = capabilities,
             expectedStatus = descriptor.value("capability_check.expected_status").toInt(),
         )
-        val requiredCapability = descriptor.value("capability_check.required_capabilities")
-        require(capabilities.body.contains("\"$requiredCapability\"")) {
-            "Capability check did not report required capability '$requiredCapability'."
+        val manifestKey = descriptor.value("capability_check.required_capabilities")
+        require(manifestKey == CLIENT_MANIFEST) {
+            "Unsupported capability manifest check '$manifestKey'."
+        }
+        val advertised =
+            try {
+                val root = Json.parseToJsonElement(capabilities.body).jsonObject
+                root["endpoints"]?.jsonObject ?: error("capability document has no 'endpoints' object")
+            } catch (error: Exception) {
+                throw FixtureReadinessException(
+                    "Capability check response is not a valid capability document.",
+                    error,
+                )
+            }
+        PublicBetaGatewayCapabilityManifest.current.requiredEndpoints.forEach { (endpoint, required) ->
+            val advertisedEndpoint = advertised[endpoint]?.jsonObject
+            val advertisedMethod = advertisedEndpoint?.get("method")?.jsonPrimitive?.content
+            val advertisedPath = advertisedEndpoint?.get("path")?.jsonPrimitive?.content
+            require(advertisedMethod?.equals(required.method, ignoreCase = true) == true) {
+                "Capability check did not report required capability '$endpoint'."
+            }
+            require(advertisedPath == required.path) {
+                "Capability check reported the wrong path for required capability '$endpoint'."
+            }
         }
     }
 

@@ -3,19 +3,71 @@
   "response": {
     "status": 200,
     "body": {
-      "capabilities": [
-        "session.list",
-        "session.create",
-        "session.open",
-        "session.history",
-        "session.rename",
-        "session.delete",
-        "session.pin",
-        "session.unpin",
-        "run.create",
-        "run.status",
-        "run.sse"
-      ]
+      "object": "hermes.api_server.capabilities",
+      "platform": "hermes-agent",
+      "model": "hermes-agent",
+      "auth": {
+        "type": "bearer",
+        "required": true
+      },
+      "runtime": {
+        "mode": "server_agent",
+        "tool_execution": "server",
+        "split_runtime": false,
+        "description": "The API server creates a server-side Hermes AIAgent; tools execute on the API-server host unless a future explicit split-runtime mode is enabled."
+      },
+      "features": {
+        "run_submission": true,
+        "run_status": true,
+        "run_events_sse": true,
+        "tool_progress_events": true,
+        "approval_events": true,
+        "session_resources": true,
+        "session_continuity_header": "X-Hermes-Session-Id",
+        "session_key_header": "X-Hermes-Session-Key"
+      },
+      "endpoints": {
+        "health": {
+          "method": "GET",
+          "path": "/health"
+        },
+        "sessions": {
+          "method": "GET",
+          "path": "/api/sessions"
+        },
+        "session_create": {
+          "method": "POST",
+          "path": "/api/sessions"
+        },
+        "session": {
+          "method": "GET",
+          "path": "/api/sessions/{session_id}"
+        },
+        "session_update": {
+          "method": "PATCH",
+          "path": "/api/sessions/{session_id}"
+        },
+        "session_delete": {
+          "method": "DELETE",
+          "path": "/api/sessions/{session_id}"
+        },
+        "session_messages": {
+          "method": "GET",
+          "path": "/api/sessions/{session_id}/messages"
+        },
+        "runs": {
+          "method": "POST",
+          "path": "/v1/runs"
+        },
+        "run_status": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}"
+        },
+        "run_events": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}/events"
+        }
+      }
     }
   }
 }

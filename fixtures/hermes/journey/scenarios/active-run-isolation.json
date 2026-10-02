@@ -4,18 +4,15 @@
   "port": 18443,
   "tls": true,
   "capabilities": [
-    "client-manifest",
-    "session.list",
-    "session.create",
-    "session.open",
-    "session.history",
-    "session.rename",
-    "session.delete",
-    "session.pin",
-    "session.unpin",
-    "run.create",
-    "run.status",
-    "run.sse"
+    "sessions",
+    "session_create",
+    "session",
+    "session_update",
+    "session_delete",
+    "session_messages",
+    "runs",
+    "run_status",
+    "run_events"
   ],
   "sessions": [
     {
@@ -38,19 +35,11 @@
       "create_status": "running",
       "observation": [
         {
-          "type": "run.started",
-          "status": "starting",
-          "id": "a1"
-        },
-        {
-          "type": "run.running",
-          "status": "running",
-          "id": "a2"
+          "type": "tool.started"
         },
         {
           "type": "message.delta",
-          "delta": "Active partial",
-          "id": "a3"
+          "delta": "Active partial"
         }
       ],
       "hold_open": true

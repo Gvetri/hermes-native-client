@@ -1,6 +1,5 @@
 package org.hermesnative.client.fixture.contract
 
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -51,26 +50,30 @@ class ContractFixtureParserTest {
     }
 
     @Test
-    fun capability_fixtures_cover_required_missing_and_unknown_additive_capabilities() {
+    fun capability_fixtures_cover_required_missing_and_unknown_additive_endpoints() {
         val request = parseJson("capabilities/request.json")
         val successful = parseJson("capabilities/success.json")
         val missing = parseJson("capabilities/missing-required.json")
         val additive = parseJson("capabilities/unknown-additive.json")
 
         assertRequest(request, "GET", "/v1/capabilities")
-        assertEquals(SupportedGatewayCapabilities.required, successful.requiredStringArray("response.body.capabilities"))
-        assertFalse(
-            missing.requiredStringArray("response.body.capabilities")
-                .contains(SupportedGatewayCapabilities.required.last()),
-        )
-        assertTrue(
-            additive.requiredStringArray("response.body.capabilities")
-                .containsAll(SupportedGatewayCapabilities.required),
-        )
-        assertTrue(
-            additive.requiredStringArray("response.body.capabilities")
-                .contains("gateway.future.capability"),
-        )
+        val successEndpoints = successful.requiredObject("response.body.endpoints")
+        SupportedGatewayCapabilities.required.forEach { endpoint ->
+            assertTrue("Missing required endpoint '$endpoint'", successEndpoints.containsKey(endpoint))
+        }
+        assertEquals("GET", successEndpoints.getValue("sessions").jsonObject.getValue("method").jsonPrimitive.content)
+        assertEquals("PATCH", successEndpoints.getValue("session_update").jsonObject.getValue("method").jsonPrimitive.content)
+        assertEquals("POST", successEndpoints.getValue("runs").jsonObject.getValue("method").jsonPrimitive.content)
+        assertEquals("GET", successEndpoints.getValue("run_events").jsonObject.getValue("method").jsonPrimitive.content)
+
+        val missingEndpoints = missing.requiredObject("response.body.endpoints")
+        assertFalse(missingEndpoints.containsKey("run_events"))
+
+        val additiveEndpoints = additive.requiredObject("response.body.endpoints")
+        SupportedGatewayCapabilities.required.forEach { endpoint ->
+            assertTrue("Additive fixture dropped required endpoint '$endpoint'", additiveEndpoints.containsKey(endpoint))
+        }
+        assertTrue(additiveEndpoints.containsKey("gateway_future_endpoint"))
         assertEquals("additive-value", additive.requiredString("future_additive_field"))
     }
 
@@ -107,93 +110,75 @@ class ContractFixtureParserTest {
         val unpinRequest = parseJson("sessions/unpin-request.json")
         val unpinResponse = parseJson("sessions/unpin-response.json")
 
-        assertRequest(listRequest, "GET", "/v1/sessions")
+        assertRequest(listRequest, "GET", "/api/sessions")
         assertEquals(20, listRequest.requiredInt("request.query.limit"))
-        assertEquals(null, listRequest.requiredNullableString("request.query.cursor"))
-        assertEquals(null, listRequest.requiredNullableString("request.query.search"))
+        assertEquals(0, listRequest.requiredInt("request.query.offset"))
+        assertFalse(listRequest.root.getValue("request").jsonObject.getValue("query").jsonObject.containsKey("cursor"))
+        assertFalse(listRequest.root.getValue("request").jsonObject.getValue("query").jsonObject.containsKey("search"))
 
         assertEquals(200, firstPage.requiredInt("response.status"))
-        assertEquals(1, firstPage.requiredArray("response.body.sessions").size)
-        assertEquals("page-two", firstPage.requiredString("response.body.next_cursor"))
+        assertEquals("list", firstPage.requiredString("response.body.object"))
+        assertEquals(1, firstPage.requiredArray("response.body.data").size)
+        assertEquals(20, firstPage.requiredInt("response.body.limit"))
+        assertEquals(0, firstPage.requiredInt("response.body.offset"))
+        assertTrue(firstPage.requiredBoolean("response.body.has_more"))
         assertEquals(200, secondPage.requiredInt("response.status"))
-        assertEquals(0, secondPage.requiredArray("response.body.sessions").size)
-        assertEquals(null, secondPage.requiredNullableString("response.body.next_cursor"))
+        assertEquals(0, secondPage.requiredArray("response.body.data").size)
+        assertEquals(20, secondPage.requiredInt("response.body.offset"))
+        assertFalse(secondPage.requiredBoolean("response.body.has_more"))
 
-        assertRequest(createRequest, "POST", "/v1/sessions")
+        assertRequest(createRequest, "POST", "/api/sessions")
         assertEquals(null, createRequest.requiredNullableString("request.body.title"))
         assertEquals(201, createResponse.requiredInt("response.status"))
+        assertEquals("hermes.session", createResponse.requiredString("response.body.object"))
         assertEquals(CREATED_SESSION_ID, createResponse.requiredString("response.body.session.id"))
 
-        assertRequest(openRequest, "GET", "/v1/sessions/$SESSION_ID")
+        assertRequest(openRequest, "GET", "/api/sessions/$SESSION_ID")
         assertEquals(200, openResponse.requiredInt("response.status"))
         assertEquals(SESSION_ID, openResponse.requiredString("response.body.session.id"))
-        assertRequest(historyRequest, "GET", "/v1/sessions/$SESSION_ID/history")
+        assertRequest(historyRequest, "GET", "/api/sessions/$SESSION_ID/messages")
         assertEquals(200, historyResponse.requiredInt("response.status"))
+        assertEquals("list", historyResponse.requiredString("response.body.object"))
         assertEquals(SESSION_ID, historyResponse.requiredString("response.body.session_id"))
-        assertEquals(0, historyResponse.requiredArray("response.body.messages").size)
-        val populatedMessage =
-            populatedHistoryResponse.root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!
-                .jsonArray.single().jsonObject
-        assertEquals(RUN_ID, populatedMessage["run_id"]!!.jsonPrimitive.content)
-        assertEquals("completed", populatedMessage["run_status"]!!.jsonPrimitive.content)
-        assertEquals(JsonNull, populatedMessage["role"])
-        assertEquals(JsonNull, populatedMessage["content"])
-        assertEquals(JsonNull, populatedMessage["run_result"])
-        assertEquals("2026-09-08T20:00:00Z", populatedMessage["timestamp"]!!.jsonPrimitive.content)
+        assertEquals(0, historyResponse.requiredArray("response.body.data").size)
+        assertEquals(0, historyResponse.requiredInt("response.body.pagination.returned"))
+        val populatedMessages =
+            populatedHistoryResponse.root["response"]!!.jsonObject["body"]!!.jsonObject["data"]!!.jsonArray
+        assertEquals(2, populatedMessages.size)
+        val firstMessage = populatedMessages[0].jsonObject
+        assertEquals("1", firstMessage["id"]!!.jsonPrimitive.content)
+        assertFalse(firstMessage["id"]!!.jsonPrimitive.isString)
+        assertEquals("user", firstMessage["role"]!!.jsonPrimitive.content)
+        assertEquals("Run this", firstMessage["content"]!!.jsonPrimitive.content)
+        assertEquals("1788897540.0", firstMessage["timestamp"]!!.jsonPrimitive.content)
+        assertFalse(firstMessage["timestamp"]!!.jsonPrimitive.isString)
+        // The pinned message projection never carries run identity metadata.
+        assertFalse(firstMessage.containsKey("run_id"))
+        assertFalse(firstMessage.containsKey("run_status"))
+        assertFalse(firstMessage.containsKey("run_result"))
+        assertEquals("assistant", populatedMessages[1].jsonObject["role"]!!.jsonPrimitive.content)
+        assertEquals("Authoritative result", populatedMessages[1].jsonObject["content"]!!.jsonPrimitive.content)
 
-        val externalRuns = parseJson("sessions/history-response-external-runs.json")
-        val externalMessages =
-            externalRuns.root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!.jsonArray
-        assertEquals(2, externalMessages.size)
-        assertEquals("external-run-failed", externalMessages[0].jsonObject["run_id"]!!.jsonPrimitive.content)
-        assertEquals("failed", externalMessages[0].jsonObject["run_status"]!!.jsonPrimitive.content)
-        assertEquals("Remote failure", externalMessages[0].jsonObject["run_result"]!!.jsonPrimitive.content)
-        assertEquals("2026-09-08T20:00:00Z", externalMessages[0].jsonObject["timestamp"]!!.jsonPrimitive.content)
-        assertEquals("external-run-succeeded", externalMessages[1].jsonObject["run_id"]!!.jsonPrimitive.content)
-        assertEquals("succeeded", externalMessages[1].jsonObject["run_status"]!!.jsonPrimitive.content)
-        assertEquals("Remote result", externalMessages[1].jsonObject["run_result"]!!.jsonPrimitive.content)
-        assertEquals("2026-09-08T21:00:00Z", externalMessages[1].jsonObject["timestamp"]!!.jsonPrimitive.content)
-
-        val mixedRuns = parseJson("sessions/history-response-mixed-runs.json")
-        val mixedMessages =
-            mixedRuns.root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!.jsonArray
-        assertEquals(4, mixedMessages.size)
-        assertEquals(
-            listOf("local-run-created", "external-run-failed", "external-run-succeeded", "local-run-created"),
-            mixedMessages.map { it.jsonObject["run_id"]!!.jsonPrimitive.content },
-        )
-        assertEquals(
-            listOf("succeeded", "failed", "succeeded", "succeeded"),
-            mixedMessages.map { it.jsonObject["run_status"]!!.jsonPrimitive.content },
-        )
-        assertEquals(JsonNull, mixedMessages[1].jsonObject["content"])
-        assertEquals("Remote result", mixedMessages[2].jsonObject["run_result"]!!.jsonPrimitive.content)
-        assertEquals("Local result", mixedMessages[3].jsonObject["run_result"]!!.jsonPrimitive.content)
-        assertEquals(
-            listOf(
-                "2026-09-08T19:00:00Z",
-                "2026-09-08T20:00:00Z",
-                "2026-09-08T21:00:00Z",
-                "2026-09-08T22:00:00Z",
-            ),
-            mixedMessages.map { it.jsonObject["timestamp"]!!.jsonPrimitive.content },
-        )
-
-        assertRequest(renameRequest, "PATCH", "/v1/sessions/$SESSION_ID")
+        assertRequest(renameRequest, "PATCH", "/api/sessions/$SESSION_ID")
         assertEquals("Renamed session", renameRequest.requiredString("request.body.title"))
         assertEquals(200, renameResponse.requiredInt("response.status"))
         assertEquals(SESSION_ID, renameResponse.requiredString("response.body.session.id"))
 
-        assertRequest(deleteRequest, "DELETE", "/v1/sessions/$SESSION_ID")
-        assertEquals(204, deleteResponse.requiredInt("response.status"))
+        assertRequest(deleteRequest, "DELETE", "/api/sessions/$SESSION_ID")
+        assertEquals(200, deleteResponse.requiredInt("response.status"))
+        assertEquals("hermes.session.deleted", deleteResponse.requiredString("response.body.object"))
+        assertEquals(SESSION_ID, deleteResponse.requiredString("response.body.id"))
+        assertTrue(deleteResponse.requiredBoolean("response.body.deleted"))
 
-        assertRequest(pinRequest, "POST", "/v1/sessions/$SESSION_ID/pin")
+        assertRequest(pinRequest, "PATCH", "/api/sessions/$SESSION_ID")
+        assertTrue(pinRequest.requiredBoolean("request.body.pinned"))
         assertEquals(200, pinResponse.requiredInt("response.status"))
-        assertTrue(pinResponse.requiredBoolean("response.body.pinned"))
+        assertTrue(pinResponse.requiredBoolean("response.body.session.pinned"))
 
-        assertRequest(unpinRequest, "DELETE", "/v1/sessions/$SESSION_ID/pin")
+        assertRequest(unpinRequest, "PATCH", "/api/sessions/$SESSION_ID")
+        assertFalse(unpinRequest.requiredBoolean("request.body.pinned"))
         assertEquals(200, unpinResponse.requiredInt("response.status"))
-        assertFalse(unpinResponse.requiredBoolean("response.body.pinned"))
+        assertFalse(unpinResponse.requiredBoolean("response.body.session.pinned"))
     }
 
     @Test
@@ -203,16 +188,19 @@ class ContractFixtureParserTest {
         val statusRequest = parseJson("runs/status-request.json")
         val statusResponse = parseJson("runs/status-response.json")
 
-        assertRequest(createRequest, "POST", "/v1/sessions/$SESSION_ID/runs")
+        assertRequest(createRequest, "POST", "/v1/runs")
         assertEquals("", createRequest.requiredString("request.body.input"))
+        assertEquals(SESSION_ID, createRequest.requiredString("request.body.session_id"))
         assertEquals(202, createResponse.requiredInt("response.status"))
         assertEquals(RUN_ID, createResponse.requiredString("response.body.run_id"))
-        assertEquals(SESSION_ID, createResponse.requiredString("response.body.session_id"))
+        assertEquals("started", createResponse.requiredString("response.body.status"))
+        assertFalse(createResponse.root.getValue("response").jsonObject.getValue("body").jsonObject.containsKey("session_id"))
         assertRequest(statusRequest, "GET", "/v1/runs/$RUN_ID")
         assertEquals(200, statusResponse.requiredInt("response.status"))
+        assertEquals("hermes.run", statusResponse.requiredString("response.body.object"))
         assertEquals(RUN_ID, statusResponse.requiredString("response.body.run_id"))
         assertEquals(SESSION_ID, statusResponse.requiredString("response.body.session_id"))
-        assertEquals("succeeded", statusResponse.requiredString("response.body.status"))
+        assertEquals("completed", statusResponse.requiredString("response.body.status"))
     }
 
     @Test
@@ -220,13 +208,13 @@ class ContractFixtureParserTest {
         val fixture = parseSse("runs/observation.sse")
 
         assertEquals(
-            listOf("fixture.metadata", "run.started", "run.running", "future.additive", "run.completed"),
+            listOf("fixture.metadata", "tool.started", "message.delta", "run.completed"),
             fixture.events.map { it.eventType },
         )
         assertEquals(RUN_ID, fixture.events[1].requiredString("run_id"))
-        assertEquals("running", fixture.events[2].requiredString("status"))
+        assertEquals("terminal", fixture.events[1].requiredString("tool"))
+        assertEquals("Hello", fixture.events[2].requiredString("delta"))
         assertEquals(RUN_ID, fixture.events[3].requiredString("run_id"))
-        assertEquals("succeeded", fixture.events[4].requiredString("status"))
         assertEquals(descriptor.provenanceValue, fixture.provenanceValue)
     }
 
@@ -242,7 +230,7 @@ class ContractFixtureParserTest {
         val fixture = parseJson("malformed/missing-required-field.json")
 
         assertFailure(ContractFixtureFailureCategory.MISSING_REQUIRED_FIELD) {
-            fixture.requiredArray("response.body.sessions")
+            fixture.requiredArray("response.body.data")
         }
     }
 
@@ -251,7 +239,7 @@ class ContractFixtureParserTest {
         val fixture = parseJson("malformed/invalid-required-field-type.json")
 
         assertFailure(ContractFixtureFailureCategory.INVALID_REQUIRED_FIELD_TYPE) {
-            fixture.requiredArray("response.body.sessions")
+            fixture.requiredArray("response.body.data")
         }
     }
 
@@ -265,10 +253,8 @@ class ContractFixtureParserTest {
     @Test
     fun missing_provenance_is_rejected() {
         val content =
-            parseJson("capabilities/success.json").root.toString().replace(
-                "\"hermes_revision\":\"$PROVENANCE\",",
-                "",
-            )
+            contractsRoot.resolve("capabilities/success.json").readText()
+                .replace("\"hermes_revision\": \"$PROVENANCE\",\n", "")
 
         assertFailure(ContractFixtureFailureCategory.MISSING_PROVENANCE) {
             ContractFixtureParser.parseJson("missing-provenance.json", content, descriptor)
@@ -282,7 +268,7 @@ class ContractFixtureParserTest {
             {
               "hermes_revision": "$PROVENANCE",
               "hermes_revision": "$PROVENANCE",
-              "response": {"status": 200, "body": {"capabilities": []}}
+              "response": {"status": 200, "body": {"endpoints": {}}}
             }
             """.trimIndent()
 
@@ -311,7 +297,7 @@ class ContractFixtureParserTest {
             {
               "hermes_revision": "$PROVENANCE",
               "$escapedField": "$PROVENANCE",
-              "response": {"status": 200, "body": {"capabilities": []}}
+              "response": {"status": 200, "body": {"endpoints": {}}}
             }
             """.trimIndent()
 
@@ -358,9 +344,9 @@ class ContractFixtureParserTest {
     @Test
     fun alternate_provenance_field_is_rejected() {
         val content =
-            parseJson("capabilities/success.json").root.toString().replace(
-                "\"hermes_revision\":\"$PROVENANCE\",",
-                "\"image_digest\":\"sha256:${"0".repeat(64)}\",",
+            contractsRoot.resolve("capabilities/success.json").readText().replace(
+                "\"hermes_revision\": \"$PROVENANCE\",\n",
+                "\"image_digest\": \"sha256:${"0".repeat(64)}\",\n",
             )
 
         assertFailure(ContractFixtureFailureCategory.INVALID_PROVENANCE) {
@@ -372,7 +358,7 @@ class ContractFixtureParserTest {
     fun missing_sse_provenance_is_rejected() {
         val content =
             contractsRoot.resolve("runs/observation.sse").readText()
-                .replace("\"hermes_revision\":\"$PROVENANCE\"", "")
+                .replace("\"hermes_revision\":\"$PROVENANCE\",", "")
 
         assertFailure(ContractFixtureFailureCategory.MISSING_PROVENANCE) {
             ContractFixtureParser.parseSse("missing-sse-provenance.sse", content, descriptor)
@@ -394,30 +380,22 @@ class ContractFixtureParserTest {
     }
 
     @Test
-    fun streaming_fixture_covers_supported_unknown_and_duplicate_events() {
+    fun streaming_fixture_covers_incremental_deltas_and_a_terminal_event() {
         val fixture = parseSse("runs/observation-streaming.sse")
 
         assertEquals(
             listOf(
                 "fixture.metadata",
-                "run.started",
-                "run.running",
                 "message.delta",
                 "message.delta",
-                "future.additive",
-                "message.delta",
-                "run.completing",
-                "run.succeeded",
+                "run.completed",
             ),
             fixture.events.map { it.eventType },
         )
         assertEquals(
-            listOf("delta-1", "delta-1", "delta-2"),
-            fixture.events.filter { it.eventType == "message.delta" }.map { it.id },
+            listOf("Hello", " world"),
+            fixture.events.filter { it.eventType == "message.delta" }.map { it.requiredString("delta") },
         )
-        assertEquals("Hello", fixture.events[3].requiredString("delta"))
-        assertEquals(" world", fixture.events[6].requiredString("delta"))
-        assertTrue(fixture.events.any { it.eventType == "future.additive" })
         assertEquals(descriptor.provenanceValue, fixture.provenanceValue)
     }
 
@@ -425,9 +403,12 @@ class ContractFixtureParserTest {
     fun interrupted_fixture_has_no_false_terminal_event() {
         val fixture = parseSse("runs/observation-interrupted.sse")
 
-        assertEquals("run.interrupted", fixture.events.last().eventType)
-        assertEquals("interrupted", fixture.events.last().requiredString("status"))
-        assertTrue(fixture.events.none { it.eventType == "run.succeeded" || it.eventType == "run.completed" })
+        assertEquals("message.delta", fixture.events.last().eventType)
+        assertTrue(
+            fixture.events.none {
+                it.eventType == "run.completed" || it.eventType == "run.failed" || it.eventType == "run.cancelled"
+            },
+        )
     }
 
     private fun parseJson(path: String): ContractJsonFixture =

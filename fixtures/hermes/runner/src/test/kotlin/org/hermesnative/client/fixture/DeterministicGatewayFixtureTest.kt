@@ -200,7 +200,7 @@ class DeterministicGatewayFixtureTest {
 
     @Test
     fun capability_failure_fails_the_invoking_fixture_job() {
-        val fixture = fixtureWithBehavior(SyntheticGatewayBehavior(capabilities = emptySet()))
+        val fixture = fixtureWithBehavior(SyntheticGatewayBehavior(endpoints = emptyMap()))
 
         val error =
             assertThrows(FixtureReadinessException::class.java) {

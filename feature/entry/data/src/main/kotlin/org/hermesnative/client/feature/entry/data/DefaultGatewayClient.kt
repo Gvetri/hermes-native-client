@@ -18,6 +18,7 @@ import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionPage
 import org.hermesnative.client.feature.entry.domain.SessionPinResult
+import org.hermesnative.client.feature.entry.domain.satisfies
 import java.security.GeneralSecurityException
 import javax.net.ssl.SSLException
 
@@ -45,15 +46,16 @@ class DefaultGatewayClient(
                 path = manifest.discoveryPath,
                 expectedStatus = 200,
             )
-        val identifiers =
+        val endpoints =
             GatewayJsonParser.parseCapabilities(
                 operation = "capability discovery",
                 root = GatewayJsonParser.parseObject("capability discovery", response.body),
             )
-        if (!manifest.requiredIdentifiers.all(identifiers::contains)) {
+        val capabilities = GatewayCapabilities(endpoints)
+        if (!capabilities.satisfies(manifest)) {
             throw GatewayException(GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE)
         }
-        return GatewayCapabilities(identifiers)
+        return capabilities
     }
 
     override fun listSessions(request: SessionListRequest): SessionPage {
@@ -63,17 +65,22 @@ class DefaultGatewayClient(
                 "Gateway request failed. Session list limit must be positive.",
             )
         }
+        if (request.offset < 0) {
+            throw GatewayException(
+                GatewayErrorCategory.GATEWAY_REQUEST_FAILED,
+                "Gateway request failed. Session list offset must not be negative.",
+            )
+        }
         val query =
             linkedMapOf(
                 "limit" to request.limit.toString(),
-                "cursor" to request.cursor,
-                "search" to request.search,
+                "offset" to request.offset.toString(),
             )
         val response =
             execute(
                 operation = "session list",
                 method = "GET",
-                path = "/v1/sessions",
+                path = "/api/sessions",
                 query = query,
                 expectedStatus = 200,
             )
@@ -89,11 +96,11 @@ class DefaultGatewayClient(
             execute(
                 operation = "session create",
                 method = "POST",
-                path = "/v1/sessions",
+                path = "/api/sessions",
                 body = body,
                 expectedStatus = 201,
             )
-        return GatewayJsonParser.parseSession(
+        return GatewayJsonParser.parseSessionResponse(
             operation = "session create",
             root = GatewayJsonParser.parseObject("session create", response.body),
         )
@@ -104,11 +111,11 @@ class DefaultGatewayClient(
             execute(
                 operation = "session open",
                 method = "GET",
-                path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session open")}",
+                path = "/api/sessions/${sessionPathSegment(sessionId.value, "session open")}",
                 expectedStatus = 200,
             )
         val session =
-            GatewayJsonParser.parseSession(
+            GatewayJsonParser.parseSessionResponse(
                 operation = "session open",
                 root = GatewayJsonParser.parseObject("session open", response.body),
             )
@@ -121,7 +128,7 @@ class DefaultGatewayClient(
             execute(
                 operation = "session history",
                 method = "GET",
-                path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session history")}/history",
+                path = "/api/sessions/${sessionPathSegment(sessionId.value, "session history")}/messages",
                 expectedStatus = 200,
             )
         val history =
@@ -142,12 +149,12 @@ class DefaultGatewayClient(
             execute(
                 operation = "session rename",
                 method = "PATCH",
-                path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session rename")}",
+                path = "/api/sessions/${sessionPathSegment(sessionId.value, "session rename")}",
                 body = body,
                 expectedStatus = 200,
             )
         val session =
-            GatewayJsonParser.parseSession(
+            GatewayJsonParser.parseSessionResponse(
                 operation = "session rename",
                 root = GatewayJsonParser.parseObject("session rename", response.body),
             )
@@ -156,68 +163,74 @@ class DefaultGatewayClient(
     }
 
     override fun deleteSession(sessionId: SessionId) {
-        execute(
+        val response =
+            execute(
+                operation = "session delete",
+                method = "DELETE",
+                path = "/api/sessions/${sessionPathSegment(sessionId.value, "session delete")}",
+                expectedStatus = 200,
+            )
+        GatewayJsonParser.parseDeletedSession(
             operation = "session delete",
-            method = "DELETE",
-            path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session delete")}",
-            expectedStatus = 204,
+            root = GatewayJsonParser.parseObject("session delete", response.body),
+            expectedSessionId = sessionId,
         )
     }
 
-    override fun pinSession(sessionId: SessionId): SessionPinResult {
-        val response =
-            execute(
-                operation = "session pin",
-                method = "POST",
-                path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session pin")}/pin",
-                expectedStatus = 200,
-            )
-        val result =
-            GatewayJsonParser.parsePinResult(
-                operation = "session pin",
-                root = GatewayJsonParser.parseObject("session pin", response.body),
-            )
-        requireIdentity("session pin", "session_id", sessionId.value, result.sessionId.value)
-        return result
-    }
+    override fun pinSession(sessionId: SessionId): SessionPinResult = setSessionPinned(sessionId, pinned = true)
 
-    override fun unpinSession(sessionId: SessionId): SessionPinResult {
+    override fun unpinSession(sessionId: SessionId): SessionPinResult = setSessionPinned(sessionId, pinned = false)
+
+    private fun setSessionPinned(
+        sessionId: SessionId,
+        pinned: Boolean,
+    ): SessionPinResult {
+        val body = JsonObject(mapOf("pinned" to JsonPrimitive(pinned))).toString()
+        val auth = if (pinned) "session pin" else "session unpin"
         val response =
             execute(
-                operation = "session unpin",
-                method = "DELETE",
-                path = "/v1/sessions/${sessionPathSegment(sessionId.value, "session unpin")}/pin",
+                operation = auth,
+                method = "PATCH",
+                path = "/api/sessions/${sessionPathSegment(sessionId.value, auth)}",
+                body = body,
                 expectedStatus = 200,
             )
-        val result =
-            GatewayJsonParser.parsePinResult(
-                operation = "session unpin",
-                root = GatewayJsonParser.parseObject("session unpin", response.body),
+        val session =
+            GatewayJsonParser.parseSessionResponse(
+                operation = auth,
+                root = GatewayJsonParser.parseObject(auth, response.body),
             )
-        requireIdentity("session unpin", "session_id", sessionId.value, result.sessionId.value)
-        return result
+        requireIdentity(auth, "session.id", sessionId.value, session.id.value)
+        return SessionPinResult(sessionId = session.id, pinned = session.pinned)
     }
 
     override fun createRun(
         sessionId: SessionId,
         input: String,
     ): Run {
-        val body = JsonObject(mapOf("input" to JsonPrimitive(input))).toString()
+        val body =
+            JsonObject(
+                mapOf(
+                    "input" to JsonPrimitive(input),
+                    "session_id" to JsonPrimitive(sessionId.value),
+                ),
+            ).toString()
         val response =
             execute(
                 operation = "run create",
                 method = "POST",
-                path = "/v1/sessions/${sessionPathSegment(sessionId.value, "run create")}/runs",
+                path = "/v1/runs",
                 body = body,
                 expectedStatus = 202,
             )
-        val run =
-            GatewayJsonParser.parseRun(
+        val admitted =
+            GatewayJsonParser.parseRunAdmission(
                 operation = "run create",
                 root = GatewayJsonParser.parseObject("run create", response.body),
             )
-        requireIdentity("run create", "session_id", sessionId.value, run.sessionId.value)
-        return run
+        // The pinned admission response carries no session_id. The Run is correlated with the
+        // Session declared in the request body, which the pinned handler binds server-side.
+        return Run(id = admitted.runId, sessionId = sessionId, status = admitted.status)
     }
 
     override fun getRunStatus(runId: RunId): Run {
@@ -229,7 +242,7 @@ class DefaultGatewayClient(
                 expectedStatus = 200,
             )
         val run =
-            GatewayJsonParser.parseRun(
+            GatewayJsonParser.parseRunStatus(
                 operation = "run status",
                 root = GatewayJsonParser.parseObject("run status", response.body),
             )

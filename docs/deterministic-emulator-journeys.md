@@ -38,6 +38,22 @@ public-network dependency, real provider credentials, or live model execution.
 - Every terminal, streaming, and interrupted journey additionally asserts the
   exact Run-submission count (`run_creates`), so a duplicate retry submission
   can never pass unnoticed.
+- Run settlement follows the pinned contract: the Gateway's history carries no
+  Run linkage, so the client only settles Runs whose IDs it already knows (a
+  `POST /v1/runs` response or the persisted recovery registry) through
+  `GET /v1/runs/{run_id}`. The terminal-failure and interrupted journeys assert
+  that settled state — the tracked Run in the Session summary and the
+  authoritative history replacing the temporary observed response. Without
+  history linkage the explicit retry lives in the Session summary and exists
+  only while the client still holds the original input in process memory: the
+  explicit-retry journey taps that summary retry and asserts exactly one new
+  Run submission for the known failure (two `run_creates` in total), while a
+  Run recovered after a restart, whose original input is gone, is never
+  retried.
+- Session list search filters already-loaded server rows locally. The
+  pagination-search journey loads both server pages first and then proves the
+  local title filter and clear-search behavior; the flow never expects a
+  server-side search request.
 - The layer is secret-free: the synthetic bearer credential, the loopback
   endpoint, and the test-only TLS key pair are repository-owned test fixtures,
   never real credentials, and the TLS key pair is never used outside the

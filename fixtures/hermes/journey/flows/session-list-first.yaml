@@ -17,17 +17,19 @@ name: session-list-first
 - assertVisible: "Sessions"
 - assertVisible: "Alpha Session"
 - assertVisible: "Pinned"
-# Keep each swipe inside the list between the pinned header and footer on
-# the API 24 Pixel 2. A full-screen swipe can scroll past the second title.
+# The list owns a short viewport on this profile, so scroll inside it with
+# small bounded swipes until the second Session's title is on screen. An
+# element swipe up from the first Session overshoots and clips the title.
 - repeat:
-    times: 8
+    times: 4
     while:
-      notVisible: "Beta Session"
+      notVisible:
+        text: "Beta Session"
     commands:
       - swipe:
-          start: "50%, 65%"
-          end: "50%, 52%"
-          duration: 600
+          start: "50%, 68%"
+          end: "50%, 56%"
+          duration: 500
 - assertVisible: "Beta Session"
 - assertVisible: "Search Sessions"
 - assertVisible: "Create Session"

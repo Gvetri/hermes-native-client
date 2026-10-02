@@ -22,10 +22,12 @@ name: interrupted-sse-refetch
 - inputText: "Interrupt this"
 - hideKeyboard
 - tapOn: "Send"
+# The interrupted stream is refetched through the Run resource; the pinned
+# history carries no Run linkage, so the settled summary shows the tracked
+# Run and the authoritative history replaces the interrupted partial response.
 - extendedWaitUntil:
     visible: "Run state: Failed"
     timeout: 30000
-- assertVisible: "Run ID: interrupted-run"
 - swipe:
     start: "50%, 71%"
     end: "50%, 62%"
@@ -35,6 +37,6 @@ name: interrupted-sse-refetch
     end: "50%, 62%"
     duration: 400
 - extendedWaitUntil:
-    visible: "This Run failed. Your conversation is preserved."
+    visible: "Latest Run: interrupted-run"
     timeout: 30000
-- assertVisible: "Try again"
+- assertVisible: "Refetched failure"

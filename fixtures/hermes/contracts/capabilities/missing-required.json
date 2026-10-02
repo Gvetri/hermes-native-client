@@ -3,18 +3,52 @@
   "response": {
     "status": 200,
     "body": {
-      "capabilities": [
-        "session.list",
-        "session.create",
-        "session.open",
-        "session.history",
-        "session.rename",
-        "session.delete",
-        "session.pin",
-        "session.unpin",
-        "run.create",
-        "run.status"
-      ]
+      "object": "hermes.api_server.capabilities",
+      "platform": "hermes-agent",
+      "model": "hermes-agent",
+      "auth": {
+        "type": "bearer",
+        "required": true
+      },
+      "features": {
+        "run_submission": true,
+        "run_status": true,
+        "session_resources": true
+      },
+      "endpoints": {
+        "sessions": {
+          "method": "GET",
+          "path": "/api/sessions"
+        },
+        "session_create": {
+          "method": "POST",
+          "path": "/api/sessions"
+        },
+        "session": {
+          "method": "GET",
+          "path": "/api/sessions/{session_id}"
+        },
+        "session_update": {
+          "method": "PATCH",
+          "path": "/api/sessions/{session_id}"
+        },
+        "session_delete": {
+          "method": "DELETE",
+          "path": "/api/sessions/{session_id}"
+        },
+        "session_messages": {
+          "method": "GET",
+          "path": "/api/sessions/{session_id}/messages"
+        },
+        "runs": {
+          "method": "POST",
+          "path": "/v1/runs"
+        },
+        "run_status": {
+          "method": "GET",
+          "path": "/v1/runs/{run_id}"
+        }
+      }
     }
   }
 }

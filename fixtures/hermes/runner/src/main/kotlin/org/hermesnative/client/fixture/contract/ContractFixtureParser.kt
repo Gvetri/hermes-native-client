@@ -34,7 +34,6 @@ class ContractJsonFixture(
 data class ContractSseEvent(
     val eventType: String,
     val data: JsonObject,
-    val id: String? = null,
 ) {
     fun requiredString(path: String): String = fields().requiredString(path)
 
@@ -130,25 +129,11 @@ object ContractFixtureParser {
         record: String,
     ): ContractSseEvent {
         val lines = record.split('\n')
-        val eventLines = lines.filter { it.startsWith("event:") }
         val dataLines = lines.filter { it.startsWith("data:") }
-        val idLines = lines.filter { it.startsWith("id:") }
-        if (
-            eventLines.size != 1 ||
-            dataLines.isEmpty() ||
-            idLines.size > 1 ||
-            lines.size != eventLines.size + dataLines.size + idLines.size
-        ) {
+        if (dataLines.isEmpty() || dataLines.size != lines.size) {
             fail(
                 ContractFixtureFailureCategory.INVALID_SSE_FRAMING,
-                "$sourceName contains an SSE record with invalid event/data framing.",
-            )
-        }
-        val eventType = eventLines.single().removePrefix("event:").trim()
-        if (eventType.isEmpty()) {
-            fail(
-                ContractFixtureFailureCategory.INVALID_SSE_FRAMING,
-                "$sourceName contains an SSE event without an event type.",
+                "$sourceName contains an SSE record with invalid data framing.",
             )
         }
         val dataContent = dataLines.joinToString("\n") { it.removePrefix("data:").trimStart() }
@@ -157,21 +142,26 @@ object ContractFixtureParser {
                 json.parseToJsonElement(dataContent) as? JsonObject
                     ?: fail(
                         ContractFixtureFailureCategory.INVALID_REQUIRED_FIELD_TYPE,
-                        "$sourceName event '$eventType' must contain a JSON object.",
+                        "$sourceName SSE payload must contain a JSON object.",
                     )
             } catch (error: ContractFixtureException) {
                 throw error
             } catch (error: Exception) {
                 throw ContractFixtureException(
                     ContractFixtureFailureCategory.INVALID_JSON,
-                    "$sourceName event '$eventType' is not valid JSON.",
+                    "$sourceName SSE payload is not valid JSON.",
                     error,
                 )
             }
+        val eventType =
+            (data["event"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf(String::isNotBlank)
+                ?: fail(
+                    ContractFixtureFailureCategory.INVALID_SSE_FRAMING,
+                    "$sourceName contains an SSE event without an event type.",
+                )
         return ContractSseEvent(
             eventType = eventType,
             data = data,
-            id = idLines.singleOrNull()?.removePrefix("id:")?.trim()?.takeIf(String::isNotEmpty),
         )
     }
 

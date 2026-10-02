@@ -22,33 +22,39 @@ name: explicit-retry
 - inputText: "Retry this"
 - hideKeyboard
 - tapOn: "Send"
+# The pinned Gateway's history carries no Run linkage, so the client retries
+# only the failed Run it created itself: the Session summary exposes the
+# explicit retry once the Run settles as failed and the authoritative history
+# has replaced the temporary observed response. The retry reuses the original
+# input still held in process memory and must submit exactly one new Run.
 - extendedWaitUntil:
     visible: "Run state: Failed"
     timeout: 30000
-- swipe:
-    start: "50%, 71%"
-    end: "50%, 62%"
-    duration: 400
-- swipe:
-    start: "50%, 71%"
-    end: "50%, 62%"
-    duration: 400
+- scrollUntilVisible:
+    element: "Stable retry failure"
+    direction: DOWN
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Latest Run: run-retry-1"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "Stable retry failure"
+    timeout: 30000
 - extendedWaitUntil:
     visible: "Try again"
     timeout: 30000
-- tapOn: "Try again"
+- tapOn:
+    text: "Try again"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Run state: Succeeded"
     timeout: 30000
-- swipe:
-    start: "50%, 71%"
-    end: "50%, 62%"
-    duration: 400
-- swipe:
-    start: "50%, 71%"
-    end: "50%, 62%"
-    duration: 400
+- scrollUntilVisible:
+    element: "Stable retry success"
+    direction: DOWN
+    timeout: 30000
 - extendedWaitUntil:
     visible: "Stable retry success"
     timeout: 30000
 - assertVisible: "Stable retry success"
+- assertNotVisible: "Try again"

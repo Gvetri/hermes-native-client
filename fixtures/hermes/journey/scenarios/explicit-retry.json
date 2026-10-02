@@ -4,18 +4,15 @@
   "port": 18443,
   "tls": true,
   "capabilities": [
-    "client-manifest",
-    "session.list",
-    "session.create",
-    "session.open",
-    "session.history",
-    "session.rename",
-    "session.delete",
-    "session.pin",
-    "session.unpin",
-    "run.create",
-    "run.status",
-    "run.sse"
+    "sessions",
+    "session_create",
+    "session",
+    "session_update",
+    "session_delete",
+    "session_messages",
+    "runs",
+    "run_status",
+    "run_events"
   ],
   "sessions": [
     {
@@ -29,17 +26,10 @@
     {
       "run_id": "run-retry-1",
       "session_id": "session-retry",
-      "create_status": "starting",
+      "create_status": "started",
       "observation": [
         {
-          "type": "run.started",
-          "status": "starting",
-          "id": "r1"
-        },
-        {
-          "type": "run.failed",
-          "status": "failed",
-          "id": "r2"
+          "type": "run.failed"
         }
       ],
       "final_status": "failed",
@@ -47,36 +37,25 @@
         {
           "id": "message-retry-failed",
           "role": "assistant",
-          "content": "Stable retry failure",
-          "run_id": "run-retry-1",
-          "run_status": "failed"
+          "content": "Stable retry failure"
         }
       ]
     },
     {
       "run_id": "run-retry-2",
       "session_id": "session-retry",
-      "create_status": "starting",
+      "create_status": "started",
       "observation": [
         {
-          "type": "run.started",
-          "status": "starting",
-          "id": "r3"
-        },
-        {
-          "type": "run.succeeded",
-          "status": "succeeded",
-          "id": "r4"
+          "type": "run.completed"
         }
       ],
-      "final_status": "succeeded",
+      "final_status": "completed",
       "terminal_history": [
         {
           "id": "message-retry-succeeded",
           "role": "assistant",
-          "content": "Stable retry success",
-          "run_id": "run-retry-2",
-          "run_status": "succeeded"
+          "content": "Stable retry success"
         }
       ]
     }

@@ -8,6 +8,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
+import org.hermesnative.client.feature.entry.domain.satisfies
 import java.util.Locale
 
 class VerifyGatewayConnection(
@@ -63,7 +64,7 @@ class VerifyGatewayConnection(
         }
 
         val capabilities = discoverCapabilities(normalizedEndpoint, bearerCredential)
-        if (!manifest.requiredIdentifiers.all(capabilities::supports)) {
+        if (!capabilities.satisfies(manifest)) {
             throw GatewayException(GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE)
         }
         return capabilities

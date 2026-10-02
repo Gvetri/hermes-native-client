@@ -3,9 +3,18 @@
   "response": {
     "status": 200,
     "body": {
+      "object": "hermes.run",
       "run_id": "9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8",
       "session_id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
-      "status": "succeeded"
+      "status": "completed",
+      "created_at": 1757325600.0,
+      "updated_at": 1757325900.0,
+      "output": "Authoritative result",
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 5,
+        "total_tokens": 17
+      }
     }
   }
 }

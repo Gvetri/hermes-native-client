@@ -3,9 +3,15 @@
   "response": {
     "status": 200,
     "body": {
+      "object": "list",
       "session_id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
-      "messages": [],
-      "next_cursor": null
+      "data": [],
+      "pagination": {
+        "limit": 500,
+        "offset": 0,
+        "order": "latest",
+        "returned": 0
+      }
     }
   }
 }

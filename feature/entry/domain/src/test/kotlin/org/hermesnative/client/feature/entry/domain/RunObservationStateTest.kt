@@ -134,10 +134,201 @@ class RunObservationStateTest {
     fun an_interruption_does_not_confirm_that_the_remote_run_is_terminal() {
         val state =
             RunEventStateTransition.initial(run)
-                .transition(event(RunEventType.INTERRUPTED, status = "interrupted", eventId = "interrupted"))
+                .transition(event(RunEventType.INTERRUPTED, status = "running", eventId = "interrupted"))
 
         assertEquals(RunPresentationState.UNCERTAIN, state.state)
         assertTrue(state.run.isActive())
+    }
+
+    @Test
+    fun a_gateway_reported_interrupted_status_is_a_terminal_run() {
+        assertEquals(RunPresentationState.CANCELLED, "interrupted".toRunPresentationState())
+        assertFalse(Run(run.id, run.sessionId, "interrupted").isActive())
+    }
+
+    @Test
+    fun every_pinned_lifecycle_status_synonym_maps_to_its_presentation_state() {
+        val expectedByStatus =
+            mapOf(
+                "queued" to RunPresentationState.STARTING,
+                "starting" to RunPresentationState.STARTING,
+                "started" to RunPresentationState.STARTING,
+                "running" to RunPresentationState.RUNNING,
+                "in_progress" to RunPresentationState.RUNNING,
+                "in-progress" to RunPresentationState.RUNNING,
+                "waiting_for_approval" to RunPresentationState.RUNNING,
+                "completing" to RunPresentationState.COMPLETING,
+                "finalizing" to RunPresentationState.COMPLETING,
+                "stopping" to RunPresentationState.COMPLETING,
+                "completed" to RunPresentationState.SUCCEEDED,
+                "complete" to RunPresentationState.SUCCEEDED,
+                "succeeded" to RunPresentationState.SUCCEEDED,
+                "success" to RunPresentationState.SUCCEEDED,
+                "failed" to RunPresentationState.FAILED,
+                "failure" to RunPresentationState.FAILED,
+                "error" to RunPresentationState.FAILED,
+                "cancelled" to RunPresentationState.CANCELLED,
+                "canceled" to RunPresentationState.CANCELLED,
+                "interrupted" to RunPresentationState.CANCELLED,
+            )
+
+        expectedByStatus.forEach { (status, expected) ->
+            assertEquals("status '$status'", expected, status.toRunPresentationState())
+            assertEquals(
+                "status '$status' on a Run",
+                expected,
+                Run(run.id, run.sessionId, status).toRunPresentationState(),
+            )
+        }
+        assertEquals(RunPresentationState.UNCERTAIN, "future-status".toRunPresentationState())
+    }
+
+    @Test
+    fun status_matching_ignores_surrounding_whitespace_and_letter_case() {
+        assertEquals(RunPresentationState.RUNNING, "  In_Progress  ".toRunPresentationState())
+        assertEquals(RunPresentationState.CANCELLED, "Interrupted".toRunPresentationState())
+        assertEquals(RunPresentationState.UNCERTAIN, "   ".toRunPresentationState())
+    }
+
+    @Test
+    fun waiting_for_approval_is_a_live_run_that_is_not_yet_terminal() {
+        val waiting = Run(run.id, run.sessionId, "waiting_for_approval")
+
+        assertEquals(RunPresentationState.RUNNING, waiting.toRunPresentationState())
+        assertTrue(waiting.isActive())
+        assertFalse(waiting.toRunPresentationState().isTerminal())
+        assertTrue(RunEventStateTransition.initial(waiting).isStreaming)
+    }
+
+    @Test
+    fun text_delta_events_append_to_the_response_like_message_deltas() {
+        val state =
+            RunEventStateTransition.initial(run)
+                .transition(event(RunEventType.TEXT_DELTA, status = "running", text = "Part", eventId = "text-1"))
+                .transition(event(RunEventType.TEXT_DELTA, status = "running", text = " two", eventId = "text-2"))
+
+        assertEquals(RunPresentationState.RUNNING, state.state)
+        assertEquals("Part two", state.responseText)
+        assertTrue(state.isStreaming)
+    }
+
+    @Test
+    fun succeeded_and_cancelled_event_types_settle_the_run_as_terminal() {
+        val succeeded =
+            RunEventStateTransition.initial(run)
+                .transition(event(RunEventType.SUCCEEDED, status = "succeeded", eventId = "succeeded-event"))
+        val cancelled =
+            RunEventStateTransition.initial(run)
+                .transition(event(RunEventType.CANCELLED, status = "cancelled", eventId = "cancelled-event"))
+
+        assertEquals(RunPresentationState.SUCCEEDED, succeeded.state)
+        assertFalse(succeeded.isStreaming)
+        assertEquals(RunPresentationState.CANCELLED, cancelled.state)
+        assertTrue(cancelled.state.isTerminal())
+        assertFalse(cancelled.isStreaming)
+    }
+
+    @Test
+    fun completed_events_resolve_every_terminal_status_family_and_an_unknown_status() {
+        val expectedByStatus =
+            mapOf(
+                "" to RunPresentationState.SUCCEEDED,
+                "completed" to RunPresentationState.SUCCEEDED,
+                "complete" to RunPresentationState.SUCCEEDED,
+                "succeeded" to RunPresentationState.SUCCEEDED,
+                "success" to RunPresentationState.SUCCEEDED,
+                "failed" to RunPresentationState.FAILED,
+                "failure" to RunPresentationState.FAILED,
+                "error" to RunPresentationState.FAILED,
+                "cancelled" to RunPresentationState.CANCELLED,
+                "canceled" to RunPresentationState.CANCELLED,
+                "interrupted" to RunPresentationState.CANCELLED,
+                "future-status" to RunPresentationState.UNCERTAIN,
+            )
+
+        expectedByStatus.forEach { (status, expected) ->
+            val state =
+                RunEventStateTransition.initial(run)
+                    .transition(event(RunEventType.COMPLETED, status = status, eventId = "completed-$status"))
+
+            assertEquals("completed status '$status'", expected, state.state)
+            assertFalse("completed status '$status' must stop streaming", state.isStreaming)
+        }
+    }
+
+    @Test
+    fun an_event_for_another_run_never_mutates_the_observation() {
+        val initial = RunEventStateTransition.initial(run)
+        val foreign = event(RunEventType.MESSAGE_DELTA, status = "succeeded", text = "other", eventId = "foreign")
+        val state = initial.transition(foreign.copy(runId = RunId("run-2")))
+
+        assertEquals(initial, state)
+        assertEquals("", state.responseText)
+        assertEquals("starting", state.run.status)
+    }
+
+    @Test
+    fun events_without_a_usable_event_identity_are_applied_without_deduplication() {
+        val absentId = RunEvent(RunEventType.TEXT_DELTA, run.id, status = "running", text = "chunk")
+        val afterAbsentId = RunEventStateTransition.initial(run).transition(absentId).transition(absentId)
+        val blankId = RunEvent(RunEventType.TEXT_DELTA, run.id, status = "running", text = "x", eventId = "   ")
+        val afterBlankId = RunEventStateTransition.initial(run).transition(blankId).transition(blankId)
+
+        assertEquals("chunkchunk", afterAbsentId.responseText)
+        assertTrue(afterAbsentId.processedEventIds.isEmpty())
+        assertEquals("xx", afterBlankId.responseText)
+        assertTrue(afterBlankId.processedEventIds.isEmpty())
+    }
+
+    @Test
+    fun a_blank_event_status_preserves_the_runs_last_known_status() {
+        val state =
+            RunEventStateTransition.initial(run)
+                .transition(RunEvent(RunEventType.RUNNING, run.id, status = "   ", eventId = "blank-status"))
+
+        assertEquals(RunPresentationState.RUNNING, state.state)
+        assertEquals("starting", state.run.status)
+    }
+
+    @Test
+    fun a_delta_without_text_appends_nothing_and_keeps_a_settled_observation_stopped() {
+        val settled =
+            RunEventStateTransition.initial(run)
+                .transition(event(RunEventType.COMPLETED, status = "succeeded", eventId = "settled"))
+        val state =
+            settled.transition(RunEvent(RunEventType.MESSAGE_DELTA, run.id, status = "running", eventId = "empty-delta"))
+
+        assertEquals("", state.responseText)
+        assertFalse(state.isStreaming)
+        assertEquals(RunPresentationState.RUNNING, state.state)
+    }
+
+    @Test
+    fun a_text_bearing_event_marks_an_uncertain_observation_as_streaming_again() {
+        val uncertain = RunEventStateTransition.initial(run.copy(status = "future-status"))
+        val state =
+            uncertain.transition(
+                RunEvent(RunEventType.RUNNING, run.id, status = "running", text = "resumed", eventId = "resume"),
+            )
+
+        assertEquals(RunPresentationState.RUNNING, state.state)
+        assertTrue(state.isStreaming)
+    }
+
+    @Test
+    fun an_interruption_never_rewrites_a_settled_or_already_inactive_run() {
+        val settled =
+            RunEventStateTransition.initial(run)
+                .transition(event(RunEventType.COMPLETED, status = "succeeded", eventId = "settled"))
+        val settledInterrupted = settled.interrupted()
+
+        assertEquals(settled, settledInterrupted)
+
+        val inactiveRun =
+            RunObservationState(run = Run(run.id, run.sessionId, "succeeded"), state = RunPresentationState.RUNNING)
+        val inactiveInterrupted = inactiveRun.interrupted()
+
+        assertEquals(inactiveRun, inactiveInterrupted)
     }
 
     private fun event(

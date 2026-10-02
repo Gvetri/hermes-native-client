@@ -21,11 +21,13 @@ typealias RunState = RunPresentationState
 fun String.toRunPresentationState(): RunPresentationState =
     when (trim().lowercase(Locale.ROOT)) {
         "queued", "starting", "started" -> RunPresentationState.STARTING
-        "running", "in_progress", "in-progress" -> RunPresentationState.RUNNING
+        "running", "in_progress", "in-progress", "waiting_for_approval" -> RunPresentationState.RUNNING
         "completing", "finalizing", "stopping" -> RunPresentationState.COMPLETING
         "completed", "complete", "succeeded", "success" -> RunPresentationState.SUCCEEDED
         "failed", "failure", "error" -> RunPresentationState.FAILED
-        "cancelled", "canceled" -> RunPresentationState.CANCELLED
+        // `interrupted` is a pinned terminal Run status: the Gateway restarted before the run
+        // settled, so the run did not complete and is never retried automatically.
+        "cancelled", "canceled", "interrupted" -> RunPresentationState.CANCELLED
         else -> RunPresentationState.UNCERTAIN
     }
 
@@ -115,11 +117,12 @@ object RunEventStateTransition {
             RunEventType.SUCCEEDED -> RunPresentationState.SUCCEEDED
             RunEventType.FAILED -> RunPresentationState.FAILED
             RunEventType.INTERRUPTED -> RunPresentationState.UNCERTAIN
+            RunEventType.CANCELLED -> RunPresentationState.CANCELLED
             RunEventType.COMPLETED ->
                 when (status.trim().lowercase(Locale.ROOT)) {
                     "", "completed", "complete", "succeeded", "success" -> RunPresentationState.SUCCEEDED
                     "failed", "failure", "error" -> RunPresentationState.FAILED
-                    "cancelled", "canceled" -> RunPresentationState.CANCELLED
+                    "cancelled", "canceled", "interrupted" -> RunPresentationState.CANCELLED
                     else -> RunPresentationState.UNCERTAIN
                 }
         }

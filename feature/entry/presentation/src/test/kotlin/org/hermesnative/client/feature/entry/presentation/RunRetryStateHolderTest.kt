@@ -7,21 +7,32 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
+import org.hermesnative.client.feature.entry.data.DefaultRunSubmissionUncertaintyStore
 import org.hermesnative.client.feature.entry.data.InMemoryGatewayConnectionDataSource
+import org.hermesnative.client.feature.entry.data.InMemoryRunRecoveryRegistry
+import org.hermesnative.client.feature.entry.data.RunSubmissionUncertaintyStorage
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
+import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunEvent
 import org.hermesnative.client.feature.entry.domain.RunEventObservation
+import org.hermesnative.client.feature.entry.domain.RunEventType
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
+import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
+import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintySnapshot
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyStore
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -307,6 +318,255 @@ class RunRetryStateHolderTest {
     }
 
     @Test
+    fun retry_is_available_for_a_locally_known_failed_run_when_pinned_history_has_no_run_linkage() {
+        val session = session("session-1")
+        val failedRunId = RunId("run-failed")
+        val retryRunId = RunId("run-retried")
+        val gateway =
+            FakeGateway(
+                sessions = listOf(session),
+                runStatuses = mapOf(failedRunId to Run(failedRunId, session.id, "failed")),
+            ).apply {
+                enqueueRun(Run(failedRunId, session.id, "failed"))
+                enqueueRun(Run(retryRunId, session.id, "running"))
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway, session.id)
+            // Pin-faithful history: no message carries Run linkage, so only the
+            // client's own record of the Run and its original input can expose
+            // the retry.
+            gateway.setHistory(
+                history(
+                    session.id,
+                    GatewayHistoryMessage(id = "message-failed", role = null, content = null),
+                ),
+            )
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Original request"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == failedRunId &&
+                    opened.latestRunState == RunPresentationState.FAILED
+            }
+
+            val settled = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertTrue(settled.latestRunRetryAvailable)
+            assertTrue(settled.messages.none { message -> message.retryAvailable })
+
+            holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
+            awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == retryRunId }
+
+            assertEquals(
+                listOf(session.id to "Original request", session.id to "Original request"),
+                gateway.runRequests,
+            )
+            val retried = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertFalse(retried.latestRunRetryAvailable)
+
+            // A duplicate tap while the retry Run is active must not create another Run.
+            holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
+            assertEquals(2, gateway.runRequests.size)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun retry_after_an_active_run_fails_through_sse_and_reconciles_with_pinned_history_creates_exactly_one_new_run() {
+        val session = session("session-1")
+        val failedRunId = RunId("run-retry-1")
+        val retryRunId = RunId("run-retry-2")
+        val gateway =
+            FakeGateway(
+                sessions = listOf(session),
+                runStatuses =
+                    mapOf(
+                        failedRunId to Run(failedRunId, session.id, "failed"),
+                        retryRunId to Run(retryRunId, session.id, "completed"),
+                    ),
+            ).apply {
+                // The admission starts the Run active; the pinned Run stream then reports
+                // the failure with no status field (`run.failed` carries only the event
+                // type and the Run identity), and the authoritative status read settles it.
+                enqueueRun(Run(failedRunId, session.id, "started"))
+                // The pinned frame carries no status field; the wire parser supplies the
+                // terminal default (`run.failed` -> "failed", `run.completed` -> "succeeded").
+                enqueueObservation(
+                    failedRunId,
+                    RunEvent(type = RunEventType.FAILED, runId = failedRunId, status = "failed"),
+                )
+                enqueueRun(Run(retryRunId, session.id, "started"))
+                enqueueObservation(
+                    retryRunId,
+                    RunEvent(type = RunEventType.COMPLETED, runId = retryRunId, status = "succeeded"),
+                )
+            }
+        val holder = holder(gateway)
+
+        try {
+            open(holder, gateway, session.id)
+            // Pin-faithful terminal history: the message carries no Run linkage, so the
+            // retry must come from the client's own record of the Run and its input.
+            gateway.setHistory(
+                history(
+                    session.id,
+                    GatewayHistoryMessage(
+                        id = "message-retry-failed",
+                        role = "assistant",
+                        content = "Stable retry failure",
+                    ),
+                ),
+            )
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Retry this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == failedRunId &&
+                    opened.latestRunState == RunPresentationState.FAILED &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress
+            }
+
+            val settled = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertTrue(settled.latestRunRetryAvailable)
+            assertEquals(listOf(session.id to "Retry this"), gateway.runRequests)
+
+            holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == retryRunId && opened.latestRunState == RunPresentationState.SUCCEEDED
+            }
+
+            assertEquals(
+                listOf(session.id to "Retry this", session.id to "Retry this"),
+                gateway.runRequests,
+            )
+            val retried = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertFalse(retried.hasUnresolvedSubmission)
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun retry_after_sse_failure_with_the_persistent_submission_store_and_recovery_registry_creates_exactly_one_new_run() {
+        val session = session("session-1")
+        val failedRunId = RunId("run-retry-1")
+        val retryRunId = RunId("run-retry-2")
+        val gateway =
+            FakeGateway(
+                sessions = listOf(session),
+                runStatuses =
+                    mapOf(
+                        failedRunId to Run(failedRunId, session.id, "failed"),
+                        retryRunId to Run(retryRunId, session.id, "completed"),
+                    ),
+            ).apply {
+                enqueueRun(Run(failedRunId, session.id, "started"))
+                // The pinned frame carries no status field; the wire parser supplies the
+                // terminal default (`run.failed` -> "failed", `run.completed` -> "succeeded").
+                enqueueObservation(
+                    failedRunId,
+                    RunEvent(type = RunEventType.FAILED, runId = failedRunId, status = "failed"),
+                )
+                enqueueRun(Run(retryRunId, session.id, "started"))
+                enqueueObservation(
+                    retryRunId,
+                    RunEvent(type = RunEventType.COMPLETED, runId = retryRunId, status = "succeeded"),
+                )
+            }
+        val registry = InMemoryRunRecoveryRegistry()
+        val holder =
+            holder(
+                gateway,
+                dispatcher = Dispatchers.Default,
+                recoveryRegistry = registry,
+                uncertaintyStore = DefaultRunSubmissionUncertaintyStore(InMemoryUncertaintyStorage()),
+                persistRunRecoveryEntry = { _, entry -> registry.save(entry) },
+                removeRunRecoveryEntry = { _, entry -> registry.remove(entry) },
+            )
+
+        try {
+            open(holder, gateway, session.id)
+            gateway.setHistory(
+                history(
+                    session.id,
+                    GatewayHistoryMessage(
+                        id = "message-retry-failed",
+                        role = "assistant",
+                        content = "Stable retry failure",
+                    ),
+                ),
+            )
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Retry this"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == failedRunId &&
+                    opened.latestRunState == RunPresentationState.FAILED &&
+                    !opened.isRefreshing &&
+                    !opened.isReconciliationInProgress
+            }
+
+            val settled = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertTrue(settled.latestRunRetryAvailable)
+
+            holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
+            runBlocking {
+                withTimeoutOrNull(TEST_TIMEOUT_MILLIS) {
+                    holder.uiState.first { it.sessionList?.openedSession?.latestRun?.id == retryRunId }
+                }
+            }
+
+            assertEquals(
+                listOf(session.id to "Retry this", session.id to "Retry this"),
+                gateway.runRequests,
+            )
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
+    fun retry_is_not_available_for_a_recovered_failed_run_without_the_original_input() {
+        val session = session("session-1")
+        val failedRunId = RunId("run-failed")
+        val gateway =
+            FakeGateway(
+                sessions = listOf(session),
+                histories = mapOf(session.id to history(session.id)),
+                runStatuses = mapOf(failedRunId to Run(failedRunId, session.id, "failed")),
+            )
+        val recoveryRegistry = InMemoryRunRecoveryRegistry(listOf(RunRecoveryEntry(session.id, failedRunId)))
+        val holder = holder(gateway, recoveryRegistry = recoveryRegistry)
+
+        try {
+            open(holder, gateway, session.id)
+            awaitState(holder) {
+                val opened = it.sessionList?.openedSession
+                opened?.latestRun?.id == failedRunId &&
+                    opened.latestRunState == RunPresentationState.FAILED
+            }
+
+            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+            assertFalse(opened.latestRunRetryAvailable)
+            assertTrue(opened.messages.none { message -> message.retryAvailable })
+
+            holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
+
+            assertTrue(gateway.runRequests.isEmpty())
+            assertEquals(
+                failedRunId,
+                requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).latestRun?.id,
+            )
+        } finally {
+            holder.close()
+        }
+    }
+
+    @Test
     fun late_inflight_response_does_not_repopulate_submitted_inputs_after_connection_removal() {
         val session = session("session-1")
         val runId = RunId("run-shared")
@@ -400,20 +660,28 @@ class RunRetryStateHolderTest {
         gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         onRunSubmissionSettled: (() -> Unit)? = null,
+        recoveryRegistry: RunRecoveryRegistry? = null,
+        uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
+        persistRunRecoveryEntry: ((String, RunRecoveryEntry) -> Unit)? = null,
+        removeRunRecoveryEntry: ((String, RunRecoveryEntry) -> Unit)? = null,
     ): EntryStateHolder =
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
                 VerifyGatewayConnection(DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())) { _, _ ->
-                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                 },
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
+            runRecoveryRegistry = recoveryRegistry,
             removeGatewayConnectionUseCase =
                 RemoveGatewayConnection(
                     DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
                 ),
+            runSubmissionUncertaintyStore = uncertaintyStore,
+            persistRunRecoveryEntry = persistRunRecoveryEntry,
+            removeRunRecoveryEntry = removeRunRecoveryEntry,
             onRunSubmissionSettled = onRunSubmissionSettled,
         )
 
@@ -458,13 +726,12 @@ class RunRetryStateHolderTest {
             title = "Session $id",
             preview = "Preview",
             pinned = false,
-            updatedAt = null,
         )
 
     private fun history(
         sessionId: SessionId,
         vararg messages: GatewayHistoryMessage,
-    ): SessionHistory = SessionHistory(sessionId, messages.toList(), null)
+    ): SessionHistory = SessionHistory(sessionId, messages.toList())
 
     private fun userMessage(
         content: String,
@@ -484,6 +751,23 @@ class RunRetryStateHolderTest {
             runResult = result,
         )
 
+    private class InMemoryUncertaintyStorage : RunSubmissionUncertaintyStorage {
+        private val records = mutableMapOf<PendingRunSubmissionKey, RunSubmissionUncertaintySnapshot>()
+
+        override fun read(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? = records[key]
+
+        override fun write(
+            key: PendingRunSubmissionKey,
+            snapshot: RunSubmissionUncertaintySnapshot,
+        ) {
+            records[key] = snapshot
+        }
+
+        override fun remove(key: PendingRunSubmissionKey) {
+            records.remove(key)
+        }
+    }
+
     private class FakeGateway(
         val sessions: List<Session>,
         private val histories: Map<SessionId, SessionHistory> = emptyMap(),
@@ -491,6 +775,7 @@ class RunRetryStateHolderTest {
     ) : SessionGatewayPort, RunGatewayPort {
         private val mutableHistories = histories.toMutableMap()
         private val mutableRunStatuses = runStatuses.toMutableMap()
+        private val runObservations = mutableMapOf<RunId, List<RunEvent>>()
         val runRequests = mutableListOf<Pair<SessionId, String>>()
         private val runResults = ArrayDeque<Result<Run>>()
         val runStarted = CountDownLatch(1)
@@ -504,6 +789,13 @@ class RunRetryStateHolderTest {
 
         fun enqueueRunFailure(error: GatewayException) {
             runResults += Result.failure(error)
+        }
+
+        fun enqueueObservation(
+            runId: RunId,
+            vararg events: RunEvent,
+        ) {
+            runObservations[runId] = events.toList()
         }
 
         fun setRunStatus(run: Run) {
@@ -521,7 +813,7 @@ class RunRetryStateHolderTest {
         override fun openSession(sessionId: SessionId): Session = sessions.single { it.id == sessionId }
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            mutableHistories[sessionId] ?: SessionHistory(sessionId, emptyList(), null)
+            mutableHistories[sessionId] ?: SessionHistory(sessionId, emptyList())
 
         override fun renameSession(
             sessionId: SessionId,
@@ -550,7 +842,7 @@ class RunRetryStateHolderTest {
 
         override fun observeRun(runId: RunId): RunEventObservation =
             object : RunEventObservation {
-                override fun iterator(): Iterator<RunEvent> = emptyList<RunEvent>().iterator()
+                override fun iterator(): Iterator<RunEvent> = runObservations[runId].orEmpty().iterator()
 
                 override fun close() = Unit
             }

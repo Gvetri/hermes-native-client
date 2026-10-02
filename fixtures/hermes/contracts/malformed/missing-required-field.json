@@ -3,7 +3,10 @@
   "response": {
     "status": 200,
     "body": {
-      "next_cursor": null
+      "object": "list",
+      "limit": 20,
+      "offset": 0,
+      "has_more": false
     }
   }
 }

@@ -4,7 +4,6 @@ import org.hermesnative.client.feature.entry.application.LoadSessionList
 import org.hermesnative.client.feature.entry.application.OpenSession
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
-import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.fixture.DeterministicGatewayFixture
@@ -30,7 +29,6 @@ class GatewaySessionFixtureIntegrationTest {
             },
         )
     private val descriptorFile = repositoryRoot.resolve("fixtures/hermes/pinned-fixture.properties")
-    private val requiredCapabilities = PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers
 
     @Test
     fun real_client_lists_ordered_sessions_and_keeps_open_history_isolated() {
@@ -60,13 +58,13 @@ class GatewaySessionFixtureIntegrationTest {
             assertEquals("Pinned A", page.sessions.first().title)
             assertEquals("Pinned A preview", page.sessions.first().preview)
             assertEquals(listOf(true, true, false, false), page.sessions.map { it.pinned })
+            assertNull(page.nextOffset)
             assertEquals(
-                listOf("/v1/capabilities", "/v1/sessions"),
+                listOf("/v1/capabilities", "/api/sessions"),
                 behavior.requests.map { it.path },
             )
             assertTrue(behavior.requests.none { it.method == "POST" })
-            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
-            assertTrue(behavior.requests.none { it.path.count { character -> character == '/' } > 2 })
+            assertTrue(behavior.requests.none { it.path.endsWith("/messages") })
             assertNoCredentials(behavior)
 
             val openedA = OpenSession(client).execute(SessionId(PINNED_A))
@@ -82,30 +80,13 @@ class GatewaySessionFixtureIntegrationTest {
     }
 
     @Test
-    fun real_client_searches_title_and_preview_and_paginates_without_loading_history() {
+    fun real_client_pages_with_server_limit_and_offset_without_loading_history() {
         val behavior =
             behavior(
                 listOf(
-                    session(
-                        id = PINNED_A,
-                        title = "Needle title",
-                        preview = "Pinned preview",
-                        pinned = true,
-                        history = "Needle only appears in history",
-                    ),
-                    session(
-                        id = SERVER_A,
-                        title = "Other title",
-                        preview = "Needle preview",
-                        pinned = false,
-                    ),
-                    session(
-                        id = SERVER_B,
-                        title = "Other title",
-                        preview = "Other preview",
-                        pinned = false,
-                        history = "Needle only appears in history",
-                    ),
+                    session(SERVER_A, "Server A", "Server A preview", pinned = false),
+                    session(SERVER_B, "Server B", "Server B preview", pinned = false),
+                    session(SERVER_C, "Server C", "Server C preview", pinned = false),
                 ),
             ).apply {
                 sessionPageSize = 1
@@ -116,34 +97,22 @@ class GatewaySessionFixtureIntegrationTest {
             behavior.requests.clear()
             client.discoverCapabilities()
 
-            val firstPage = client.listSessions(SessionListRequest(search = "needle"))
-            val secondPage =
-                client.listSessions(
-                    SessionListRequest(
-                        cursor = requireNotNull(firstPage.nextCursor),
-                        search = "needle",
-                    ),
-                )
-            val refreshedPage = client.listSessions(SessionListRequest(search = "needle"))
+            val firstPage = client.listSessions(SessionListRequest(limit = 20))
+            val secondPage = client.listSessions(SessionListRequest(limit = 20, offset = requireNotNull(firstPage.nextOffset)))
 
-            assertEquals(listOf(PINNED_A), firstPage.sessions.map { it.id.value })
-            assertEquals(listOf(SERVER_A), secondPage.sessions.map { it.id.value })
-            assertNull(secondPage.nextCursor)
-            assertTrue(secondPage.sessions.none { it.id.value == SERVER_B })
-            assertEquals(listOf(PINNED_A), refreshedPage.sessions.map { it.id.value })
-            assertEquals("Needle title", firstPage.sessions.single().title)
-            assertEquals("Needle preview", secondPage.sessions.single().preview)
+            assertEquals(listOf(SERVER_A), firstPage.sessions.map { it.id.value })
+            assertEquals(1, firstPage.nextOffset)
+            assertEquals(listOf(SERVER_B), secondPage.sessions.map { it.id.value })
+            assertEquals(2, secondPage.nextOffset)
 
-            val listRequests = behavior.requests.filter { it.path == "/v1/sessions" }
+            val listRequests = behavior.requests.filter { it.path == "/api/sessions" }
             assertEquals(
-                listOf(
-                    "limit=20&search=needle",
-                    "limit=20&cursor=offset%3A1&search=needle",
-                    "limit=20&search=needle",
-                ),
+                listOf("limit=20&offset=0", "limit=20&offset=1"),
                 listRequests.map { it.query },
             )
-            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
+            // The pinned Session list has no cursor or search parameters.
+            assertTrue(listRequests.none { it.query.orEmpty().contains("cursor") || it.query.orEmpty().contains("search") })
+            assertTrue(behavior.requests.none { it.path.endsWith("/messages") })
             assertTrue(behavior.requests.none { it.method == "POST" })
             assertNoCredentials(behavior)
         }
@@ -167,19 +136,20 @@ class GatewaySessionFixtureIntegrationTest {
             val client = client(context)
             client.discoverCapabilities()
 
-            val firstPage = client.listSessions()
+            val firstPage = client.listSessions(SessionListRequest(limit = 20))
             val secondPage =
                 client.listSessions(
-                    SessionListRequest(cursor = requireNotNull(firstPage.nextCursor)),
+                    SessionListRequest(limit = 20, offset = requireNotNull(firstPage.nextOffset)),
                 )
             val pagedSessions = firstPage.sessions + secondPage.sessions
 
             assertEquals(listOf(PINNED_A, SERVER_A), firstPage.sessions.map { it.id.value })
+            assertEquals(2, firstPage.nextOffset)
             assertEquals(listOf(SERVER_A, SERVER_B), secondPage.sessions.map { it.id.value })
             assertEquals(listOf(PINNED_A, SERVER_A, SERVER_A, SERVER_B), pagedSessions.map { it.id.value })
             assertEquals("Server A refreshed", secondPage.sessions.first().title)
             assertEquals(4, pagedSessions.size)
-            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
+            assertTrue(behavior.requests.none { it.path.endsWith("/messages") })
             assertTrue(behavior.requests.none { it.method == "POST" })
             assertNoCredentials(behavior)
         }
@@ -206,9 +176,9 @@ class GatewaySessionFixtureIntegrationTest {
 
             assertEquals(GatewayErrorCategory.GATEWAY_REQUEST_FAILED, failure.category)
             assertEquals(initial, recovered)
-            assertEquals(3, behavior.requests.count { it.path == "/v1/sessions" })
+            assertEquals(3, behavior.requests.count { it.path == "/api/sessions" })
             assertTrue(behavior.requests.none { it.method == "POST" })
-            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
+            assertTrue(behavior.requests.none { it.path.endsWith("/messages") })
             assertNoCredentials(behavior)
         }
     }
@@ -236,17 +206,17 @@ class GatewaySessionFixtureIntegrationTest {
             assertEquals(
                 listOf(
                     "GET:/v1/capabilities",
-                    "GET:/v1/sessions",
-                    "PATCH:/v1/sessions/$SERVER_A",
-                    "POST:/v1/sessions/$SERVER_A/pin",
-                    "DELETE:/v1/sessions/$SERVER_A/pin",
-                    "DELETE:/v1/sessions/$SERVER_A",
+                    "GET:/api/sessions",
+                    "PATCH:/api/sessions/$SERVER_A",
+                    "PATCH:/api/sessions/$SERVER_A",
+                    "PATCH:/api/sessions/$SERVER_A",
+                    "DELETE:/api/sessions/$SERVER_A",
                 ),
                 behavior.requests.map { "${it.method}:${it.path}" },
             )
             assertEquals("{\"title\":\"Confirmed title\"}", behavior.requests[2].body)
-            assertEquals(null, behavior.requests[3].body)
-            assertEquals(null, behavior.requests[4].body)
+            assertEquals("{\"pinned\":true}", behavior.requests[3].body)
+            assertEquals("{\"pinned\":false}", behavior.requests[4].body)
             assertEquals(null, behavior.requests[5].body)
             assertNoCredentials(behavior)
         }
@@ -270,12 +240,12 @@ class GatewaySessionFixtureIntegrationTest {
             assertEquals("Updated title", refreshed.sessions.single().title)
             assertEquals("Updated preview", refreshed.sessions.single().preview)
             assertEquals(refreshed, repeated)
-            assertEquals(3, behavior.requests.count { it.path == "/v1/sessions" })
+            assertEquals(3, behavior.requests.count { it.path == "/api/sessions" })
             assertEquals(
-                listOf("limit=20", "limit=20", "limit=20"),
-                behavior.requests.filter { it.path == "/v1/sessions" }.map { it.query },
+                listOf("limit=20&offset=0", "limit=20&offset=0", "limit=20&offset=0"),
+                behavior.requests.filter { it.path == "/api/sessions" }.map { it.query },
             )
-            assertTrue(behavior.requests.all { it.path == "/v1/sessions" })
+            assertTrue(behavior.requests.all { it.path == "/api/sessions" })
             assertTrue(behavior.requests.none { it.method == "POST" })
             assertNoCredentials(behavior)
         }
@@ -323,8 +293,8 @@ class GatewaySessionFixtureIntegrationTest {
                 }
 
             assertEquals(GatewayErrorCategory.GATEWAY_REQUEST_FAILED, error.category)
-            assertEquals(listOf("/v1/sessions/$SERVER_A"), behavior.requests.map { it.path })
-            assertTrue(behavior.requests.none { it.path.endsWith("/history") })
+            assertEquals(listOf("/api/sessions/$SERVER_A"), behavior.requests.map { it.path })
+            assertTrue(behavior.requests.none { it.path.endsWith("/messages") })
             assertTrue(behavior.requests.none { it.method == "POST" })
             assertNoCredentials(behavior)
         }
@@ -344,7 +314,7 @@ class GatewaySessionFixtureIntegrationTest {
             val created = client.createSession(null)
             assertEquals(CREATED_SESSION, created.id.value)
             assertNull(created.title)
-            assertEquals(1, behavior.requests.count { it.method == "POST" && it.path == "/v1/sessions" })
+            assertEquals(1, behavior.requests.count { it.method == "POST" && it.path == "/api/sessions" })
 
             val opened = OpenSession(client).execute(created.id)
             assertEquals(CREATED_SESSION, opened.session.id.value)
@@ -359,7 +329,7 @@ class GatewaySessionFixtureIntegrationTest {
                     failure
                 }
             assertEquals(GatewayErrorCategory.GATEWAY_REQUEST_FAILED, refreshFailure.category)
-            assertEquals(1, behavior.requests.count { it.method == "POST" && it.path == "/v1/sessions" })
+            assertEquals(1, behavior.requests.count { it.method == "POST" && it.path == "/api/sessions" })
             assertNoCredentials(behavior)
         }
     }
@@ -377,7 +347,6 @@ class GatewaySessionFixtureIntegrationTest {
 
     private fun behavior(sessions: List<SyntheticGatewaySession>): SyntheticGatewayBehavior =
         SyntheticGatewayBehavior(
-            capabilities = requiredCapabilities + "client-manifest",
             initialSessions = sessions,
         )
 
@@ -402,7 +371,6 @@ class GatewaySessionFixtureIntegrationTest {
             title = title,
             preview = preview,
             pinned = pinned,
-            updatedAt = "2026-09-08T20:00:00Z",
             history =
                 history?.let {
                     listOf(
@@ -420,6 +388,7 @@ class GatewaySessionFixtureIntegrationTest {
         const val PINNED_B = "22222222-2222-4222-8222-222222222222"
         const val SERVER_A = "33333333-3333-4333-8333-333333333333"
         const val SERVER_B = "44444444-4444-4444-8444-444444444444"
+        const val SERVER_C = "66666666-6666-4666-8666-666666666666"
         const val CREATED_SESSION = "55555555-5555-4555-8555-555555555555"
     }
 }

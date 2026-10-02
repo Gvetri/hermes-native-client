@@ -4,18 +4,15 @@
   "port": 18443,
   "tls": true,
   "capabilities": [
-    "client-manifest",
-    "session.list",
-    "session.create",
-    "session.open",
-    "session.history",
-    "session.rename",
-    "session.delete",
-    "session.pin",
-    "session.unpin",
-    "run.create",
-    "run.status",
-    "run.sse"
+    "sessions",
+    "session_create",
+    "session",
+    "session_update",
+    "session_delete",
+    "session_messages",
+    "runs",
+    "run_status",
+    "run_events"
   ],
   "fail_next_session_list": true,
   "sessions": [

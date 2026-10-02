@@ -69,6 +69,29 @@ workflow revision, and unsigned APK checksum in the job outputs. Approve only th
 expected signing job. This approval is required even when a Nightly caller starts
 preparation automatically. Do not dispatch a release to work around failed tests.
 
+## Stable Public Beta release prerequisite
+
+Signing approval is not Stable Public Beta publication approval. Before a human
+approves publication of a Stable Public Beta, run the
+[local live smoke gate](local-live-smoke.md) on the **exact signed candidate APK**.
+Require successful, complete Live Smoke Evidence bound to that APK's SHA-256 and
+the repository's audited immutable Hermes revision. A smoke run on an unsigned,
+rebuilt, differently signed, or earlier APK is not sufficient.
+
+Keep the live-provider gate outside GitHub Actions, pull-request workflows, and
+Nightly workflows. Do not add provider credentials to the signing environment.
+An unavailable provider, incompatible Gateway, failed turn, failed teardown, or
+missing evidence blocks Stable Public Beta publication; it is not permission to
+substitute deterministic fixture results or bypass human approval.
+
+At publication, compare the attached APK's downloaded bytes with the successful
+smoke evidence, and retain the redacted evidence and video hash/metadata in the
+release record. Never attach provider credentials or video to a public release.
+Retained video must be encrypted, restricted to release maintainers, and deleted
+within 30 days under the local smoke retention policy. The redacted metadata can
+remain after video deletion. The existing Nightly publisher does not publish
+Stable Public Beta releases and remains unchanged by this requirement.
+
 ## Stable identity and custody
 
 Use one RSA-4096 release key and keep it stable across APK upgrades. Its PKCS#12

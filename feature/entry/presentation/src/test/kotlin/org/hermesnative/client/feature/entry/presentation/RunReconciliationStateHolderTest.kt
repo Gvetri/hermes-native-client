@@ -59,7 +59,6 @@ class RunReconciliationStateHolderTest {
                 SessionHistory(
                     session.id,
                     listOf(GatewayHistoryMessage("result", "assistant", "Done", latestRun.id, "succeeded")),
-                    null,
                 ),
             )
         val containsEntered = CountDownLatch(1)
@@ -127,11 +126,10 @@ class RunReconciliationStateHolderTest {
                     GatewayHistoryMessage("user-1", "user", "Run this"),
                     GatewayHistoryMessage("assistant-1", "assistant", "Confirmed result", run.id, "succeeded"),
                 ),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(authoritativeHistory)
                 statuses.add(run.copy(status = "succeeded"))
                 runs.add(run)
@@ -172,11 +170,10 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("cancelled", "assistant", "Cancelled", run.id, "cancelled")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(authoritativeHistory)
                 statuses.add(run.copy(status = "cancelled"))
                 runs.add(run)
@@ -211,11 +208,10 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(history)
                 statuses.add(terminalRun)
                 runs.add(run)
@@ -263,7 +259,6 @@ class RunReconciliationStateHolderTest {
                     SessionHistory(
                         session.id,
                         listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                        null,
                     ),
                 )
                 statuses.add(run)
@@ -320,7 +315,6 @@ class RunReconciliationStateHolderTest {
                     SessionHistory(
                         session.id,
                         listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                        null,
                     ),
                 )
                 statuses.add(run)
@@ -368,11 +362,10 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(history)
                 statuses.add(terminalRun)
                 runs.add(run)
@@ -424,7 +417,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val observation =
             BlockingObservation(
@@ -435,7 +427,7 @@ class RunReconciliationStateHolderTest {
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 runs.add(run)
                 observations.add(observation)
                 histories.add(terminalHistory)
@@ -483,12 +475,11 @@ class RunReconciliationStateHolderTest {
                     GatewayHistoryMessage("user", "user", "Keep this draft", realRun.id, "succeeded"),
                     GatewayHistoryMessage("assistant", "assistant", "Delivered", realRun.id, "succeeded"),
                 ),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(realHistory)
                 histories.add(realHistory)
                 statuses.add(realRun)
@@ -540,7 +531,6 @@ class RunReconciliationStateHolderTest {
                     GatewayHistoryMessage("baseline-user", "user", "Keep this draft", baselineRun.id, "succeeded"),
                     GatewayHistoryMessage("baseline-assistant", "assistant", "Old result", baselineRun.id, "succeeded"),
                 ),
-                null,
             )
         val laterHistory =
             SessionHistory(
@@ -550,13 +540,12 @@ class RunReconciliationStateHolderTest {
                     GatewayHistoryMessage("baseline-assistant", "assistant", "Old result", baselineRun.id, "succeeded"),
                     GatewayHistoryMessage("unrelated-assistant", "assistant", "Unrelated result", unrelatedRun.id, "succeeded"),
                 ),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
                 histories.add(baselineHistory)
                 histories.add(baselineHistory)
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(laterHistory)
                 statuses.add(baselineRun)
                 blockRunCreation = true
@@ -606,12 +595,11 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", terminalRun.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(terminalHistory)
                 statuses.add(terminalRun)
                 runs.add(terminalRun)
@@ -661,13 +649,12 @@ class RunReconciliationStateHolderTest {
                     GatewayHistoryMessage("user", "user", "Keep this draft", correlatedRun.id, "running"),
                     GatewayHistoryMessage("unrelated", "assistant", "Other work", unrelatedRun.id, "running"),
                 ),
-                null,
             )
         val correlatedObservation = BlockingObservation()
         val unrelatedObservation = BlockingObservation()
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(history)
                 histories.add(history)
                 statuses.add(correlatedRun)
@@ -724,11 +711,10 @@ class RunReconciliationStateHolderTest {
                     GatewayHistoryMessage("submitted", "assistant", "Submitted", submittedRun.id, "succeeded"),
                     GatewayHistoryMessage("later", "assistant", "Later failure", laterRun.id, "failed"),
                 ),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(history)
                 statuses.add(submittedRun)
                 statuses.add(laterRun)
@@ -767,7 +753,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("stale", "assistant", "Stale result", run.id, "succeeded")),
-                null,
             )
         val observation =
             BlockingObservation(
@@ -778,7 +763,7 @@ class RunReconciliationStateHolderTest {
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(staleTerminalHistory)
                 histories.add(staleTerminalHistory)
                 statuses.add(run)
@@ -808,14 +793,13 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun terminal_status_with_only_a_stale_user_message_preserves_the_streamed_response() {
+    fun terminal_status_settles_the_reopened_outcome_and_applies_authoritative_history() {
         val session = session()
         val run = Run(RunId("run-stale-terminal-history"), session.id, "starting")
         val staleHistory =
             SessionHistory(
                 session.id,
-                listOf(GatewayHistoryMessage("stale-user", "user", "Run this", run.id)),
-                null,
+                listOf(GatewayHistoryMessage("stale-user", "user", "Run this")),
             )
         val observation =
             BlockingObservation(
@@ -826,7 +810,7 @@ class RunReconciliationStateHolderTest {
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(staleHistory)
                 histories.add(staleHistory)
                 statuses.add(run.copy(status = "succeeded"))
@@ -845,8 +829,9 @@ class RunReconciliationStateHolderTest {
             awaitState(holder) {
                 val opened = it.sessionList?.openedSession
                 opened?.isRefreshing == false &&
-                    opened.latestRunState == RunPresentationState.UNCERTAIN &&
-                    opened.activeResponse?.content == "Partial"
+                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened.messages.map { message -> message.id } == listOf("stale-user") &&
+                    opened.activeResponse == null
             }
         } finally {
             observation.release.countDown()
@@ -862,11 +847,10 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Created result", terminalRun.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(history)
                 statuses.add(terminalRun)
                 runs.add(terminalRun)
@@ -898,11 +882,10 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("other", "assistant", "Other result", otherRun.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(otherHistory)
                 statuses.add(otherRun)
                 blockRunCreation = true
@@ -940,9 +923,9 @@ class RunReconciliationStateHolderTest {
         val session = session()
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 blockRunCreation = true
             }
         val holder = holder(gateway, Dispatchers.Default, sendTimeoutMillis = 50L)
@@ -980,8 +963,8 @@ class RunReconciliationStateHolderTest {
         val run = Run(RunId("run-1"), session.id, "starting")
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 statuses.add(run.copy(status = "running"))
                 runs.add(run)
                 observation =
@@ -1026,11 +1009,10 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("active", "assistant", "Partial", run.id, "running")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(activeHistory)
                 histories.add(activeHistory)
                 runs.add(run)
@@ -1071,13 +1053,12 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed after refresh", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(authoritativeHistory)
                 statuses.add(run.copy(status = "running"))
                 statuses.add(run.copy(status = "succeeded"))
@@ -1122,12 +1103,11 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed", firstRun.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(authoritativeHistory)
                 statuses.add(firstRun.copy(status = "succeeded"))
                 runs.add(firstRun)
@@ -1175,12 +1155,11 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed", firstRun.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(authoritativeHistory)
                 statuses.add(firstRun.copy(status = "succeeded"))
                 runs.add(firstRun)
@@ -1231,12 +1210,11 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed", firstRun.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(authoritativeHistory)
                 statuses.add(firstRun.copy(status = "succeeded"))
                 runs.add(firstRun)
@@ -1283,7 +1261,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("message-1", "user", "Run this", run.id, "running")),
-                null,
             )
         val firstObservation = BlockingObservation()
         val secondObservation = BlockingObservation()
@@ -1340,7 +1317,6 @@ class RunReconciliationStateHolderTest {
         ) = SessionHistory(
             session.id,
             listOf(GatewayHistoryMessage("message-1", "assistant", content, run.id, status)),
-            null,
         )
         val firstObservation = BlockingObservation()
         val secondObservation = BlockingObservation()
@@ -1400,22 +1376,15 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun returning_after_terminal_event_keeps_reopened_outcome_uncertain_until_history_confirms_it() {
+    fun returning_after_terminal_event_resolves_the_reopened_outcome_from_the_authoritative_status() {
         val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")
-        val otherRun = Run(RunId("other-run"), session.id, "succeeded")
-        val otherHistory =
-            SessionHistory(
-                session.id,
-                listOf(GatewayHistoryMessage("other", "assistant", "Other result", otherRun.id, "succeeded")),
-                null,
-            )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(otherHistory)
-                histories.add(otherHistory)
-                histories.add(otherHistory)
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 statuses.add(run.copy(status = "succeeded"))
                 statuses.add(run.copy(status = "succeeded"))
                 runs.add(run)
@@ -1436,6 +1405,11 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
             awaitState(holder) { it.sessionList?.openedSession == null }
 
+            // Re-arm the status barrier so the reopened outcome stays unconfirmed
+            // until the test releases it. The unconfirmed window is the state under
+            // test, and without the barrier the reconciliation can resolve before
+            // the assertion ever observes it.
+            gateway.blockNextStatus = true
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitState(holder) {
                 val opened = it.sessionList?.openedSession
@@ -1449,7 +1423,7 @@ class RunReconciliationStateHolderTest {
             gateway.releaseStatus.countDown()
             assertTrue(gateway.statusFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             awaitState(holder) {
-                it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+                it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED
             }
         } finally {
             gateway.releaseStatus.countDown()
@@ -1475,11 +1449,10 @@ class RunReconciliationStateHolderTest {
                         "2026-09-08T21:00:00Z",
                     ),
                 ),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(otherHistory)
                 histories.add(otherHistory)
                 histories.add(otherHistory)
@@ -1575,11 +1548,10 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("terminal", "assistant", "Succeeded", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(history)
                 statuses.add(run)
                 failRunCreation = true
@@ -1621,11 +1593,10 @@ class RunReconciliationStateHolderTest {
                     GatewayHistoryMessage("terminal", "assistant", "Succeeded", terminalRun.id, "succeeded"),
                     GatewayHistoryMessage("active", "assistant", "Running", activeRun.id, "running"),
                 ),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(history)
                 statuses.add(terminalRun)
                 statuses.add(activeRun)
@@ -1679,17 +1650,15 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("active", "assistant", "Running", activeRun.id, "running")),
-                null,
             )
         val terminalHistory =
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("terminal", "assistant", "Succeeded", terminalRun.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(activeHistory)
                 histories.add(terminalHistory)
                 histories.add(terminalHistory)
@@ -1732,46 +1701,21 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
-    fun terminal_run_without_matching_history_closes_observer_and_keeps_send_disabled() {
+    fun authoritative_terminal_status_closes_the_live_observer_and_settles_the_submission() {
         val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")
-        val otherRun = Run(RunId("run-2"), session.id, "running")
-        val otherTerminalRun = otherRun.copy(status = "succeeded")
         val observation = BlockingObservation()
-        val otherActiveHistory =
-            SessionHistory(
-                session.id,
-                listOf(GatewayHistoryMessage("other-active", "assistant", "Other running", otherRun.id, "running")),
-                null,
-            )
-        val otherTerminalHistory =
-            SessionHistory(
-                session.id,
-                listOf(GatewayHistoryMessage("other-terminal", "assistant", "Other result", otherTerminalRun.id, "succeeded")),
-                null,
-            )
-        val otherObservation = BlockingObservation()
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(SessionHistory(session.id, emptyList(), null))
-                histories.add(otherActiveHistory)
-                histories.add(otherActiveHistory)
-                histories.add(otherTerminalHistory)
-                histories.add(otherTerminalHistory)
-                histories.add(otherTerminalHistory)
-                histories.add(otherTerminalHistory)
-                histories.add(otherTerminalHistory)
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
+                histories.add(SessionHistory(session.id, emptyList()))
                 statuses.add(run.copy(status = "cancelled"))
                 statuses.add(run.copy(status = "cancelled"))
-                statuses.add(otherRun)
-                statuses.add(otherTerminalRun)
                 statuses.add(run.copy(status = "cancelled"))
-                statuses.add(otherTerminalRun)
                 runs.add(run)
                 observations.add(observation)
-                observations.add(otherObservation)
             }
         val holder = holder(gateway, Dispatchers.Default)
 
@@ -1783,45 +1727,16 @@ class RunReconciliationStateHolderTest {
 
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             awaitState(holder) {
-                it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN
+                val opened = it.sessionList?.openedSession
+                opened?.isRefreshing == false &&
+                    opened.latestRunState == RunPresentationState.CANCELLED &&
+                    opened.hasUnresolvedSubmission == false
             }
             assertTrue(observation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
-            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
-            awaitState(holder) { it.sessionList?.openedSession == null }
-            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
-            awaitState(holder) {
-                it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
-                    it.sessionList?.openedSession?.latestRun?.id == run.id &&
-                    gateway.statusRequests.size == 3
-            }
-            assertTrue(otherObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-
-            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-            awaitState(holder) {
-                it.sessionList?.openedSession?.isRefreshing == false &&
-                    it.sessionList?.openedSession?.latestRunState == RunPresentationState.UNCERTAIN &&
-                    it.sessionList?.openedSession?.latestRun?.id == run.id &&
-                    gateway.statusRequests.size == 5
-            }
-            assertTrue(otherObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-
-            assertEquals(9, gateway.historyRequests)
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not send"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-            awaitCondition { gateway.historyRequests == 10 }
-            awaitState(holder) {
-                it.sessionList?.openedSession?.isReconciliationInProgress == false &&
-                    it.sessionList?.openedSession?.hasUnresolvedSubmission == true
-            }
             assertEquals(1, gateway.runRequests.size)
-            assertEquals(6, gateway.statusRequests.size)
-            assertFalse(requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).isSending)
         } finally {
             observation.release.countDown()
-            otherObservation.release.countDown()
             holder.close()
         }
     }
@@ -1867,7 +1782,7 @@ class RunReconciliationStateHolderTest {
             FakeGateway(session).apply {
                 failStatusRunIds += failedEntry.runId
                 statuses.add(successfulRun)
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 histories.add(
                     SessionHistory(
                         session.id,
@@ -1880,7 +1795,6 @@ class RunReconciliationStateHolderTest {
                                 "succeeded",
                             ),
                         ),
-                        null,
                     ),
                 )
             }
@@ -1913,7 +1827,7 @@ class RunReconciliationStateHolderTest {
             FakeGateway(session).apply {
                 runs.add(run)
                 statuses.add(run)
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
             }
         val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = recoveryRegistry)
 
@@ -1963,7 +1877,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
@@ -2008,7 +1921,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
@@ -2055,7 +1967,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
@@ -2091,7 +2002,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val observation = BlockingObservation()
         val gateway =
@@ -2132,7 +2042,6 @@ class RunReconciliationStateHolderTest {
             SessionHistory(
                 session.id,
                 listOf(GatewayHistoryMessage("result", "assistant", "Confirmed", run.id, "succeeded")),
-                null,
             )
         val gateway =
             FakeGateway(session).apply {
@@ -2162,7 +2071,7 @@ class RunReconciliationStateHolderTest {
         val session = session()
         val gateway =
             FakeGateway(session).apply {
-                histories.add(SessionHistory(session.id, emptyList(), null))
+                histories.add(SessionHistory(session.id, emptyList()))
                 failHistoryRequest = 2
                 blockRunCreation = true
             }
@@ -2258,7 +2167,7 @@ class RunReconciliationStateHolderTest {
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
                 VerifyGatewayConnection(repository) { _, _ ->
-                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                 },
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
@@ -2324,7 +2233,6 @@ class RunReconciliationStateHolderTest {
             title = "Session",
             preview = "Preview",
             pinned = false,
-            updatedAt = null,
         )
 
     private fun invokePersistedRecoveryEntry(
@@ -2393,7 +2301,7 @@ class RunReconciliationStateHolderTest {
                     historyRequestCount.incrementAndGet()
                     val history =
                         if (histories.isEmpty()) {
-                            SessionHistory(sessionId, emptyList(), null)
+                            SessionHistory(sessionId, emptyList())
                         } else {
                             histories.removeFirst()
                         }

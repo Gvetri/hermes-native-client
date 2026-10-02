@@ -11,24 +11,23 @@ data class AuthoritativeRunReconciliation(
     val decision: RunReconciliationDecision,
 )
 
-fun decideRunReconciliation(
-    run: Run,
-    history: SessionHistory,
-): RunReconciliationDecision =
-    if (!run.isActive() && history.containsTerminalRun(run)) {
-        RunReconciliationDecision.CONFIRMED
-    } else {
+/**
+ * Decides whether an authoritative Run observation settles a client-tracked Run.
+ *
+ * The pinned Gateway's Run resource (`GET /v1/runs/{run_id}`) is the only
+ * authoritative source of Run state: its Session message payloads never link
+ * messages to Runs (`api_server._message_response` whitelists no run fields),
+ * so a terminal Run status is itself the confirmation. Active Runs remain
+ * uncertain until a terminal status is observed; the Session history fetched
+ * alongside the status is applied for display but cannot corroborate Run state
+ * on this contract.
+ */
+fun decideRunReconciliation(run: Run): RunReconciliationDecision =
+    if (run.isActive()) {
         RunReconciliationDecision.UNCERTAIN
+    } else {
+        RunReconciliationDecision.CONFIRMED
     }
-
-fun SessionHistory.containsTerminalRun(run: Run): Boolean {
-    val expectedState = run.toRunPresentationState()
-    return expectedState.isTerminal() &&
-        messages.any { message ->
-            message.runId == run.id &&
-                message.runStatus?.toRunPresentationState() == expectedState
-        }
-}
 
 fun SessionHistory.runs(): List<Run> {
     val runsById = linkedMapOf<RunId, Run>()

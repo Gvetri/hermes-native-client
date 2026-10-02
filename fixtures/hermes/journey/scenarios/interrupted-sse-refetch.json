@@ -4,18 +4,15 @@
   "port": 18443,
   "tls": true,
   "capabilities": [
-    "client-manifest",
-    "session.list",
-    "session.create",
-    "session.open",
-    "session.history",
-    "session.rename",
-    "session.delete",
-    "session.pin",
-    "session.unpin",
-    "run.create",
-    "run.status",
-    "run.sse"
+    "sessions",
+    "session_create",
+    "session",
+    "session_update",
+    "session_delete",
+    "session_messages",
+    "runs",
+    "run_status",
+    "run_events"
   ],
   "sessions": [
     {
@@ -32,19 +29,11 @@
       "create_status": "running",
       "observation": [
         {
-          "type": "run.started",
-          "status": "starting",
-          "id": "i1"
-        },
-        {
-          "type": "run.running",
-          "status": "running",
-          "id": "i2"
+          "type": "tool.started"
         },
         {
           "type": "message.delta",
-          "delta": "Interrupted partial",
-          "id": "i3"
+          "delta": "Interrupted partial"
         }
       ],
       "final_status": "failed",
@@ -52,12 +41,10 @@
         {
           "id": "message-interrupted",
           "role": "assistant",
-          "content": "Refetched failure",
-          "run_id": "interrupted-run",
-          "run_status": "failed"
+          "content": "Refetched failure"
         }
       ],
-      "interrupt_after_events": 3
+      "interrupt_after_events": 2
     }
   ]
 }

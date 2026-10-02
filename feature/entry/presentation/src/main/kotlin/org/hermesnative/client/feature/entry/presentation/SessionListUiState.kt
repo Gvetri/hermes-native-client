@@ -49,7 +49,6 @@ data class SessionItemUiState(
     val title: String,
     val preview: String?,
     val pinned: Boolean,
-    val updatedAt: String? = null,
 )
 
 data class SessionMessageUiState(
@@ -104,6 +103,7 @@ data class OpenSessionUiState(
     val sendErrorCategory: MessageSendErrorCategory? = null,
     val hasUnresolvedSubmission: Boolean = false,
     val latestRunState: RunPresentationState? = null,
+    val latestRunRetryAvailable: Boolean = false,
     val activeResponse: SessionMessageUiState? = null,
     val isReconciliationInProgress: Boolean = false,
 )
@@ -144,13 +144,28 @@ data class SessionListUiState(
     val openedSession: OpenSessionUiState? = null,
     val createSession: SessionCreationUiState? = null,
     val searchQuery: String = "",
-    val nextCursor: String? = null,
+    val nextOffset: Int? = null,
     val isLoadingMore: Boolean = false,
     val isSearching: Boolean = false,
     val sessionMutations: Map<SessionId, SessionMutationUiState> = emptyMap(),
 ) {
     val hasPendingMutation: Boolean
         get() = sessionMutations.values.any { it.pendingAction != null }
+
+    /**
+     * Search covers only server-provided Session titles and previews that this client
+     * already loaded; the pinned `GET /api/sessions` has no general search parameter
+     * (its `title` filter is an exact-title lookup) and transcripts are never fetched.
+     */
+    val visibleSessions: List<SessionItemUiState>
+        get() {
+            val query = searchQuery.trim()
+            if (query.isEmpty()) return sessions
+            return sessions.filter { session ->
+                session.title.contains(query, ignoreCase = true) ||
+                    session.preview?.contains(query, ignoreCase = true) == true
+            }
+        }
 }
 
 internal val SessionListUiState.hasActiveRequest: Boolean
@@ -176,7 +191,6 @@ internal fun Session.toSessionItemUiState(): SessionItemUiState =
         title = title?.takeIf(String::isNotBlank) ?: "Untitled Session",
         preview = preview?.takeIf(String::isNotBlank),
         pinned = pinned,
-        updatedAt = updatedAt,
     )
 
 internal fun GatewayHistoryMessage.toSessionMessageUiState(retryInput: String? = null): SessionMessageUiState {
