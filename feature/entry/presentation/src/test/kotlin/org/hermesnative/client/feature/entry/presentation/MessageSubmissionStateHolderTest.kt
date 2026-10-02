@@ -599,7 +599,14 @@ class MessageSubmissionStateHolderTest {
             assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == session.id }
+            // The reopened Session appears before the failed submission's restore lands. Wait for the
+            // restored error category so the assertions read the settled state instead of racing it.
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { opened ->
+                    opened.session.id == session.id &&
+                        opened.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+                } == true
+            }
             val reopened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals("Keep this draft", reopened.composerText)
             assertEquals(MessageSendErrorCategory.GATEWAY_REQUEST_FAILED, reopened.sendErrorCategory)
