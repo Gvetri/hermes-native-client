@@ -573,6 +573,9 @@ class SessionHistoryScreenTest {
             }
         }
 
+        // The transcript opens at its newest content, so an explicit scroll to the start pins
+        // the first pane: the header and the oldest messages fill it, and two timestamps are composed.
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
         composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(2)
         // Index 0 is the Session summary, so the message items start at 1.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
@@ -704,4 +707,79 @@ class SessionHistoryScreenTest {
 
         composeTestRule.onNodeWithText("Try again").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
     }
+
+    @Test
+    fun opening_a_session_lands_on_its_newest_transcript_message() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state = transcriptEntryState(messages = (1..12).map(::transcriptMessage)),
+                    onEvent = {},
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Transcript message 12").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Transcript message 1").assertDoesNotExist()
+    }
+
+    @Test
+    fun an_arriving_message_is_followed_while_the_newest_content_is_shown() {
+        var state by mutableStateOf(transcriptEntryState(messages = (1..10).map(::transcriptMessage)))
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(state = state, onEvent = {})
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        state = transcriptEntryState(messages = (1..11).map(::transcriptMessage))
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Transcript message 11").assertIsDisplayed()
+    }
+
+    @Test
+    fun an_arriving_message_does_not_pull_a_reader_who_scrolled_away_and_follow_resumes_at_the_newest_content() {
+        var state by mutableStateOf(transcriptEntryState(messages = (1..10).map(::transcriptMessage)))
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(state = state, onEvent = {})
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        // The reader deliberately scrolls away from the newest content.
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        composeTestRule.waitForIdle()
+
+        state = transcriptEntryState(messages = (1..11).map(::transcriptMessage))
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Transcript message 1").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Transcript message 11").assertDoesNotExist()
+
+        // Settling back at the newest content restores the follow for the next arrival.
+        composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(11)
+        composeTestRule.waitForIdle()
+
+        state = transcriptEntryState(messages = (1..12).map(::transcriptMessage))
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Transcript message 12").assertIsDisplayed()
+    }
+
+    private fun transcriptEntryState(messages: List<SessionMessageUiState>): EntryUiState =
+        entryState(
+            SessionListUiState(
+                openedSession =
+                    OpenSessionUiState(
+                        session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                        messages = messages,
+                    ),
+            ),
+        )
+
+    private fun transcriptMessage(index: Int): SessionMessageUiState = message("message-$index", "user", "Transcript message $index")
 }
