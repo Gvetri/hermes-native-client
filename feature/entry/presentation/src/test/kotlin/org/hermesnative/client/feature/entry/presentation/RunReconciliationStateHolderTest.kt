@@ -1405,6 +1405,11 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
             awaitState(holder) { it.sessionList?.openedSession == null }
 
+            // Re-arm the status barrier so the reopened outcome stays unconfirmed
+            // until the test releases it. The unconfirmed window is the state under
+            // test, and without the barrier the reconciliation can resolve before
+            // the assertion ever observes it.
+            gateway.blockNextStatus = true
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitState(holder) {
                 val opened = it.sessionList?.openedSession
