@@ -31,14 +31,16 @@ name: active-run-isolation
     timeout: 30000
 - assertVisible: "The displayed Session history may be stale."
 - tapOn: "Back to Sessions"
-- swipe:
-    from:
-      text: "Alpha Session"
-    direction: UP
-- swipe:
-    start: "50%, 52%"
-    end: "50%, 56%"
-    duration: 600
+# Use short gestures inside the list; a full-screen swipe can skip Beta's title.
+- repeat:
+    times: 8
+    while:
+      notVisible: "Beta Session"
+    commands:
+      - swipe:
+          start: "50%, 65%"
+          end: "50%, 52%"
+          duration: 600
 - assertVisible: "Beta Session"
 - tapOn: "Beta Session"
 - extendedWaitUntil:
