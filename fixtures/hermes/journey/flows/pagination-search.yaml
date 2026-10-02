@@ -39,11 +39,15 @@ name: pagination-search
 - tapOn: "Search Sessions"
 - inputText: "Gamma"
 - hideKeyboard
+# Clear search adds a header row, so the filtered list starts lower. Keep
+# the return swipe inside that list and stop as soon as its title is visible.
 - repeat:
-    times: 2
+    times: 8
+    while:
+      notVisible: "Search Gamma Three"
     commands:
       - swipe:
-          start: "93%, 57%"
+          start: "93%, 62%"
           end: "93%, 69%"
           duration: 500
 - extendedWaitUntil:
