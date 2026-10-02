@@ -199,47 +199,31 @@ class QualityVerificationFailClosedTest {
         return ProcessResult(process.waitFor(), output)
     }
 
-    private fun unreachedProductionFixture(): String =
-        listOf(
-            "",
-            "/** Quality gate fixture: production code no test reaches, so its mutants survive. */",
-            "fun qualityGateFixtureTotal(input: Int): Int {",
-            "    var total = input + 1",
-            "    if (total > 3) {",
-            "        total += 2",
-            "    }",
-            "    if (total % 2 == 0) {",
-            "        total *= 3",
-            "    } else {",
-            "        total -= 4",
-            "    }",
-            "    total = if (total < 0) -total else total",
-            "    if (total > 100) {",
-            "        total -= 10",
-            "    }",
-            "    if (total == 7) {",
-            "        total += 5",
-            "    }",
-            "    if (total < 5) {",
-            "        total += 6",
-            "    }",
-            "    if (total > 50) {",
-            "        total -= 7",
-            "    }",
-            "    if (total % 5 == 0) {",
-            "        total += 8",
-            "    } else {",
-            "        total -= 9",
-            "    }",
-            "    if (total > 200) {",
-            "        total -= 11",
-            "    }",
-            "    if (total == 13) {",
-            "        total += 12",
-            "    }",
-            "    return total",
-            "}",
-        ).joinToString("\n") + "\n"
+    /**
+     * The fixture is deliberately large enough to fail the declared thresholds from a high measured
+     * baseline: production code no test reaches must still be rejected when the module's measured
+     * coverage sits well above its declared minimums.
+     */
+    private fun unreachedProductionFixture(): String {
+        val lines =
+            mutableListOf(
+                "",
+                "/** Quality gate fixture: production code no test reaches, so its mutants survive. */",
+                "fun qualityGateFixtureTotal(input: Int): Int {",
+                "    var total = input + 1",
+                "    total = if (total < 0) -total else total",
+            )
+        for (index in 0 until 36) {
+            lines += "    if (total > ${3 + index * 7}) {"
+            lines += "        total += ${index + 2}"
+            lines += "    } else {"
+            lines += "        total -= ${index + 3}"
+            lines += "    }"
+        }
+        lines += "    return total"
+        lines += "}"
+        return lines.joinToString("\n") + "\n"
+    }
 
     private data class InjectedFixture(
         val relativePath: String,
