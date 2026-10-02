@@ -17,14 +17,17 @@ name: session-list-first
 - assertVisible: "Sessions"
 - assertVisible: "Alpha Session"
 - assertVisible: "Pinned"
-- swipe:
-    from:
-      text: "Alpha Session"
-    direction: UP
-- swipe:
-    start: "50%, 52%"
-    end: "50%, 56%"
-    duration: 600
+# Keep each swipe inside the list between the pinned header and footer on
+# the API 24 Pixel 2. A full-screen swipe can scroll past the second title.
+- repeat:
+    times: 8
+    while:
+      notVisible: "Beta Session"
+    commands:
+      - swipe:
+          start: "50%, 65%"
+          end: "50%, 52%"
+          duration: 600
 - assertVisible: "Beta Session"
 - assertVisible: "Search Sessions"
 - assertVisible: "Create Session"
