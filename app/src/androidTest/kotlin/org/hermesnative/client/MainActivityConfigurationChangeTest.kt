@@ -51,6 +51,7 @@ class MainActivityConfigurationChangeTest {
     fun orientation_change_keeps_the_shell_usable() {
         composeTestRule.onNodeWithText("Connect to a Hermes Gateway").assertIsDisplayed()
         val activityBeforeRotation = composeTestRule.activity
+        val widthBeforeRotation = activityBeforeRotation.resources.configuration.screenWidthDp
 
         try {
             composeTestRule.runOnUiThread {
@@ -78,6 +79,13 @@ class MainActivityConfigurationChangeTest {
         } finally {
             composeTestRule.runOnUiThread {
                 composeTestRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+            // A display rotation settles asynchronously. Wait for the original viewport, so the
+            // configuration change cannot leak into the next test's activity in this process.
+            composeTestRule.waitUntil(timeoutMillis = 10_000) {
+                runCatching {
+                    composeTestRule.activity.resources.configuration.screenWidthDp == widthBeforeRotation
+                }.getOrDefault(false)
             }
             composeTestRule.waitForIdle()
         }
