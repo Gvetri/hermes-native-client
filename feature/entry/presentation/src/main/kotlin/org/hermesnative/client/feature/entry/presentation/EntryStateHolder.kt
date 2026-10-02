@@ -1868,9 +1868,9 @@ class EntryStateHolder(
         } catch (error: CancellationException) {
             throw error
         } catch (_: GatewayException) {
-            showOpenedSessionFailure(request.generation, request.query)
+            showOpenedSessionFailure(request.generation)
         } catch (_: Exception) {
-            showOpenedSessionFailure(request.generation, request.query)
+            showOpenedSessionFailure(request.generation)
         }
     }
 
@@ -2501,10 +2501,7 @@ class EntryStateHolder(
         return true
     }
 
-    private fun showOpenedSessionFailure(
-        requestGeneration: Long,
-        query: String,
-    ) {
+    private fun showOpenedSessionFailure(requestGeneration: Long) {
         updateCurrentSessionRequest(requestGeneration) { current ->
             current.openedSession?.let { openedSession ->
                 current.copy(
@@ -2573,9 +2570,9 @@ class EntryStateHolder(
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
-                        showSessionListFailure(request.generation, request.query, request.offset, preserveSessions = true)
+                        showSessionListFailure(request.generation, request.offset, preserveSessions = true)
                     } catch (_: Exception) {
-                        showSessionListFailure(request.generation, request.query, request.offset, preserveSessions = true)
+                        showSessionListFailure(request.generation, request.offset, preserveSessions = true)
                     }
                 }
             }
@@ -3501,14 +3498,12 @@ class EntryStateHolder(
         } catch (_: GatewayException) {
             showSessionListFailure(
                 request.generation,
-                request.query,
                 offset = null,
                 preserveSessions = preserveSessions,
             )
         } catch (_: Exception) {
             showSessionListFailure(
                 request.generation,
-                request.query,
                 offset = null,
                 preserveSessions = preserveSessions,
             )
@@ -3561,7 +3556,6 @@ class EntryStateHolder(
 
     private fun showSessionListFailure(
         requestGeneration: Long,
-        query: String,
         offset: Int?,
         preserveSessions: Boolean,
     ) {
@@ -3717,9 +3711,9 @@ class EntryStateHolder(
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
-                        showSessionOpenFailure(request.generation, request.query, sessionId)
+                        showSessionOpenFailure(request.generation, sessionId)
                     } catch (_: Exception) {
-                        showSessionOpenFailure(request.generation, request.query, sessionId)
+                        showSessionOpenFailure(request.generation, sessionId)
                     }
                 }
             }
@@ -3728,7 +3722,6 @@ class EntryStateHolder(
 
     private fun showSessionOpenFailure(
         requestGeneration: Long,
-        query: String,
         sessionId: SessionId,
     ) {
         updateCurrentSessionRequest(requestGeneration) { current ->

@@ -419,6 +419,15 @@ class OrchestratorEndToEndTests(unittest.TestCase):
         self.assertFalse(runner.has_call("docker", "create"))
         self.assertFalse(runner.has_call("docker", "build"))
 
+    def test_preflight_rejects_apk_checksum_mismatch_before_fixture_start(self):
+        gate, runner = self.harness.make_gate()
+        gate.inputs.expected_apk_sha256 = "0" * 64
+        checksum = next(check for check in gate.preflight() if check["id"] == "apk_checksum")
+        self.assertFalse(checksum["ok"])
+        self.assertEqual(checksum["code"], "apk_checksum_mismatch")
+        self.assertFalse(runner.has_call("docker", "create"))
+        self.assertFalse(runner.has_call("docker", "build"))
+
     def test_preflight_checks_are_complete_and_green(self):
         gate, _runner = self.harness.make_gate()
         checks = gate.preflight()
