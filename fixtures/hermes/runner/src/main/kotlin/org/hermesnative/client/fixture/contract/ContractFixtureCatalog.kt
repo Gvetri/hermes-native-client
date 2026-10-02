@@ -31,8 +31,6 @@ object ContractFixtureCatalog {
             ContractFixtureDefinition("sessions/history-request.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/history-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/history-response-populated.json", ContractFixtureFormat.JSON),
-            ContractFixtureDefinition("sessions/history-response-external-runs.json", ContractFixtureFormat.JSON),
-            ContractFixtureDefinition("sessions/history-response-mixed-runs.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/rename-request.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/rename-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("sessions/delete-request.json", ContractFixtureFormat.JSON),
@@ -56,12 +54,12 @@ object ContractFixtureCatalog {
             ContractFixtureDefinition("malformed/mismatched-session-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/mismatched-history-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/mismatched-pin-response.json", ContractFixtureFormat.JSON),
-            ContractFixtureDefinition("malformed/mismatched-run-create-response.json", ContractFixtureFormat.JSON),
+            ContractFixtureDefinition("malformed/incomplete-run-admission-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/mismatched-run-status-response.json", ContractFixtureFormat.JSON),
             ContractFixtureDefinition("malformed/mismatched-run-event.sse", ContractFixtureFormat.SSE),
         )
 }
 
 object SupportedGatewayCapabilities {
-    val required = PublicBetaGatewayCapabilityManifest.current.requirements.map { it.identifier }
+    val required = PublicBetaGatewayCapabilityManifest.current.requirements.map { it.endpoint }.distinct()
 }

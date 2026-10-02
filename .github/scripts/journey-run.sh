@@ -197,31 +197,11 @@ for journey in "${journeys[@]}"; do
         log "Journey Gateway capability check failed for $journey."
         exit 1
     }
-    if ! printf '%s' "$capabilities_body" | python3 -c '
-import json, sys
-try:
-    served = json.load(sys.stdin)["capabilities"]
-except Exception:
-    sys.exit(1)
-sys.exit(0 if isinstance(served, list) and served else 1)
-'; then
+    if ! printf '%s' "$capabilities_body" | python3 \
+        "$workspace/.github/scripts/verify-journey-capabilities.py" \
+        "$workspace/fixtures/hermes/contracts/capabilities/success.json" "$journey"; then
         log "Journey Gateway capability check failed for $journey."
         exit 1
-    fi
-    if [[ "$journey" != "capabilities-missing-required" ]]; then
-        if ! printf '%s' "$capabilities_body" | python3 -c '
-import json, sys
-served = set(json.load(sys.stdin)["capabilities"])
-required = {
-    "session.list", "session.create", "session.open", "session.history",
-    "session.rename", "session.delete", "session.pin", "session.unpin",
-    "run.create", "run.status", "run.sse",
-}
-sys.exit(1 if required - served else 0)
-'; then
-            log "Journey Gateway is missing required capabilities for $journey."
-            exit 1
-        fi
     fi
 
     maestro_log="$evidence_dir/${journey}-maestro.log"

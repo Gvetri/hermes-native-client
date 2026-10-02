@@ -82,7 +82,7 @@ class RunStatusNotificationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(SessionHistory(session.id, emptyList()))
                 enqueueHistory(
                     SessionHistory(
                         session.id,
@@ -95,7 +95,6 @@ class RunStatusNotificationStateHolderTest {
                                 runStatus = "succeeded",
                             ),
                         ),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "succeeded"))
@@ -282,7 +281,7 @@ class RunStatusNotificationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(SessionHistory(session.id, emptyList()))
                 enqueueHistory(
                     SessionHistory(
                         session.id,
@@ -295,7 +294,6 @@ class RunStatusNotificationStateHolderTest {
                                 runStatus = "succeeded",
                             ),
                         ),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "succeeded"))
@@ -344,7 +342,7 @@ class RunStatusNotificationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(SessionHistory(session.id, emptyList()))
                 enqueueHistory(
                     SessionHistory(
                         session.id,
@@ -357,7 +355,6 @@ class RunStatusNotificationStateHolderTest {
                                 runStatus = "failed",
                             ),
                         ),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "failed"))
@@ -399,7 +396,7 @@ class RunStatusNotificationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(SessionHistory(session.id, emptyList()))
                 enqueueHistory(
                     SessionHistory(
                         session.id,
@@ -412,7 +409,6 @@ class RunStatusNotificationStateHolderTest {
                                 runStatus = "cancelled",
                             ),
                         ),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "cancelled"))
@@ -491,7 +487,7 @@ class RunStatusNotificationStateHolderTest {
         val gateway =
             ScriptedGateway(session).apply {
                 enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList(), null))
+                enqueueHistory(SessionHistory(session.id, emptyList()))
                 enqueueHistory(
                     SessionHistory(
                         session.id,
@@ -504,7 +500,6 @@ class RunStatusNotificationStateHolderTest {
                                 runStatus = "failed",
                             ),
                         ),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "failed"))
@@ -562,7 +557,6 @@ class RunStatusNotificationStateHolderTest {
                                 runStatus = "failed",
                             ),
                         ),
-                        null,
                     ),
                 )
                 enqueueStatus(run.copy(status = "failed"))
@@ -678,7 +672,7 @@ class RunStatusNotificationStateHolderTest {
         val run = Run(RunId(runId), session.id, "starting")
         return ScriptedGateway(session).apply {
             enqueueRun(run)
-            enqueueHistory(SessionHistory(session.id, emptyList(), null))
+            enqueueHistory(SessionHistory(session.id, emptyList()))
             enqueueHistory(
                 SessionHistory(
                     session.id,
@@ -691,7 +685,6 @@ class RunStatusNotificationStateHolderTest {
                             runStatus = "succeeded",
                         ),
                     ),
-                    null,
                 ),
             )
             enqueueStatus(run.copy(status = "succeeded"))
@@ -721,7 +714,7 @@ class RunStatusNotificationStateHolderTest {
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
                 VerifyGatewayConnection(repository) { _, _ ->
-                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                 },
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
@@ -779,7 +772,6 @@ class RunStatusNotificationStateHolderTest {
             title = "Session $id",
             preview = "Preview",
             pinned = false,
-            updatedAt = null,
         )
 
     private class FakeNotificationSettingsStore(
@@ -840,7 +832,7 @@ class RunStatusNotificationStateHolderTest {
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
             if (historyResults.isEmpty()) {
-                SessionHistory(sessionId, emptyList(), null)
+                SessionHistory(sessionId, emptyList())
             } else {
                 historyResults.removeFirst()
             }

@@ -186,8 +186,8 @@ class EntryScreenTest {
 
     @Test
     fun switching_from_an_active_run_keeps_send_available_in_another_session() {
-        val first = Session(SessionId("first"), "First Session", null, pinned = false, updatedAt = null)
-        val second = Session(SessionId("second"), "Second Session", null, pinned = false, updatedAt = null)
+        val first = Session(SessionId("first"), "First Session", null, pinned = false)
+        val second = Session(SessionId("second"), "Second Session", null, pinned = false)
         val activeRun = Run(RunId("run-first"), first.id, "running")
         val gateway = SwitchingGateway(first, second, activeRun)
         val recoveryRegistry = InMemoryRunRecoveryRegistry()
@@ -196,7 +196,9 @@ class EntryScreenTest {
                 initialState = EntryState(isGatewayConnectionConfigured = false),
                 verifyGatewayConnection =
                     VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                        GatewayCapabilities(
+                            PublicBetaGatewayCapabilityManifest.current.requiredEndpoints,
+                        )
                     },
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
                 sessionGatewayFactory = { _, _ -> gateway },
@@ -435,7 +437,7 @@ class EntryScreenTest {
     }
 
     @Test
-    fun searching_keeps_existing_sessions_visible_with_progress_feedback() {
+    fun local_search_keeps_matching_sessions_visible_without_a_search_progress_state() {
         composeTestRule.setContent {
             HermesTheme {
                 EntryScreen(
@@ -456,9 +458,10 @@ class EntryScreenTest {
                                                 pinned = false,
                                             ),
                                         ),
-                                    isLoading = true,
-                                    isSearching = true,
-                                    searchQuery = "needle",
+                                    // The pinned Gateway has no general Session search, so the
+                                    // query filters loaded rows locally and never produces a
+                                    // search-in-flight state.
+                                    searchQuery = "Existing",
                                 ),
                         ),
                     onEvent = {},
@@ -467,7 +470,7 @@ class EntryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Existing Session").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Searching Sessions…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Searching Sessions…").assertDoesNotExist()
     }
 
     @Test
@@ -494,7 +497,7 @@ class EntryScreenTest {
                                                     pinned = false,
                                                 ),
                                             ),
-                                        nextCursor = "next",
+                                        nextOffset = 1,
                                     ),
                             ),
                         onEvent = events::add,
@@ -527,7 +530,7 @@ class EntryScreenTest {
                                 pinned = false,
                             ),
                         ),
-                    nextCursor = "next",
+                    nextOffset = 1,
                 ),
             )
         composeTestRule.setContent {
@@ -923,7 +926,7 @@ class EntryScreenTest {
         private var firstRunHasBeenCreated = false
         private var firstObservationRequested = false
 
-        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(first, second), nextCursor = null)
+        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(first, second), nextOffset = null)
 
         override fun createSession(title: String?): Session = error("not used")
 
@@ -946,7 +949,6 @@ class EntryScreenTest {
                     } else {
                         emptyList()
                     },
-                nextCursor = null,
             )
 
         override fun renameSession(

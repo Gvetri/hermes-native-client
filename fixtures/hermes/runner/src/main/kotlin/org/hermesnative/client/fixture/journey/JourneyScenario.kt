@@ -10,6 +10,30 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import java.io.File
 
+/** The pinned `/v1/capabilities` endpoint names a journey can advertise. */
+object JourneyEndpointCatalog {
+    data class Endpoint(
+        val method: String,
+        val path: String,
+    )
+
+    val endpoints: Map<String, Endpoint> =
+        linkedMapOf(
+            "health" to Endpoint("GET", "/health"),
+            "sessions" to Endpoint("GET", "/api/sessions"),
+            "session_create" to Endpoint("POST", "/api/sessions"),
+            "session" to Endpoint("GET", "/api/sessions/{session_id}"),
+            "session_update" to Endpoint("PATCH", "/api/sessions/{session_id}"),
+            "session_delete" to Endpoint("DELETE", "/api/sessions/{session_id}"),
+            "session_messages" to Endpoint("GET", "/api/sessions/{session_id}/messages"),
+            "runs" to Endpoint("POST", "/v1/runs"),
+            "run_status" to Endpoint("GET", "/v1/runs/{run_id}"),
+            "run_events" to Endpoint("GET", "/v1/runs/{run_id}/events"),
+            // Additive endpoint used only by the capabilities-additive journey.
+            "gateway_future_endpoint" to Endpoint("GET", "/v1/future"),
+        )
+}
+
 /**
  * Explicit, repository-owned configuration for one deterministic emulator
  * journey. One scenario file backs exactly one Maestro flow.
@@ -43,20 +67,18 @@ data class JourneySession(
     val history: List<JourneyMessage> = emptyList(),
 )
 
+/** A pinned Session message projection has no run identity metadata. */
 data class JourneyMessage(
     val id: String,
     val role: String?,
     val content: String?,
-    val runId: String? = null,
-    val runStatus: String? = null,
-    val runResult: String? = null,
     val timestamp: String? = null,
 )
 
 data class JourneyRunScript(
     val runId: String,
     val sessionId: String,
-    val createStatus: String = "starting",
+    val createStatus: String = "started",
     val observation: List<JourneyRunEvent> = emptyList(),
     val interruptAfterEvents: Int? = null,
     val holdOpen: Boolean = false,
@@ -73,11 +95,10 @@ data class JourneyRunScript(
     }
 }
 
+/** One pinned Run SSE payload: `{"event": <type>, "run_id": ..., ...}`. */
 data class JourneyRunEvent(
     val type: String,
-    val status: String? = null,
     val delta: String? = null,
-    val id: String? = null,
 )
 
 sealed class JourneyScenarioException(message: String, cause: Throwable? = null) :
@@ -88,14 +109,15 @@ class JourneyScenarioFormatException(message: String) : JourneyScenarioException
 object JourneyScenarioParser {
     private val supportedEventTypes =
         setOf(
-            "run.started",
-            "run.running",
-            "run.completing",
             "message.delta",
-            "run.succeeded",
-            "run.failed",
-            "run.interrupted",
             "run.completed",
+            "run.failed",
+            "run.cancelled",
+            "run.stopping",
+            "tool.started",
+            "tool.completed",
+            "reasoning.available",
+            "approval.request",
         )
 
     private val allowedTopLevelKeys =
@@ -112,7 +134,7 @@ object JourneyScenarioParser {
             "fail_next_session_list",
         )
     private val allowedSessionKeys = setOf("id", "title", "preview", "pinned", "history")
-    private val allowedMessageKeys = setOf("id", "role", "content", "run_id", "run_status", "run_result", "timestamp")
+    private val allowedMessageKeys = setOf("id", "role", "content", "timestamp")
     private val allowedRunKeys =
         setOf(
             "run_id",
@@ -124,7 +146,7 @@ object JourneyScenarioParser {
             "final_status",
             "terminal_history",
         )
-    private val allowedEventKeys = setOf("type", "status", "delta", "id")
+    private val allowedEventKeys = setOf("type", "delta")
     private val UNICODE_ESCAPE = Regex("\\\\u([0-9a-fA-F]{4})")
 
     fun parse(
@@ -176,8 +198,18 @@ object JourneyScenarioParser {
             } catch (error: IllegalArgumentException) {
                 throw JourneyScenarioFormatException(error.message ?: "Journey scenario is invalid.")
             }
+        requireKnownEndpoints(scenario)
         requireProvenance(scenario, pinnedHermesRevision)
         return scenario
+    }
+
+    private fun requireKnownEndpoints(scenario: JourneyScenario) {
+        val unknown = scenario.capabilities.filterNot(JourneyEndpointCatalog.endpoints::containsKey)
+        if (unknown.isNotEmpty()) {
+            throw JourneyScenarioFormatException(
+                "Journey scenario declares unsupported capability endpoints: ${unknown.sorted()}",
+            )
+        }
     }
 
     private fun requireProvenance(
@@ -216,9 +248,6 @@ object JourneyScenarioParser {
                 id = requiredString(message, "id"),
                 role = optionalString(message, "role"),
                 content = optionalString(message, "content"),
-                runId = optionalString(message, "run_id"),
-                runStatus = optionalString(message, "run_status"),
-                runResult = optionalString(message, "run_result"),
                 timestamp = optionalString(message, "timestamp"),
             )
         }
@@ -230,7 +259,7 @@ object JourneyScenarioParser {
             JourneyRunScript(
                 runId = requiredString(run, "run_id"),
                 sessionId = requiredString(run, "session_id"),
-                createStatus = optionalString(run, "create_status") ?: "starting",
+                createStatus = optionalString(run, "create_status") ?: "started",
                 observation = parseObservation(run, index),
                 interruptAfterEvents = optionalInt(run, "interrupt_after_events"),
                 holdOpen = optionalBoolean(run, "hold_open", default = false),
@@ -254,9 +283,7 @@ object JourneyScenarioParser {
             }
             JourneyRunEvent(
                 type = type,
-                status = optionalString(event, "status"),
                 delta = optionalString(event, "delta"),
-                id = optionalString(event, "id"),
             )
         }
 

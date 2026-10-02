@@ -17,9 +17,6 @@ data class SyntheticGatewayMessage(
     val id: String,
     val role: String?,
     val content: String?,
-    val runId: String? = null,
-    val runStatus: String? = null,
-    val runResult: String? = null,
     val timestamp: String? = null,
 )
 
@@ -28,8 +25,12 @@ data class SyntheticGatewaySession(
     val title: String?,
     val preview: String?,
     val pinned: Boolean,
-    val updatedAt: String?,
     val history: List<SyntheticGatewayMessage> = emptyList(),
+)
+
+data class SyntheticEndpoint(
+    val method: String,
+    val path: String,
 )
 
 data class SyntheticGatewayRequest(
@@ -43,7 +44,7 @@ data class SyntheticGatewayRequest(
 class SyntheticGatewayBehavior(
     val healthStatus: Int = 200,
     val capabilityStatus: Int = 200,
-    val capabilities: Set<String> = setOf("client-manifest"),
+    val endpoints: Map<String, SyntheticEndpoint> = defaultCapabilityEndpoints(),
     initialSessions: List<SyntheticGatewaySession> = emptyList(),
 ) {
     init {
@@ -57,6 +58,7 @@ class SyntheticGatewayBehavior(
     @Volatile
     var failNextSessionList: Boolean = false
 
+    /** Server-side page cap; the response echoes the effective limit like the pinned Gateway. */
     @Volatile
     var sessionPageSize: Int? = null
 
@@ -73,6 +75,22 @@ class SyntheticGatewayBehavior(
     var failNextSessionUnpin: Boolean = false
 
     val createdSessionId: String = "55555555-5555-4555-8555-555555555555"
+
+    companion object {
+        fun defaultCapabilityEndpoints(): Map<String, SyntheticEndpoint> =
+            linkedMapOf(
+                "health" to SyntheticEndpoint("GET", "/health"),
+                "sessions" to SyntheticEndpoint("GET", "/api/sessions"),
+                "session_create" to SyntheticEndpoint("POST", "/api/sessions"),
+                "session" to SyntheticEndpoint("GET", "/api/sessions/{session_id}"),
+                "session_update" to SyntheticEndpoint("PATCH", "/api/sessions/{session_id}"),
+                "session_delete" to SyntheticEndpoint("DELETE", "/api/sessions/{session_id}"),
+                "session_messages" to SyntheticEndpoint("GET", "/api/sessions/{session_id}/messages"),
+                "runs" to SyntheticEndpoint("POST", "/v1/runs"),
+                "run_status" to SyntheticEndpoint("GET", "/v1/runs/{run_id}"),
+                "run_events" to SyntheticEndpoint("GET", "/v1/runs/{run_id}/events"),
+            )
+    }
 }
 
 /** A loopback-only HTTP process with deterministic health, capability, and synthetic behavior. */
@@ -135,17 +153,12 @@ class LocalSyntheticGatewayProcess private constructor(
             }
             server.createContext("/v1/capabilities") { exchange ->
                 recordRequest(exchange, behavior)
-                val capabilities = behavior.capabilities.sorted().joinToString(",") { quote(it) }
-                respond(
-                    exchange,
-                    behavior.capabilityStatus,
-                    "{\"capabilities\":[$capabilities]}",
-                )
+                respond(exchange, behavior.capabilityStatus, capabilitiesJson(behavior))
             }
-            server.createContext("/v1/sessions") { exchange ->
+            server.createContext("/api/sessions") { exchange ->
                 handleSessionListRequest(exchange, behavior)
             }
-            server.createContext("/v1/sessions/") { exchange ->
+            server.createContext("/api/sessions/") { exchange ->
                 handleSessionResourceRequest(exchange, behavior)
             }
             server.createContext("/") { exchange ->
@@ -161,12 +174,28 @@ class LocalSyntheticGatewayProcess private constructor(
             )
         }
 
+        private fun capabilitiesJson(behavior: SyntheticGatewayBehavior): String =
+            buildString {
+                append("{\"object\":\"hermes.api_server.capabilities\",\"platform\":\"hermes-agent\",")
+                append("\"model\":\"synthetic\",")
+                append("\"auth\":{\"type\":\"bearer\",\"required\":false},")
+                append("\"features\":{\"run_submission\":true,\"run_status\":true,\"run_events_sse\":true,")
+                append("\"session_resources\":true},")
+                append("\"endpoints\":{")
+                append(
+                    behavior.endpoints.entries.joinToString(",") { (name, endpoint) ->
+                        "${quote(name)}:{\"method\":${quote(endpoint.method)},\"path\":${quote(endpoint.path)}}"
+                    },
+                )
+                append("}}")
+            }
+
         private fun handleSessionListRequest(
             exchange: HttpExchange,
             behavior: SyntheticGatewayBehavior,
         ) {
             val body = recordRequest(exchange, behavior)
-            if (exchange.requestURI.path != "/v1/sessions") {
+            if (exchange.requestURI.path != "/api/sessions") {
                 respond(exchange, 404, "{\"error\":\"not-found\"}")
                 return
             }
@@ -178,55 +207,35 @@ class LocalSyntheticGatewayProcess private constructor(
                         return
                     }
                     val query = queryParameters(exchange.requestURI)
-                    val search = query["search"].orEmpty()
-                    val matchingSessions =
-                        if (search.isBlank()) {
-                            behavior.sessions.toList()
-                        } else {
-                            behavior.sessions.filter { session ->
-                                session.title.orEmpty().contains(search, ignoreCase = true) ||
-                                    session.preview.orEmpty().contains(search, ignoreCase = true)
-                            }
-                        }
-                    val cursor = query["cursor"]
-                    val parsedOffset = cursor?.removePrefix("offset:")?.toIntOrNull()
-                    if (cursor != null && !cursor.startsWith("offset:")) {
-                        respond(exchange, 400, "{\"error\":\"invalid-cursor\"}")
+                    val requestedLimit = query["limit"]?.toIntOrNull() ?: 50
+                    val offset = query["offset"]?.toIntOrNull() ?: 0
+                    if (requestedLimit <= 0 || offset < 0) {
+                        respond(exchange, 400, "{\"error\":\"invalid-pagination\"}")
                         return
                     }
-                    if (cursor != null && parsedOffset == null) {
-                        respond(exchange, 400, "{\"error\":\"invalid-cursor\"}")
+                    val effectiveLimit = minOf(requestedLimit, behavior.sessionPageSize ?: requestedLimit)
+                    val matchingSessions = behavior.sessions.toList()
+                    if (offset > matchingSessions.size) {
+                        respond(exchange, 400, "{\"error\":\"offset-out-of-range\"}")
                         return
                     }
-                    val offset = parsedOffset ?: 0
-                    val pageSize = behavior.sessionPageSize ?: query["limit"]?.toIntOrNull() ?: matchingSessions.size
-                    if (pageSize <= 0) {
-                        respond(exchange, 400, "{\"error\":\"invalid-limit\"}")
-                        return
-                    }
-                    if (offset !in 0..matchingSessions.size) {
-                        respond(exchange, 400, "{\"error\":\"cursor-out-of-range\"}")
-                        return
-                    }
-                    val page = matchingSessions.drop(offset).take(pageSize)
-                    val nextOffset = offset + page.size
-                    val nextCursor =
-                        nextOffset.takeIf { it < matchingSessions.size }?.let { next -> "offset:$next" }
+                    val page = matchingSessions.drop(offset).take(effectiveLimit)
+                    val hasMore = offset + page.size < matchingSessions.size
                     val sessions = page.joinToString(",") { sessionJson(it) }
                     respond(
                         exchange,
                         200,
-                        "{\"sessions\":[$sessions],\"next_cursor\":${nextCursor.jsonValue()}}",
+                        "{\"object\":\"list\",\"data\":[$sessions],\"limit\":$effectiveLimit,\"offset\":$offset," +
+                            "\"has_more\":$hasMore}",
                     )
                 }
                 "POST" -> {
                     val created =
                         SyntheticGatewaySession(
                             id = behavior.createdSessionId,
-                            title = parseCreateTitle(body),
+                            title = parseTitle(body),
                             preview = null,
                             pinned = false,
-                            updatedAt = "2026-09-09T00:00:00Z",
                             history =
                                 listOf(
                                     SyntheticGatewayMessage(
@@ -238,7 +247,7 @@ class LocalSyntheticGatewayProcess private constructor(
                         )
                     behavior.sessions.removeIf { it.id == created.id }
                     behavior.sessions += created
-                    respond(exchange, 201, "{\"session\":${sessionJson(created)}}")
+                    respond(exchange, 201, "{\"object\":\"hermes.session\",\"session\":${sessionJson(created)}}")
                 }
                 else -> respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
             }
@@ -249,7 +258,7 @@ class LocalSyntheticGatewayProcess private constructor(
             behavior: SyntheticGatewayBehavior,
         ) {
             val body = recordRequest(exchange, behavior)
-            val resource = exchange.requestURI.path.removePrefix("/v1/sessions/")
+            val resource = exchange.requestURI.path.removePrefix("/api/sessions/")
             val segments = resource.split('/')
             val sessionId = segments.firstOrNull().orEmpty()
             val session = behavior.sessions.firstOrNull { it.id == sessionId }
@@ -261,57 +270,64 @@ class LocalSyntheticGatewayProcess private constructor(
             when (exchange.requestMethod) {
                 "GET" ->
                     when {
-                        segments.size == 1 -> respond(exchange, 200, "{\"session\":${sessionJson(session)}}")
-                        segments[1] == "history" -> respond(exchange, 200, historyJson(session))
+                        segments.size == 1 ->
+                            respond(exchange, 200, "{\"object\":\"hermes.session\",\"session\":${sessionJson(session)}}")
+                        segments[1] == "messages" -> respond(exchange, 200, historyJson(session))
                         else -> respond(exchange, 404, "{\"error\":\"not-found\"}")
                     }
                 "PATCH" -> {
                     if (segments.size != 1) {
                         respond(exchange, 404, "{\"error\":\"not-found\"}")
-                    } else if (behavior.failNextSessionRename) {
-                        behavior.failNextSessionRename = false
-                        respond(exchange, 503, "{\"error\":\"synthetic-rename-failure\"}")
                     } else {
-                        val renamed = session.copy(title = parseCreateTitle(body))
-                        replaceSession(behavior, renamed)
-                        respond(exchange, 200, "{\"session\":${sessionJson(renamed)}}")
+                        when {
+                            bodyContainsField(body, "pinned") -> {
+                                val pinned = bodyBoolean(body, "pinned")
+                                if (pinned == null) {
+                                    respond(exchange, 400, "{\"error\":\"invalid-session-field\"}")
+                                    return
+                                }
+                                if (pinned && behavior.failNextSessionPin) {
+                                    behavior.failNextSessionPin = false
+                                    respond(exchange, 503, "{\"error\":\"synthetic-pin-failure\"}")
+                                    return
+                                }
+                                if (!pinned && behavior.failNextSessionUnpin) {
+                                    behavior.failNextSessionUnpin = false
+                                    respond(exchange, 503, "{\"error\":\"synthetic-unpin-failure\"}")
+                                    return
+                                }
+                                val updated = session.copy(pinned = pinned)
+                                replaceSession(behavior, updated)
+                                respond(exchange, 200, "{\"object\":\"hermes.session\",\"session\":${sessionJson(updated)}}")
+                            }
+                            else -> {
+                                if (behavior.failNextSessionRename) {
+                                    behavior.failNextSessionRename = false
+                                    respond(exchange, 503, "{\"error\":\"synthetic-rename-failure\"}")
+                                    return
+                                }
+                                val renamed = session.copy(title = parseTitle(body))
+                                replaceSession(behavior, renamed)
+                                respond(exchange, 200, "{\"object\":\"hermes.session\",\"session\":${sessionJson(renamed)}}")
+                            }
+                        }
                     }
                 }
-                "POST" -> {
-                    if (segments.size != 2 || segments[1] != "pin") {
+                "DELETE" -> {
+                    if (segments.size != 1) {
                         respond(exchange, 404, "{\"error\":\"not-found\"}")
-                    } else if (behavior.failNextSessionPin) {
-                        behavior.failNextSessionPin = false
-                        respond(exchange, 503, "{\"error\":\"synthetic-pin-failure\"}")
+                    } else if (behavior.failNextSessionDelete) {
+                        behavior.failNextSessionDelete = false
+                        respond(exchange, 503, "{\"error\":\"synthetic-delete-failure\"}")
                     } else {
-                        val pinned = session.copy(pinned = true)
-                        replaceSession(behavior, pinned)
-                        respond(exchange, 200, pinJson(pinned))
+                        behavior.sessions.removeIf { it.id == sessionId }
+                        respond(
+                            exchange,
+                            200,
+                            "{\"object\":\"hermes.session.deleted\",\"id\":${quote(sessionId)},\"deleted\":true}",
+                        )
                     }
                 }
-                "DELETE" ->
-                    when {
-                        segments.size == 2 && segments[1] == "pin" -> {
-                            if (behavior.failNextSessionUnpin) {
-                                behavior.failNextSessionUnpin = false
-                                respond(exchange, 503, "{\"error\":\"synthetic-unpin-failure\"}")
-                            } else {
-                                val unpinned = session.copy(pinned = false)
-                                replaceSession(behavior, unpinned)
-                                respond(exchange, 200, pinJson(unpinned))
-                            }
-                        }
-                        segments.size == 1 -> {
-                            if (behavior.failNextSessionDelete) {
-                                behavior.failNextSessionDelete = false
-                                respond(exchange, 503, "{\"error\":\"synthetic-delete-failure\"}")
-                            } else {
-                                behavior.sessions.removeIf { it.id == sessionId }
-                                respond(exchange, 204, "")
-                            }
-                        }
-                        else -> respond(exchange, 404, "{\"error\":\"not-found\"}")
-                    }
                 else -> respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
             }
         }
@@ -324,30 +340,30 @@ class LocalSyntheticGatewayProcess private constructor(
             if (index >= 0) behavior.sessions[index] = session
         }
 
-        private fun pinJson(session: SyntheticGatewaySession): String = "{\"session_id\":${quote(session.id)},\"pinned\":${session.pinned}}"
-
         private fun sessionJson(session: SyntheticGatewaySession): String =
             buildString {
                 append("{\"id\":")
                 append(quote(session.id))
-                append(",\"title\":")
+                append(",\"source\":\"api_server\",\"title\":")
                 append(session.title.jsonValue())
                 append(",\"preview\":")
                 append(session.preview.jsonValue())
                 append(",\"pinned\":")
                 append(session.pinned)
-                append(",\"updated_at\":")
-                append(session.updatedAt.jsonValue())
+                append(",\"message_count\":")
+                append(session.history.size)
                 append('}')
             }
 
         private fun historyJson(session: SyntheticGatewaySession): String =
             buildString {
-                append("{\"session_id\":")
+                append("{\"object\":\"list\",\"session_id\":")
                 append(quote(session.id))
-                append(",\"messages\":[")
+                append(",\"data\":[")
                 append(session.history.joinToString(",") { messageJson(it) })
-                append("],\"next_cursor\":null}")
+                append("],\"pagination\":{\"limit\":500,\"offset\":0,\"order\":\"latest\",\"returned\":")
+                append(session.history.size)
+                append("}}")
             }
 
         private fun messageJson(message: SyntheticGatewayMessage): String =
@@ -358,12 +374,29 @@ class LocalSyntheticGatewayProcess private constructor(
                 append(message.role.jsonValue())
                 append(",\"content\":")
                 append(message.content.jsonValue())
-                message.runId?.let { append(",\"run_id\":${quote(it)}") }
-                message.runStatus?.let { append(",\"run_status\":${quote(it)}") }
-                message.runResult?.let { append(",\"run_result\":${quote(it)}") }
                 message.timestamp?.let { append(",\"timestamp\":${quote(it)}") }
                 append('}')
             }
+
+        private fun bodyContainsField(
+            body: String?,
+            field: String,
+        ): Boolean {
+            val text = body?.takeIf(String::isNotBlank) ?: return false
+            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return false
+            return root.containsKey(field)
+        }
+
+        private fun bodyBoolean(
+            body: String?,
+            field: String,
+        ): Boolean? {
+            val text = body?.takeIf(String::isNotBlank) ?: return null
+            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
+            val value = root[field] as? JsonPrimitive ?: return null
+            if (value.isString || value.content !in setOf("true", "false")) return null
+            return value.content == "true"
+        }
 
         private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)
 
@@ -371,7 +404,7 @@ class LocalSyntheticGatewayProcess private constructor(
 
         private fun quote(value: String): String = GatewayHttpSupport.quote(value)
 
-        private fun parseCreateTitle(body: String?): String? {
+        private fun parseTitle(body: String?): String? {
             val text = body?.takeIf(String::isNotBlank) ?: return null
             val root =
                 runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null

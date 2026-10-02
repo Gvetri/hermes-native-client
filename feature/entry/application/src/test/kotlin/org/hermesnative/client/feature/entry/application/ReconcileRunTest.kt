@@ -28,7 +28,6 @@ class ReconcileRunTest {
                 SessionHistory(
                     sessionId,
                     listOf(GatewayHistoryMessage("message-1", "assistant", "Done", run.id, "succeeded")),
-                    null,
                 ),
                 operations,
             )
@@ -45,7 +44,7 @@ class ReconcileRunTest {
         val operations = mutableListOf<String>()
         val requestedSessionId = SessionId("session-1")
         val run = Run(RunId("run-1"), SessionId("other-session"), "succeeded")
-        val sessionGateway = RecordingSessionGateway(SessionHistory(requestedSessionId, emptyList(), null), operations)
+        val sessionGateway = RecordingSessionGateway(SessionHistory(requestedSessionId, emptyList()), operations)
 
         val error =
             runCatching {
@@ -62,7 +61,7 @@ class ReconcileRunTest {
         val requestedSessionId = SessionId("session-1")
         val run = Run(RunId("run-1"), requestedSessionId, "succeeded")
         val operations = mutableListOf<String>()
-        val mismatchedHistory = SessionHistory(SessionId("other-session"), emptyList(), null)
+        val mismatchedHistory = SessionHistory(SessionId("other-session"), emptyList())
 
         val error =
             runCatching {
@@ -135,7 +134,6 @@ class ReconcileSessionTest {
                     GatewayHistoryMessage("old-message", "assistant", "Old", oldRunId, "succeeded"),
                     GatewayHistoryMessage("new-message", "user", "New", newRunId, "running"),
                 ),
-                null,
             )
         val run = Run(newRunId, sessionId, "running")
 

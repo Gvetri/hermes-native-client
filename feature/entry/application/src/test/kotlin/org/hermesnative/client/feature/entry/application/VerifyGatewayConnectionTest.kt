@@ -3,12 +3,18 @@ package org.hermesnative.client.feature.entry.application
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
+import org.hermesnative.client.feature.entry.domain.GatewayEndpoint
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+
+private fun clientManifestCapabilities(vararg extra: Pair<String, GatewayEndpoint>): GatewayCapabilities =
+    GatewayCapabilities(
+        PublicBetaGatewayCapabilityManifest.current.requiredEndpoints + extra.toMap(),
+    )
 
 class VerifyGatewayConnectionTest {
     @Test
@@ -20,14 +26,14 @@ class VerifyGatewayConnectionTest {
             VerifyGatewayConnection(repository) { endpoint, credential ->
                 receivedEndpoint = endpoint
                 receivedCredential = credential
-                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers + "future.capability")
+                clientManifestCapabilities("gateway_future_endpoint" to GatewayEndpoint("GET", "/v1/future"))
             }
 
         val capabilities = verifier.execute("  https://gateway.example/profile/  ", "memory-only-token")
 
         assertEquals("https://gateway.example/profile", receivedEndpoint)
         assertEquals("memory-only-token", receivedCredential)
-        assertEquals(12, capabilities.identifiers.size)
+        assertEquals(10, capabilities.endpoints.size)
         assertEquals(GatewayConnection("https://gateway.example/profile"), repository.saved)
     }
 
@@ -37,7 +43,7 @@ class VerifyGatewayConnectionTest {
         val verifier =
             VerifyGatewayConnection(repository) { endpoint, _ ->
                 assertEquals("https://gateway.example/profile", endpoint)
-                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                clientManifestCapabilities()
             }
 
         verifier.execute(" HTTPS://GATEWAY.EXAMPLE:0443/profile/ ", "token")
@@ -65,7 +71,32 @@ class VerifyGatewayConnectionTest {
         val repository = FakeGatewayConnectionRepository()
         val verifier =
             VerifyGatewayConnection(repository) { _, _ ->
-                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers.toList().dropLast(1).toSet())
+                GatewayCapabilities(
+                    PublicBetaGatewayCapabilityManifest.current.requiredEndpoints
+                        .toMutableMap()
+                        .apply { remove("run_events") },
+                )
+            }
+
+        val error = captureFailure { verifier.execute("https://gateway.example", "token") }
+
+        assertEquals(GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE, error.category)
+        assertNull(repository.saved)
+    }
+
+    @Test
+    fun rejects_a_required_endpoint_advertised_with_the_wrong_path_without_persisting_the_endpoint() {
+        val repository = FakeGatewayConnectionRepository()
+        val verifier =
+            VerifyGatewayConnection(repository) { _, _ ->
+                GatewayCapabilities(
+                    PublicBetaGatewayCapabilityManifest.current.requiredEndpoints
+                        .toMutableMap()
+                        .apply {
+                            this["session_messages"] =
+                                GatewayEndpoint("GET", "/api/sessions/{session_id}/history")
+                        },
+                )
             }
 
         val error = captureFailure { verifier.execute("https://gateway.example", "token") }
@@ -104,7 +135,7 @@ class VerifyGatewayConnectionTest {
             }
         val verifier =
             VerifyGatewayConnection(repository) { _, _ ->
-                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                clientManifestCapabilities()
             }
 
         verifier.execute(

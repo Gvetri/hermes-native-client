@@ -145,7 +145,7 @@ class SessionRenameStateHolderTest {
                 initialState = EntryState(isGatewayConnectionConfigured = false),
                 verifyGatewayConnection =
                     VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                     },
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
                 sessionGatewayFactory = { _, _ -> gateways.removeFirst() },
@@ -189,7 +189,7 @@ class SessionRenameStateHolderTest {
                 initialState = EntryState(isGatewayConnectionConfigured = false),
                 verifyGatewayConnection =
                     VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                     },
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
                 sessionGatewayFactory = { _, _ -> gateway },
@@ -233,7 +233,7 @@ class SessionRenameStateHolderTest {
                 initialState = EntryState(isGatewayConnectionConfigured = false),
                 verifyGatewayConnection =
                     VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                        GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                     },
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
                 sessionGatewayFactory = { _, _ -> gateway },
@@ -274,7 +274,6 @@ class SessionRenameStateHolderTest {
             title = title,
             preview = preview,
             pinned = pinned,
-            updatedAt = "server-time",
         )
 
     private class FakeGatewayConnectionRepository : GatewayConnectionRepository {
@@ -297,7 +296,7 @@ class SessionRenameStateHolderTest {
         override fun openSession(sessionId: SessionId): Session = error("not used")
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>(), null)
+            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>())
 
         override fun renameSession(
             sessionId: SessionId,
@@ -329,7 +328,7 @@ class SessionRenameStateHolderTest {
         override fun openSession(sessionId: SessionId): Session = error("not used")
 
         override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>(), null)
+            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>())
 
         override fun renameSession(
             sessionId: SessionId,

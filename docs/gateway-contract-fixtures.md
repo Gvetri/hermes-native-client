@@ -24,50 +24,71 @@ adapters must use these shapes and must not infer additional routes or fields.
 
 | Area | Supported shape |
 | --- | --- |
-| Capabilities | `GET /v1/capabilities`, with the required capability identifiers listed below |
+| Capabilities | `GET /v1/capabilities` with the `endpoints` table below |
 | Connection authentication | Authenticated success and HTTP 401 authentication failure outcomes |
-| Session list | `GET /v1/sessions`, with server `limit`, `cursor`, and `search` values |
-| Session pagination | A response page with `next_cursor`, followed by a terminal page with `next_cursor: null` |
-| Session create | `POST /v1/sessions` with an optional title and an authoritative returned Session ID |
-| Session open | The authoritative Session resource by Session ID |
-| Session history | The authoritative history resource by Session ID; the empty fixture contains no fabricated messages |
-| Session rename | `PATCH /v1/sessions/{session_id}` with a confirmed title |
-| Session delete | `DELETE /v1/sessions/{session_id}` with HTTP 204 |
-| Session pin | `POST /v1/sessions/{session_id}/pin` |
-| Session unpin | `DELETE /v1/sessions/{session_id}/pin` |
-| Run create | `POST /v1/sessions/{session_id}/runs` with an input field and an authoritative Run ID |
+| Session list | `GET /api/sessions` with server `limit` and `offset`; the response is `{"object": "list", "data": [...], "limit", "offset", "has_more"}` |
+| Session search | No general search parameter: the client filters the already-loaded rows locally by title and preview. The `title` query is an exact-title lookup, not a search surface. |
+| Session pagination | `offset` advances the window; `has_more` decides whether another page exists |
+| Session create | `POST /api/sessions` with an optional title and an authoritative returned Session ID |
+| Session open | The authoritative Session resource by Session ID (`GET /api/sessions/{session_id}`) |
+| Session history | The authoritative history resource (`GET /api/sessions/{session_id}/messages`); the empty fixture contains no fabricated messages |
+| Session rename | `PATCH /api/sessions/{session_id}` with a confirmed `title` |
+| Session pin | `PATCH /api/sessions/{session_id}` with `pinned: true` |
+| Session unpin | `PATCH /api/sessions/{session_id}` with `pinned: false` |
+| Session delete | `DELETE /api/sessions/{session_id}` returning the `hermes.session.deleted` object |
+| Run create | `POST /v1/runs` with `session_id` and `input`; the response carries the authoritative Run ID and status |
 | Run status | `GET /v1/runs/{run_id}` |
 | Run observation | `GET /v1/runs/{run_id}/events` as Server-Sent Events |
 
-A Session history response contains `session_id`, an ordered `messages` array,
-and `next_cursor`. Each message must provide its Gateway `id`; `role` and
-`content` may be unavailable. When the Gateway provides them, the supported
-message fields `run_id`, `run_status`, `run_result`, and ISO-8601 `timestamp`
-remain attached to that message. The client does not derive IDs, results,
-statuses, or timestamps from other fields.
+Session row responses (create, get, and patch) can omit the list-only `preview`
+field. Missing preview remains unavailable; it is not fabricated from history.
+The real pinned database emits integer message IDs and numeric Unix-second
+timestamps. The client preserves those values as text in its domain model; it
+also accepts string IDs and timestamps. Malformed scalar types still fail.
 
-The required capability identifiers are:
+A Session history response contains `session_id`, an ordered `data` array, and a
+`pagination` object. Each message must provide its Gateway `id`. The pinned
+`_message_response` whitelist is `id`, `session_id`, `role`, `content`,
+`tool_call_id`, `tool_calls`, `tool_name`, `timestamp`, `token_count`,
+`finish_reason`, `reasoning`, `reasoning_content`, and `display_kind`. Pinned
+messages carry no Run linkage (`run_id`, `run_status`, `run_result`); the client
+preserves those fields if a future server returns them, but it never derives
+IDs, results, statuses, or timestamps from other fields.
 
-- `session.list`
-- `session.create`
-- `session.open`
-- `session.history`
-- `session.rename`
-- `session.delete`
-- `session.pin`
-- `session.unpin`
-- `run.create`
-- `run.status`
-- `run.sse`
+Because the pinned history carries no Run linkage, the client only reconciles
+Runs whose IDs it already knows — from a `POST /v1/runs` response or the
+persisted recovery registry — through `GET /v1/runs/{run_id}`. It cannot
+discover, reconcile, or offer a retry for Runs that exist only in history. This
+known-run-ID limitation is the supported boundary, not a gap to work around
+with derived data.
 
-Unknown additive JSON fields and unknown capability identifiers are allowed when
-all required identifiers are present. Unknown SSE event types are retained by
-the fixture parser so an observer can ignore them safely. Supported Run
-observation events include `run.started`, `run.running`, `run.completing`,
-`message.delta`, `run.succeeded`, `run.failed`, and `run.interrupted` (with the
-legacy `run.completed` terminal event also accepted). SSE `id` values identify
-repeated deliveries for client-side deduplication; they are not resume cursors.
-Unknown fields and events must not be used to invent client behavior.
+The required capability endpoints are the pinned `endpoints` table entries the
+client calls:
+
+| Endpoint name | Method | Path |
+| --- | --- | --- |
+| `sessions` | `GET` | `/api/sessions` |
+| `session_create` | `POST` | `/api/sessions` |
+| `session` | `GET` | `/api/sessions/{session_id}` |
+| `session_messages` | `GET` | `/api/sessions/{session_id}/messages` |
+| `session_update` | `PATCH` | `/api/sessions/{session_id}` |
+| `session_delete` | `DELETE` | `/api/sessions/{session_id}` |
+| `runs` | `POST` | `/v1/runs` |
+| `run_status` | `GET` | `/v1/runs/{run_id}` |
+| `run_events` | `GET` | `/v1/runs/{run_id}/events` |
+
+Capability detection is fail-closed: every required endpoint must be advertised
+with the exact pinned method and path, and a missing or mismatched endpoint
+fails connection verification with `REQUIRED_FEATURE_UNAVAILABLE`. Unknown
+additive endpoints and unknown additive JSON fields are allowed when every
+required endpoint is present. The pinned SSE stream uses `data:` records with
+an `event` discriminator inside JSON, not named SSE `event:` or `id:` lines.
+The client consumes `message.delta`, `run.completed`, `run.failed`,
+`run.cancelled`, and `run.stopping`. Known tool, approval, reasoning, subagent,
+and steering events indicate an active Run but do not expose tool or provider
+administration. Other event types are ignored. The current adapter has no
+server event cursor or event-ID deduplication claim; it prevents duplicate
+observers locally. Unknown fields and events must not invent client behavior.
 
 ## Identity and data policy
 
@@ -83,11 +104,14 @@ The `malformed` directory contains deterministic parser inputs for:
 
 - invalid JSON;
 - a missing required JSON field;
-- an invalid required JSON field type; and
-- invalid SSE event framing.
+- an invalid required JSON field type;
+- invalid SSE event framing;
+- an incomplete Run admission response; and
+- identity-mismatched responses for a Session, history, pin, Run status, or Run
+  event, which must fail closed instead of being applied.
 
 The `runs` directory also contains a valid Run observation stream that ends
-with an interruption event instead of a terminal event.
+before a terminal event, so the client must reconcile through the Run resource.
 
 The tests also construct missing-provenance and duplicate-provenance inputs.
 Failures use stable safe categories: `INVALID_JSON`,
@@ -117,6 +141,6 @@ before changing the pinned descriptor or accepting a new Gateway boundary.
 ## Excluded behavior
 
 This fixture set does not define dashboard-only routes, profile discovery,
-archive or restore, attachments, unsupported interaction types, event-resume
-cursors, or production HTTP/SSE adapters. Ambiguous behavior is excluded rather
-than inferred.
+archive or restore, attachments, unsupported interaction types, server search
+endpoints, event-resume cursors, or production HTTP/SSE adapters. Ambiguous
+behavior is excluded rather than inferred.

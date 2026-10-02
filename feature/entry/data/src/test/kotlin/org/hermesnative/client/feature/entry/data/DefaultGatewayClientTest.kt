@@ -9,6 +9,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.RunEventType
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunReconciliationDecision
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.junit.Assert.assertEquals
@@ -59,26 +60,33 @@ class DefaultGatewayClientTest {
         val client = DefaultGatewayClient("https://gateway.example", "test-token", transport)
         val sessionId = SessionId(SESSION_ID)
 
-        assertEquals(11, client.discoverCapabilities().identifiers.size)
-        assertEquals(1, client.listSessions().sessions.size)
+        val capabilities = client.discoverCapabilities()
+        assertEquals(10, capabilities.endpoints.size)
+        assertTrue(capabilities.supports("run_events"))
+        val page = client.listSessions()
+        assertEquals(1, page.sessions.size)
+        assertEquals(20, page.nextOffset)
         assertEquals(CREATED_SESSION_ID, client.createSession(null).id.value)
         assertEquals(sessionId, client.openSession(sessionId).id)
         val history = client.loadSessionHistory(sessionId)
         assertEquals(sessionId, history.sessionId)
-        assertEquals(RUN_ID, history.messages.single().runId?.value)
-        assertEquals("completed", history.messages.single().runStatus)
-        assertNull(history.messages.single().role)
-        assertNull(history.messages.single().content)
-        assertNull(history.messages.single().runResult)
-        assertEquals("2026-09-08T20:00:00Z", history.messages.single().timestamp)
+        assertEquals(listOf("1", "2"), history.messages.map { it.id })
+        assertEquals("user", history.messages.first().role)
+        assertEquals("Run this", history.messages.first().content)
+        assertEquals("Authoritative result", history.messages.last().content)
+        assertNull(history.messages.first().runId)
+        assertEquals("1788897600.0", history.messages.last().timestamp)
         assertEquals("Renamed session", client.renameSession(sessionId, "Renamed session").title)
         client.deleteSession(sessionId)
         assertTrue(client.pinSession(sessionId).pinned)
         assertFalse(client.unpinSession(sessionId).pinned)
-        assertEquals(RUN_ID, client.createRun(sessionId, "").id.value)
-        assertEquals("succeeded", client.getRunStatus(RunId(RUN_ID)).status)
+        val run = client.createRun(sessionId, "")
+        assertEquals(RUN_ID, run.id.value)
+        assertEquals("started", run.status)
+        assertEquals(sessionId, run.sessionId)
+        assertEquals("completed", client.getRunStatus(RunId(RUN_ID)).status)
         assertEquals(
-            listOf(RunEventType.STARTED, RunEventType.RUNNING, RunEventType.COMPLETED),
+            listOf(RunEventType.RUNNING, RunEventType.MESSAGE_DELTA, RunEventType.COMPLETED),
             client.observeRun(RunId(RUN_ID)).toList().map { it.type },
         )
         assertTrue(transport.eventStreamClosed)
@@ -144,12 +152,16 @@ class DefaultGatewayClientTest {
 
         val result = ReconcileRun(client, client).execute(RunId(RUN_ID), SessionId(SESSION_ID))
 
-        assertEquals("succeeded", result.run.status)
-        assertEquals(RUN_ID, result.history.messages.single().runId?.value)
+        assertEquals("completed", result.run.status)
+        assertEquals("Authoritative result", result.history.messages.last().content)
+        // The pinned Session message projection carries no run_id/run_status/run_result metadata,
+        // so the authoritative terminal Run resource is the confirmation source; the history
+        // fetched alongside it is applied for display only.
+        assertEquals(RunReconciliationDecision.CONFIRMED, result.decision)
         assertEquals(
             listOf(
                 "/v1/runs/$RUN_ID",
-                "/v1/sessions/$SESSION_ID/history",
+                "/api/sessions/$SESSION_ID/messages",
             ),
             transport.requests.map { URI(it.url).path },
         )
@@ -168,26 +180,25 @@ class DefaultGatewayClientTest {
     }
 
     @Test
-    fun session_list_forwards_and_encodes_server_search_and_cursor_parameters() {
+    fun session_list_forwards_and_encodes_the_server_limit_and_offset_parameters() {
         val transport = RecordingTransport(responses = listOf(response("sessions/list-response-page-1.json")))
         val client = DefaultGatewayClient("https://gateway.example", "test-token", transport)
 
         client.listSessions(
             SessionListRequest(
                 limit = 7,
-                cursor = "page two",
-                search = "title & preview",
+                offset = 42,
             ),
         )
 
         assertEquals(
-            "limit=7&cursor=page%20two&search=title%20%26%20preview",
+            "limit=7&offset=42",
             URI(transport.requests.single().url).rawQuery,
         )
     }
 
     @Test
-    fun capabilities_allow_unknown_additive_identifiers_but_reject_missing_required_identifiers() {
+    fun capabilities_allow_unknown_additive_endpoints_but_reject_missing_required_endpoints() {
         val additiveClient =
             DefaultGatewayClient(
                 endpoint = "https://gateway.example",
@@ -197,8 +208,8 @@ class DefaultGatewayClientTest {
 
         val capabilities = additiveClient.discoverCapabilities()
 
-        assertTrue(capabilities.supports("gateway.future.capability"))
-        assertEquals(12, capabilities.identifiers.size)
+        assertTrue(capabilities.supports("gateway_future_endpoint"))
+        assertEquals(11, capabilities.endpoints.size)
 
         val missingClient =
             DefaultGatewayClient(
@@ -209,6 +220,35 @@ class DefaultGatewayClientTest {
 
         assertFailure(GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE) {
             missingClient.discoverCapabilities()
+        }
+    }
+
+    @Test
+    fun capabilities_with_a_mismatched_required_path_are_rejected() {
+        val fixture =
+            Json.parseToJsonElement(contractsRoot.resolve("capabilities/success.json").readText()).jsonObject
+        val mismatchedBody =
+            fixture
+                .getValue("response")
+                .jsonObject
+                .getValue("body")
+                .toString()
+                .replace(
+                    "\"/api/sessions/{session_id}/messages\"",
+                    "\"/api/sessions/{session_id}/history\"",
+                )
+        val client =
+            DefaultGatewayClient(
+                endpoint = "https://gateway.example",
+                bearerToken = "test-token",
+                transport =
+                    RecordingTransport(
+                        responses = listOf(GatewayHttpResponse(statusCode = 200, body = mismatchedBody)),
+                    ),
+            )
+
+        assertFailure(GatewayErrorCategory.REQUIRED_FEATURE_UNAVAILABLE) {
+            client.discoverCapabilities()
         }
     }
 
@@ -259,7 +299,7 @@ class DefaultGatewayClientTest {
             DefaultGatewayClient(
                 endpoint = "https://gateway.example",
                 bearerToken = "secret-token",
-                transport = RecordingTransport(failure = IOException("Authorization: Bearer secret-token")),
+                transport = RecordingTransport(failure = IOException("Authorization: Bearer ***")),
             )
 
         val error = captureFailure { client.discoverCapabilities() }
@@ -317,7 +357,7 @@ class DefaultGatewayClientTest {
             clientForResponse("malformed/mismatched-pin-response.json").unpinSession(SessionId(SESSION_ID))
         }
         assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
-            clientForResponse("malformed/mismatched-run-create-response.json").createRun(SessionId(SESSION_ID), "input")
+            clientForResponse("malformed/incomplete-run-admission-response.json").createRun(SessionId(SESSION_ID), "input")
         }
         assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
             clientForResponse("malformed/mismatched-run-status-response.json").getRunStatus(RunId(RUN_ID))
@@ -403,8 +443,11 @@ class DefaultGatewayClientTest {
         if (expectedQuery == null) {
             assertNull(rawQuery)
         } else {
-            assertEquals("limit=20", rawQuery)
-            assertEquals("20", expectedQuery.getValue("limit").jsonPrimitive.content)
+            val serialized =
+                expectedQuery.entries.joinToString("&") { (key, value) ->
+                    "$key=${value.jsonPrimitive.content}"
+                }
+            assertEquals(serialized, rawQuery)
         }
 
         val expectedBody = expected["body"]?.jsonObject

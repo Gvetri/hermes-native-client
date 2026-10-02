@@ -3,8 +3,14 @@
   "response": {
     "status": 200,
     "body": {
-      "session_id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
-      "pinned": true
+      "object": "hermes.session",
+      "session": {
+        "id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
+        "source": "api_server",
+        "title": null,
+        "pinned": true,
+        "message_count": 0
+      }
     }
   }
 }

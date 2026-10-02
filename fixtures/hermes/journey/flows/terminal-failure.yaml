@@ -22,10 +22,12 @@ name: terminal-failure
 - inputText: "Fail this"
 - hideKeyboard
 - tapOn: "Send"
+# The pinned Gateway settles the failed Run through the Run resource; its
+# history carries no Run linkage, so the settled summary shows the tracked
+# Run and the authoritative history replaces the temporary observed response.
 - extendedWaitUntil:
     visible: "Run state: Failed"
     timeout: 30000
-- assertVisible: "Run ID: run-failure"
 - swipe:
     start: "50%, 71%"
     end: "50%, 62%"
@@ -35,6 +37,6 @@ name: terminal-failure
     end: "50%, 62%"
     duration: 400
 - extendedWaitUntil:
-    visible: "This Run failed. Your conversation is preserved."
+    visible: "Latest Run: run-failure"
     timeout: 30000
-- assertVisible: "Try again"
+- assertVisible: "Stable failure result"

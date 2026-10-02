@@ -50,7 +50,11 @@ internal class GatewayRunEventObservation(
         return object : Iterator<RunEvent> {
             private var buffered: RunEvent? = null
             private var hasBuffered = false
-            private val seenEventKeys = mutableSetOf<String>()
+
+            // The pinned Run stream carries no SSE `id:` values, so byte-identical payloads are
+            // the only observable repeated deliveries; distinct lifecycle events carry distinct
+            // timestamps and are never collapsed.
+            private val seenFrames = mutableSetOf<String>()
 
             override fun hasNext(): Boolean {
                 if (closed) return false
@@ -58,7 +62,7 @@ internal class GatewayRunEventObservation(
                 try {
                     while (frames.hasNext()) {
                         val frame = frames.next()
-                        if (!seenEventKeys.add(frame.dedupeKey)) continue
+                        if (!seenFrames.add(frame.data)) continue
                         val event = parseFrame(frame) ?: continue
                         buffered = event
                         hasBuffered = true

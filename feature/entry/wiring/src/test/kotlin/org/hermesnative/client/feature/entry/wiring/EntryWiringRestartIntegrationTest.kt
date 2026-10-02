@@ -139,7 +139,7 @@ class EntryWiringRestartIntegrationTest {
     }
 
     @Test
-    fun production_wiring_keeps_recovery_when_status_is_terminal_without_terminal_history() {
+    fun production_wiring_settles_recovery_when_the_run_status_is_terminal() {
         val context = RuntimeEnvironment.getApplication()
         val gateway = RestartGateway()
         val endpoint = "https://gateway.example/profile"
@@ -167,7 +167,9 @@ class EntryWiringRestartIntegrationTest {
                     it.sessionList?.openedSession?.let { opened -> !opened.isReconciliationInProgress } == true
                 }
                 assertTrue(gateway.statusRequests.contains(gateway.activeRun.id))
-                assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
+                // The pinned Gateway's history carries no Run linkage, so the terminal Run
+                // resource itself settles the recovery entry and it is removed.
+                assertTrue(storage.load().isEmpty())
             } finally {
                 restartedHolder.close()
             }
@@ -406,7 +408,9 @@ class EntryWiringRestartIntegrationTest {
         EntryWiring.createEntryStateHolder(
             context = context,
             capabilityDiscovery = { _, _ ->
-                GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers)
+                GatewayCapabilities(
+                    PublicBetaGatewayCapabilityManifest.current.requiredEndpoints,
+                )
             },
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
@@ -474,7 +478,7 @@ class EntryWiringRestartIntegrationTest {
             val SESSION_ID = SessionId("wiring-session")
         }
 
-        val session = Session(SESSION_ID, "Wiring session", null, pinned = false, updatedAt = null)
+        val session = Session(SESSION_ID, "Wiring session", null, pinned = false)
         val activeRun = Run(RunId("wiring-run"), SESSION_ID, "running")
         val externalRun = Run(RunId("external-run"), SESSION_ID, "succeeded")
         val statusRequests = CopyOnWriteArrayList<RunId>()
@@ -512,7 +516,6 @@ class EntryWiringRestartIntegrationTest {
                             runResult = null,
                         ),
                     ),
-                    null,
                 )
             } else if (terminal) {
                 SessionHistory(
@@ -535,10 +538,9 @@ class EntryWiringRestartIntegrationTest {
                             runResult = "Recovered result",
                         ),
                     ),
-                    null,
                 )
             } else {
-                SessionHistory(sessionId, emptyList(), null)
+                SessionHistory(sessionId, emptyList())
             }
 
         override fun renameSession(

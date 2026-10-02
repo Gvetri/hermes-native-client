@@ -77,6 +77,5 @@ class SessionMutationFlowTest {
             title = title,
             preview = "Preview",
             pinned = false,
-            updatedAt = "server-time",
         )
 }

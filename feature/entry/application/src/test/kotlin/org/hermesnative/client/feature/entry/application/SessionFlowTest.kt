@@ -13,7 +13,7 @@ import org.junit.Test
 class SessionFlowTest {
     @Test
     fun creating_a_session_forwards_the_optional_title_and_returns_the_gateway_session() {
-        val expected = Session(SessionId("created"), "Created", null, pinned = false, updatedAt = "now")
+        val expected = Session(SessionId("created"), "Created", null, pinned = false)
         val gateway = RecordingSessionGateway().apply { createResult = expected }
 
         val created = CreateSession(gateway).execute("Created")
@@ -25,7 +25,7 @@ class SessionFlowTest {
     @Test
     fun loading_the_session_list_requests_the_first_server_page_without_local_paging() {
         val gateway = RecordingSessionGateway()
-        val expectedPage = SessionPage(emptyList(), nextCursor = "server-cursor")
+        val expectedPage = SessionPage(emptyList(), nextOffset = 20)
         gateway.listResult = expectedPage
 
         val page = LoadSessionList(gateway).execute()
@@ -36,9 +36,9 @@ class SessionFlowTest {
     }
 
     @Test
-    fun loading_the_session_list_forwards_search_and_server_cursor() {
+    fun loading_the_session_list_forwards_the_server_limit_and_offset() {
         val gateway = RecordingSessionGateway()
-        val request = SessionListRequest(limit = 5, cursor = "server-cursor", search = "server query")
+        val request = SessionListRequest(limit = 5, offset = 10)
 
         LoadSessionList(gateway).execute(request)
 
@@ -48,8 +48,8 @@ class SessionFlowTest {
     @Test
     fun opening_a_session_fetches_the_authoritative_session_then_its_history() {
         val sessionId = SessionId("session-one")
-        val session = Session(sessionId, "Real title", "Real preview", pinned = false, updatedAt = "now")
-        val history = SessionHistory(sessionId, emptyList(), nextCursor = null)
+        val session = Session(sessionId, "Real title", "Real preview", pinned = false)
+        val history = SessionHistory(sessionId, emptyList())
         val gateway = RecordingSessionGateway(session, history)
 
         val opened = OpenSession(gateway).execute(sessionId)
@@ -68,7 +68,7 @@ class SessionFlowTest {
         val listRequests = mutableListOf<SessionListRequest>()
         val operations = mutableListOf<String>()
         var createCalls = 0
-        var createResult = Session(SessionId("created"), null, null, pinned = false, updatedAt = null)
+        var createResult = Session(SessionId("created"), null, null, pinned = false)
         val createTitles = mutableListOf<String?>()
 
         override fun listSessions(request: SessionListRequest): SessionPage {

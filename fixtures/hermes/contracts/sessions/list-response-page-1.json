@@ -3,16 +3,21 @@
   "response": {
     "status": 200,
     "body": {
-      "sessions": [
+      "object": "list",
+      "data": [
         {
           "id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
+          "source": "api_server",
           "title": null,
           "preview": null,
           "pinned": false,
-          "updated_at": null
+          "last_active": 1757325600.0,
+          "message_count": 0
         }
       ],
-      "next_cursor": "page-two"
+      "limit": 20,
+      "offset": 0,
+      "has_more": true
     }
   }
 }

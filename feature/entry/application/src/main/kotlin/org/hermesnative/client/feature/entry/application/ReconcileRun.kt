@@ -30,7 +30,7 @@ class ReconcileRun(
         return AuthoritativeRunReconciliation(
             run = run,
             history = history,
-            decision = decideRunReconciliation(run, history),
+            decision = decideRunReconciliation(run),
         )
     }
 

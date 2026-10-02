@@ -4,18 +4,15 @@
   "port": 18443,
   "tls": true,
   "capabilities": [
-    "client-manifest",
-    "session.list",
-    "session.create",
-    "session.open",
-    "session.history",
-    "session.rename",
-    "session.delete",
-    "session.pin",
-    "session.unpin",
-    "run.create",
-    "run.status",
-    "run.sse"
+    "sessions",
+    "session_create",
+    "session",
+    "session_update",
+    "session_delete",
+    "session_messages",
+    "runs",
+    "run_status",
+    "run_events"
   ],
   "sessions": [
     {
@@ -29,17 +26,10 @@
     {
       "run_id": "run-failure",
       "session_id": "session-alpha",
-      "create_status": "starting",
+      "create_status": "started",
       "observation": [
         {
-          "type": "run.started",
-          "status": "starting",
-          "id": "f1"
-        },
-        {
-          "type": "run.failed",
-          "status": "failed",
-          "id": "f2"
+          "type": "run.failed"
         }
       ],
       "final_status": "failed",
@@ -47,9 +37,7 @@
         {
           "id": "message-failure",
           "role": "assistant",
-          "content": "Stable failure result",
-          "run_id": "run-failure",
-          "run_status": "failed"
+          "content": "Stable failure result"
         }
       ]
     }

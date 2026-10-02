@@ -10,25 +10,24 @@ import java.io.File
 
 class GatewayHistoryMapperTest {
     @Test
-    fun history_fixture_maps_gateway_run_relationship_result_status_and_timestamp() {
+    fun history_fixture_maps_ordered_message_fields_and_omits_unavailable_run_metadata() {
         val root =
             GatewayJsonParser.parseObject(
                 "session history",
                 """
                 {
+                  "object": "list",
                   "session_id": "session-1",
-                  "messages": [
+                  "data": [
                     {
                       "id": "message-1",
+                      "session_id": "session-1",
                       "role": "user",
                       "content": "Run this",
-                      "run_id": "run-1",
-                      "run_status": "completed",
-                      "run_result": "Done",
                       "timestamp": "2026-09-08T20:00:00Z"
                     }
                   ],
-                  "next_cursor": null
+                  "pagination": {"limit": 500, "offset": 0, "order": "latest", "returned": 1}
                 }
                 """.trimIndent(),
             )
@@ -36,74 +35,47 @@ class GatewayHistoryMapperTest {
         val history = GatewayJsonParser.parseHistory("session history", root)
         val message = history.messages.single()
 
-        assertEquals("run-1", message.runId?.value)
-        assertEquals("completed", message.runStatus)
-        assertEquals("Done", message.runResult)
+        assertEquals("session-1", history.sessionId.value)
+        assertEquals("message-1", message.id)
+        assertEquals("user", message.role)
+        assertEquals("Run this", message.content)
         assertEquals("2026-09-08T20:00:00Z", message.timestamp)
+        // The pinned message projection never carries run identity metadata.
+        assertNull(message.runId)
+        assertNull(message.runStatus)
+        assertNull(message.runResult)
     }
 
     @Test
-    fun external_runs_contract_fixture_maps_mixed_run_metadata_without_local_content() {
+    fun populated_contract_fixture_maps_chat_content_without_inventing_run_metadata() {
         val repositoryRoot = File(requireNotNull(System.getProperty("fixture.repositoryRoot")))
         val envelope =
             GatewayJsonParser.parseObject(
-                "external Session history fixture",
-                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-external-runs.json").readText(),
+                "populated Session history fixture",
+                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-populated.json").readText(),
             )
         val body = envelope["response"]!!.jsonObject["body"]!!.jsonObject
-        val history = GatewayJsonParser.parseHistory("external Session history fixture", body)
+        val history = GatewayJsonParser.parseHistory("populated Session history fixture", body)
 
+        assertEquals(listOf("1", "2"), history.messages.map { it.id })
+        assertEquals(listOf("user", "assistant"), history.messages.map { it.role })
+        assertEquals(listOf("Run this", "Authoritative result"), history.messages.map { it.content })
         assertEquals(
-            listOf("external-run-failed", "external-run-succeeded"),
-            history.messages.map { it.runId?.value },
-        )
-        assertEquals(listOf("failed", "succeeded"), history.messages.map { it.runStatus })
-        assertEquals(listOf("Remote failure", "Remote result"), history.messages.map { it.runResult })
-        assertEquals(
-            listOf("2026-09-08T20:00:00Z", "2026-09-08T21:00:00Z"),
+            listOf("1788897540.0", "1788897600.0"),
             history.messages.map { it.timestamp },
         )
-        assertEquals(null, history.messages.first().role)
-        assertEquals(null, history.messages.first().content)
+        assertEquals(listOf(null, null), history.messages.map { it.runId })
+        assertEquals(listOf(null, null), history.messages.map { it.runStatus })
+        assertEquals(listOf(null, null), history.messages.map { it.runResult })
     }
 
     @Test
-    fun mixed_runs_contract_fixture_maps_local_and_external_run_metadata_in_gateway_order() {
-        val repositoryRoot = File(requireNotNull(System.getProperty("fixture.repositoryRoot")))
-        val envelope =
-            GatewayJsonParser.parseObject(
-                "mixed Session history fixture",
-                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-mixed-runs.json").readText(),
-            )
-        val body = envelope["response"]!!.jsonObject["body"]!!.jsonObject
-        val history = GatewayJsonParser.parseHistory("mixed Session history fixture", body)
-
-        assertEquals(
-            listOf("local-run-created", "external-run-failed", "external-run-succeeded", "local-run-created"),
-            history.messages.map { it.runId?.value },
-        )
-        assertEquals(listOf("succeeded", "failed", "succeeded", "succeeded"), history.messages.map { it.runStatus })
-        assertEquals(listOf(null, "Remote failure", "Remote result", "Local result"), history.messages.map { it.runResult })
-        assertEquals(
-            listOf(
-                "2026-09-08T19:00:00Z",
-                "2026-09-08T20:00:00Z",
-                "2026-09-08T21:00:00Z",
-                "2026-09-08T22:00:00Z",
-            ),
-            history.messages.map { it.timestamp },
-        )
-        assertEquals(listOf(null, null, null, null), history.messages.map { it.role })
-        assertEquals(listOf(null, null, null, null), history.messages.map { it.content })
-    }
-
-    @Test
-    fun absent_optional_run_fields_remain_unavailable() {
+    fun absent_optional_fields_remain_unavailable() {
         val root =
             GatewayJsonParser.parseObject(
                 "session history",
                 """
-                {"session_id":"session-1","messages":[{"id":"message-1","role":"user","content":"Hello"}],"next_cursor":null}
+                {"object":"list","session_id":"session-1","data":[{"id":"message-1","role":"user","content":"Hello"}],"pagination":{"limit":500,"offset":0,"order":"latest","returned":1}}
                 """.trimIndent(),
             )
 
@@ -122,12 +94,13 @@ class GatewayHistoryMapperTest {
                 "session history",
                 """
                 {
+                  "object": "list",
                   "session_id": "session-1",
-                  "messages": [
+                  "data": [
                     {"id":"message-1","role":"user","content":"First"},
                     {"id":"message-1","role":"assistant","content":"Second"}
                   ],
-                  "next_cursor": null
+                  "pagination": {"limit": 500, "offset": 0, "order": "latest", "returned": 2}
                 }
                 """.trimIndent(),
             )
@@ -143,7 +116,25 @@ class GatewayHistoryMapperTest {
             GatewayJsonParser.parseObject(
                 "session history",
                 """
-                {"session_id":"session-1","messages":[{"role":"assistant","content":"Hello"}],"next_cursor":null}
+                {"object":"list","session_id":"session-1","data":[{"role":"assistant","content":"Hello"}],"pagination":{"limit":500,"offset":0,"order":"latest","returned":1}}
+                """.trimIndent(),
+            )
+
+        val error =
+            requireNotNull(
+                runCatching { GatewayJsonParser.parseHistory("session history", root) }
+                    .exceptionOrNull() as? GatewayException,
+            )
+        assertEquals(GatewayErrorCategory.INVALID_RESPONSE, error.category)
+    }
+
+    @Test
+    fun missing_pagination_is_rejected_as_an_invalid_gateway_response() {
+        val root =
+            GatewayJsonParser.parseObject(
+                "session history",
+                """
+                {"object":"list","session_id":"session-1","data":[]}
                 """.trimIndent(),
             )
 

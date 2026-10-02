@@ -189,7 +189,7 @@ internal fun SessionListPane(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
                 verticalArrangement = Arrangement.Top,
             ) {
-                if (state.sessions.isEmpty()) {
+                if (state.visibleSessions.isEmpty()) {
                     item { SessionListStateContent(state = state) }
                     item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
                 } else {
@@ -203,7 +203,7 @@ internal fun SessionListPane(
                         }
                     }
                     items(
-                        items = state.sessions,
+                        items = state.visibleSessions,
                         key = { session -> session.id.value },
                     ) { session ->
                         SessionRow(
@@ -342,17 +342,17 @@ private fun SessionListPaneHeader(
 /** State content for a pane without rows; panes with rows render the list instead. */
 @Composable
 private fun SessionListStateContent(state: SessionListUiState) {
-    if ((state.isLoading || state.isSearching) && state.sessions.isEmpty()) {
+    if ((state.isLoading || state.isSearching) && state.visibleSessions.isEmpty()) {
         LoadingSessionsContent(if (state.isSearching) "Searching Sessions…" else "Loading Sessions…")
-    } else if (state.sessions.isEmpty() && (state.isUnavailable || state.isStale)) {
+    } else if (state.visibleSessions.isEmpty() && (state.isUnavailable || state.isStale)) {
         if (state.searchQuery.isNotBlank()) {
             SearchUnavailableContent()
         } else {
             SessionsUnavailableContent()
         }
-    } else if (state.searchQuery.isNotBlank() && state.sessions.isEmpty()) {
+    } else if (state.searchQuery.isNotBlank() && state.visibleSessions.isEmpty()) {
         NoSearchResultsContent()
-    } else if (state.sessions.isEmpty()) {
+    } else if (state.visibleSessions.isEmpty()) {
         EmptySessionsContent()
     }
 }
@@ -363,10 +363,10 @@ private fun SessionListPaginationFooterIfAvailable(
     onEvent: (EntryUiEvent) -> Unit,
 ) {
     if (
-        state.sessions.isEmpty() &&
+        state.visibleSessions.isEmpty() &&
         !state.isLoading &&
         !state.isSearching &&
-        state.nextCursor != null
+        state.nextOffset != null
     ) {
         SessionPaginationFooter(state = state, onEvent = onEvent)
     }
@@ -564,7 +564,7 @@ private fun SessionPaginationFooter(
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 )
             }
-        state.nextCursor != null ->
+        state.nextOffset != null ->
             Button(
                 onClick = { onEvent(EntryUiEvent.LoadMoreSessionsClicked) },
                 enabled =
@@ -990,6 +990,21 @@ internal fun SessionDetailContent(
     modifier: Modifier = Modifier,
 ) {
     val displayedMessages = state.messages + listOfNotNull(state.activeResponse)
+    val canSubmit =
+        RunSubmissionState(
+            latestRun = state.latestRun,
+            activeRuns = state.activeRuns,
+            isSubmissionPending = state.isSending || listRequestActive,
+        ).canSubmit
+    val retryEnabled =
+        actionsEnabled &&
+            canSubmit &&
+            !state.isRefreshing &&
+            mutation?.pendingAction == null &&
+            !state.isSending &&
+            !state.isReconciliationInProgress &&
+            !state.hasUnresolvedSubmission &&
+            !listRequestActive
     // Without a transcript there is no weighted list to absorb the free space, so the pane
     // scrolls as one surface and the composer and Send stay reachable in short windows.
     val paneScrollState = rememberScrollState()
@@ -1019,6 +1034,7 @@ internal fun SessionDetailContent(
                 state = state,
                 mutation = mutation,
                 actionsEnabled = actionsEnabled,
+                retryEnabled = retryEnabled,
                 listRequestActive = listRequestActive,
                 listIsStale = listIsStale,
                 listErrorCategory = listErrorCategory,
@@ -1026,12 +1042,6 @@ internal fun SessionDetailContent(
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
-        val canSubmit =
-            RunSubmissionState(
-                latestRun = state.latestRun,
-                activeRuns = state.activeRuns,
-                isSubmissionPending = state.isSending || listRequestActive,
-            ).canSubmit
         if (displayedMessages.isEmpty()) {
             Text(text = "No messages in this Session.")
         } else {
@@ -1048,6 +1058,7 @@ internal fun SessionDetailContent(
                         state = state,
                         mutation = mutation,
                         actionsEnabled = actionsEnabled,
+                        retryEnabled = retryEnabled,
                         listRequestActive = listRequestActive,
                         listIsStale = listIsStale,
                         listErrorCategory = listErrorCategory,
@@ -1061,15 +1072,7 @@ internal fun SessionDetailContent(
                 ) { message ->
                     SessionMessageContent(
                         message = message,
-                        retryEnabled =
-                            actionsEnabled &&
-                                canSubmit &&
-                                !state.isRefreshing &&
-                                mutation?.pendingAction == null &&
-                                !state.isSending &&
-                                !state.isReconciliationInProgress &&
-                                !state.hasUnresolvedSubmission &&
-                                !listRequestActive,
+                        retryEnabled = retryEnabled,
                         onRetry = { runId -> onEvent(EntryUiEvent.RetryRunClicked(runId)) },
                     )
                 }
@@ -1167,6 +1170,7 @@ private fun SessionDetailSummary(
     state: OpenSessionUiState,
     mutation: SessionMutationUiState?,
     actionsEnabled: Boolean,
+    retryEnabled: Boolean,
     listRequestActive: Boolean,
     listIsStale: Boolean,
     listErrorCategory: SessionListErrorCategory?,
@@ -1235,6 +1239,19 @@ private fun SessionDetailSummary(
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
             )
         } ?: Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
+        if (state.latestRunRetryAvailable) {
+            Spacer(modifier = Modifier.height(8.dp))
+            // The pinned Gateway's history carries no Run linkage, so the explicit retry
+            // for a settled failed Run lives in this known-Run summary and exists only
+            // while the client still holds the original input in process memory.
+            OutlinedButton(
+                onClick = { onEvent(EntryUiEvent.RetryRunClicked(run.id)) },
+                enabled = retryEnabled,
+                modifier = Modifier.heightIn(min = 40.dp),
+            ) {
+                Text(text = "Try again")
+            }
+        }
     }
 }
 

@@ -1620,6 +1620,11 @@ class EntryStateHolder(
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
                                 latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                latestRunRetryAvailable =
+                                    latestRunRetryAvailable(
+                                        knownRuns,
+                                        latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                    ),
                                 activeResponse = observedMessageUiState(latestObservation),
                             ),
                     ),
@@ -1629,52 +1634,36 @@ class EntryStateHolder(
     private fun updateSearchQuery(value: String) {
         var observationToClose: RunEventObservation? = null
         var observationJobToCancel: Job? = null
-        val job =
-            synchronized(sessionRequestLock) {
-                val state = _uiState.value
-                val sessionList = state.sessionList ?: return
-                if (sessionList.searchQuery == value) return
-                if (sessionList.createSession?.isSubmitting == true) return
-                if (sessionList.sessionMutations.isNotEmpty()) return
+        synchronized(sessionRequestLock) {
+            val state = _uiState.value
+            val sessionList = state.sessionList ?: return
+            if (sessionList.searchQuery == value) return
+            if (sessionList.createSession?.isSubmitting == true) return
+            if (sessionList.sessionMutations.isNotEmpty()) return
 
-                // A search replaces the visible conversation with the result list, so the
-                // Session that leaves the pane is released like every other exit path; a later
-                // switch cannot do it, because by then the selection is already null.
-                sessionList.openedSession?.session?.id?.let { openedSessionId ->
-                    val released = releaseRunObservation(openedSessionId)
-                    observationJobToCancel = released.job
-                    observationToClose = released.observation
-                }
-
-                val gateway = sessionGateway
-                val requestGeneration = beginSessionRequest()
-                _uiState.value =
-                    state.copy(
-                        sessionList =
-                            sessionList.copy(
-                                sessions = sessionList.sessions,
-                                searchQuery = value,
-                                nextCursor = null,
-                                isLoading = gateway != null,
-                                isLoadingMore = false,
-                                isSearching = gateway != null,
-                                isRefreshing = false,
-                                isStale = false,
-                                isUnavailable = false,
-                                openingSessionId = null,
-                                openedSession = null,
-                                errorCategory = null,
-                            ),
-                    )
-                gateway?.let {
-                    val request = SessionRequestContext(requestGeneration, value, cursor = null)
-                    createSessionJob {
-                        delay(SESSION_SEARCH_DEBOUNCE_MILLIS)
-                        loadFirstPage(it, request, preserveSessions = false)
-                    }
-                }
+            // A search replaces the visible conversation with the result list, so the
+            // Session that leaves the pane is released like every other exit path; a later
+            // switch cannot do it, because by then the selection is already null.
+            sessionList.openedSession?.session?.id?.let { openedSessionId ->
+                val released = releaseRunObservation(openedSessionId)
+                observationJobToCancel = released.job
+                observationToClose = released.observation
             }
-        job?.start()
+
+            // The pinned Gateway has no general Session search, so the query filters the
+            // server-provided Sessions already loaded in this pane. No request is issued:
+            // transcripts are never fetched and titles/previews are not re-queried.
+            _uiState.value =
+                state.copy(
+                    sessionList =
+                        sessionList.copy(
+                            searchQuery = value,
+                            openingSessionId = null,
+                            openedSession = null,
+                            errorCategory = null,
+                        ),
+                )
+        }
         observationJobToCancel?.cancel()
         observationToClose?.close()
     }
@@ -1762,7 +1751,7 @@ class EntryStateHolder(
                     ?: latestObservedObservationState(openedSession.session.id, visibleSessionRuns(openedSession.session.id))?.run?.id
             val requestGeneration = beginSessionRequest()
             val requestConnectionGeneration = connectionGeneration
-            val request = SessionRequestContext(requestGeneration, sessionList.searchQuery, cursor = null)
+            val request = SessionRequestContext(requestGeneration, sessionList.searchQuery, offset = null)
             _uiState.value =
                 state.copy(
                     sessionList =
@@ -1796,7 +1785,7 @@ class EntryStateHolder(
         try {
             val openedSession = OpenSession(gateway).execute(sessionId)
             val applied =
-                updateCurrentSessionRequest(request.generation, request.query) { current ->
+                updateCurrentSessionRequest(request.generation) { current ->
                     val previous = current.openedSession
                     if (previous == null) {
                         current
@@ -1820,6 +1809,11 @@ class EntryStateHolder(
                                     activeRuns = knownRuns.activeRuns(),
                                     isSending = previous.isSending || runJobs.containsKey(sessionId),
                                     latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                    latestRunRetryAvailable =
+                                        latestRunRetryAvailable(
+                                            knownRuns,
+                                            latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                        ),
                                     activeResponse = observedMessageUiState(latestObservation),
                                     isRefreshing = previous.isRefreshing,
                                 ).copy(
@@ -2282,6 +2276,11 @@ class EntryStateHolder(
                                                 latestRun = latestRun,
                                                 activeRuns = knownRuns.activeRuns(),
                                                 latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                                latestRunRetryAvailable =
+                                                    latestRunRetryAvailable(
+                                                        knownRuns,
+                                                        latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                                    ),
                                                 activeResponse = observedMessageUiState(latestObservation),
                                                 errorCategory = null,
                                                 isStale = false,
@@ -2307,6 +2306,11 @@ class EntryStateHolder(
                                                 sendErrorCategory = opened.sendErrorCategory,
                                                 hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
                                                 latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                                latestRunRetryAvailable =
+                                                    latestRunRetryAvailable(
+                                                        visibleSessionRuns(sessionId),
+                                                        latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                                    ),
                                                 activeResponse = observedMessageUiState(latestObservation),
                                                 errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                                                 isStale = true,
@@ -2393,6 +2397,11 @@ class EntryStateHolder(
                                     sendErrorCategory = opened.sendErrorCategory,
                                     hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
                                     latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                    latestRunRetryAvailable =
+                                        latestRunRetryAvailable(
+                                            knownRuns,
+                                            latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                        ),
                                     activeResponse = observedMessageUiState(latestObservation),
                                     errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                                     isStale = true,
@@ -2476,6 +2485,11 @@ class EntryStateHolder(
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
                                 latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                latestRunRetryAvailable =
+                                    latestRunRetryAvailable(
+                                        knownRuns,
+                                        latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                    ),
                                 activeResponse = observedMessageUiState(latestObservation),
                                 sendErrorCategory = errorCategory,
                                 hasUnresolvedSubmission = true,
@@ -2491,7 +2505,7 @@ class EntryStateHolder(
         requestGeneration: Long,
         query: String,
     ) {
-        updateCurrentSessionRequest(requestGeneration, query) { current ->
+        updateCurrentSessionRequest(requestGeneration) { current ->
             current.openedSession?.let { openedSession ->
                 current.copy(
                     openedSession =
@@ -2511,7 +2525,7 @@ class EntryStateHolder(
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
                 val sessionList = state.sessionList ?: return
-                val cursor = sessionList.nextCursor ?: return
+                val offset = sessionList.nextOffset ?: return
                 if (
                     sessionList.isLoading ||
                     sessionList.isRefreshing ||
@@ -2529,7 +2543,7 @@ class EntryStateHolder(
 
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
-                val request = SessionRequestContext(requestGeneration, query, cursor)
+                val request = SessionRequestContext(requestGeneration, query, offset)
                 _uiState.value =
                     state.copy(
                         sessionList =
@@ -2540,15 +2554,15 @@ class EntryStateHolder(
                     )
                 createSessionJob {
                     try {
-                        val page = LoadSessionList(gateway).execute(sessionListRequest(request.query, request.cursor))
-                        updateCurrentSessionRequest(request.generation, request.query, request.cursor) { current ->
+                        val page = LoadSessionList(gateway).execute(sessionListRequest(request.offset))
+                        updateCurrentSessionRequest(request.generation, request.offset) { current ->
                             current.copy(
                                 sessions =
                                     mergeSessions(
                                         current.sessions,
                                         page.sessions.map { it.toSessionItemUiState() },
                                     ),
-                                nextCursor = page.nextCursor,
+                                nextOffset = page.nextOffset,
                                 isLoadingMore = false,
                                 isStale = false,
                                 isUnavailable = false,
@@ -2559,9 +2573,9 @@ class EntryStateHolder(
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: GatewayException) {
-                        showSessionListFailure(request.generation, request.query, request.cursor, preserveSessions = true)
+                        showSessionListFailure(request.generation, request.query, request.offset, preserveSessions = true)
                     } catch (_: Exception) {
-                        showSessionListFailure(request.generation, request.query, request.cursor, preserveSessions = true)
+                        showSessionListFailure(request.generation, request.query, request.offset, preserveSessions = true)
                     }
                 }
             }
@@ -2826,8 +2840,12 @@ class EntryStateHolder(
                 .orEmpty()
                 .filter { it.id !in incomingRunIds } + incomingRuns
         val localRunIds = sessionRuns[sessionId].orEmpty().mapTo(mutableSetOf()) { it.id }
+        // The pinned Gateway's history carries no Run linkage, so a locally created or
+        // recovered Run cannot be re-derived from a later history response. Every locally
+        // tracked Run is retained (not only active ones) so a terminal local Run keeps
+        // settling the visible conversation state across refreshes.
         val retainedLocalRuns =
-            sessionRuns[sessionId].orEmpty().filter(Run::isActive) +
+            sessionRuns[sessionId].orEmpty() +
                 allObservationStates(sessionId)
                     .filter { state -> state.run.id in localRunIds }
                     .map(RunObservationState::run)
@@ -3204,7 +3222,7 @@ class EntryStateHolder(
             synchronized(sessionRequestLock) {
                 if (!isCurrentSessionMutation(request)) return@synchronized null
                 val current = _uiState.value.sessionList ?: return@synchronized null
-                val shouldRefresh = current.nextCursor != null
+                val shouldRefresh = current.nextOffset != null
                 if (current.openedSession?.session?.id == sessionId) {
                     observationJobToCancel = runObservationJobs[sessionId]
                     observationToClose = runObservations.remove(sessionId)
@@ -3271,7 +3289,7 @@ class EntryStateHolder(
                 val requestGeneration = beginSessionRequest()
                 val request =
                     CreateSessionRequest(
-                        context = SessionRequestContext(requestGeneration, query, cursor = null),
+                        context = SessionRequestContext(requestGeneration, query, offset = null),
                         title = title,
                     )
                 _uiState.value =
@@ -3301,14 +3319,14 @@ class EntryStateHolder(
                 val openedSession = OpenSession(gateway).execute(createdSession.id)
                 val refreshedPage =
                     try {
-                        LoadSessionList(gateway).execute(sessionListRequest(request.context.query, cursor = null))
+                        LoadSessionList(gateway).execute(sessionListRequest(offset = null))
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {
                         null
                     }
                 val openedSessionUiState = openedSession.toOpenSessionUiState(messages = openedSession.history.toMessageUiStates())
-                updateCurrentSessionRequest(request.context.generation, request.context.query) { current ->
+                updateCurrentSessionRequest(request.context.generation) { current ->
                     current.copy(
                         sessions =
                             refreshedPage?.let { page ->
@@ -3321,7 +3339,7 @@ class EntryStateHolder(
                             } else {
                                 current.sessions
                             },
-                        nextCursor = refreshedPage?.nextCursor,
+                        nextOffset = refreshedPage?.nextOffset,
                         isLoading = false,
                         isRefreshing = false,
                         isSearching = false,
@@ -3359,7 +3377,7 @@ class EntryStateHolder(
         requestGeneration: Long,
         query: String,
     ) {
-        updateCurrentSessionRequest(requestGeneration, query) { current ->
+        updateCurrentSessionRequest(requestGeneration) { current ->
             current.createSession?.let { creation ->
                 current.copy(
                     createSession =
@@ -3377,7 +3395,7 @@ class EntryStateHolder(
         query: String,
         createdSession: Session,
     ) {
-        updateCurrentSessionRequest(requestGeneration, query) { current ->
+        updateCurrentSessionRequest(requestGeneration) { current ->
             current.copy(
                 sessions =
                     if (query.isBlank()) {
@@ -3417,7 +3435,7 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return@synchronized null
             val requestGeneration = beginSessionRequest()
-            val request = SessionRequestContext(requestGeneration, query, cursor = null)
+            val request = SessionRequestContext(requestGeneration, query, offset = null)
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -3430,7 +3448,7 @@ class EntryStateHolder(
                             isStale = if (preserveSessions) current.isStale else false,
                             isUnavailable = false,
                             errorCategory = null,
-                            nextCursor = if (preserveSessions) current.nextCursor else null,
+                            nextOffset = if (preserveSessions) current.nextOffset else null,
                             sessionMutations =
                                 restoreUnresolvedSessionMutations(
                                     if (preserveSessions) {
@@ -3452,8 +3470,8 @@ class EntryStateHolder(
         preserveSessions: Boolean,
     ) {
         try {
-            val page = LoadSessionList(gateway).execute(sessionListRequest(request.query, request.cursor))
-            updateCurrentSessionRequest(request.generation, request.query) { latest ->
+            val page = LoadSessionList(gateway).execute(sessionListRequest(request.offset))
+            updateCurrentSessionRequest(request.generation) { latest ->
                 latest.copy(
                     sessions =
                         mergeSessions(
@@ -3467,7 +3485,7 @@ class EntryStateHolder(
                                 page.sessions.map { it.id },
                             ),
                         ),
-                    nextCursor = page.nextCursor,
+                    nextOffset = page.nextOffset,
                     isLoading = false,
                     isRefreshing = false,
                     isSearching = false,
@@ -3484,26 +3502,22 @@ class EntryStateHolder(
             showSessionListFailure(
                 request.generation,
                 request.query,
-                cursor = null,
+                offset = null,
                 preserveSessions = preserveSessions,
             )
         } catch (_: Exception) {
             showSessionListFailure(
                 request.generation,
                 request.query,
-                cursor = null,
+                offset = null,
                 preserveSessions = preserveSessions,
             )
         }
     }
 
-    private fun sessionListRequest(
-        query: String,
-        cursor: String?,
-    ): SessionListRequest =
+    private fun sessionListRequest(offset: Int?): SessionListRequest =
         SessionListRequest(
-            cursor = cursor,
-            search = query.trim().takeIf(String::isNotEmpty),
+            offset = offset ?: 0,
         )
 
     private fun beginSessionRequest(): Long {
@@ -3519,10 +3533,16 @@ class EntryStateHolder(
             scope.launch(start = CoroutineStart.LAZY, block = block).also { sessionJob = it }
         }
 
+    /**
+     * Applies a Session request result while its generation still owns the pane.
+     *
+     * The local Session search filters already-loaded rows and never issues a Gateway
+     * request, so a query change must not invalidate an in-flight result: request
+     * identity is the generation (and, for pagination, the offset).
+     */
     private fun updateCurrentSessionRequest(
         requestGeneration: Long,
-        query: String,
-        cursor: String? = null,
+        offset: Int? = null,
         transform: (SessionListUiState) -> SessionListUiState,
     ): Boolean =
         synchronized(sessionRequestLock) {
@@ -3530,8 +3550,7 @@ class EntryStateHolder(
             if (
                 current == null ||
                 requestGeneration != sessionRequestGeneration ||
-                current.searchQuery != query ||
-                (cursor != null && current.nextCursor != cursor)
+                (offset != null && current.nextOffset != offset)
             ) {
                 false
             } else {
@@ -3543,11 +3562,11 @@ class EntryStateHolder(
     private fun showSessionListFailure(
         requestGeneration: Long,
         query: String,
-        cursor: String?,
+        offset: Int?,
         preserveSessions: Boolean,
     ) {
         recordDiagnostic(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.FAILED)
-        updateCurrentSessionRequest(requestGeneration, query, cursor) { current ->
+        updateCurrentSessionRequest(requestGeneration, offset) { current ->
             current.copy(
                 isLoading = false,
                 isRefreshing = false,
@@ -3593,7 +3612,7 @@ class EntryStateHolder(
                 val query = sessionList.searchQuery
                 val requestGeneration = beginSessionRequest()
                 val requestConnectionGeneration = connectionGeneration
-                val request = SessionRequestContext(requestGeneration, query, cursor = null)
+                val request = SessionRequestContext(requestGeneration, query, offset = null)
                 _uiState.value =
                     state.copy(
                         sessionList =
@@ -3606,7 +3625,7 @@ class EntryStateHolder(
                     try {
                         val openedSession = OpenSession(gateway).execute(sessionId)
                         val applied =
-                            updateCurrentSessionRequest(request.generation, request.query) { current ->
+                            updateCurrentSessionRequest(request.generation) { current ->
                                 val authoritativeSession = openedSession.session.toSessionItemUiState()
                                 val knownRuns = rememberSessionRuns(sessionId, openedSession)
                                 val latestObservation = latestObservationState(sessionId, knownRuns)
@@ -3638,6 +3657,11 @@ class EntryStateHolder(
                                             activeRuns = knownRuns.activeRuns(),
                                             isSending = runJobs.containsKey(sessionId),
                                             latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                            latestRunRetryAvailable =
+                                                latestRunRetryAvailable(
+                                                    knownRuns,
+                                                    latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                                ),
                                             activeResponse = observedMessageUiState(latestObservation),
                                         ).copy(
                                             isRefreshing = recoveryLoadBlocksSession,
@@ -3707,7 +3731,7 @@ class EntryStateHolder(
         query: String,
         sessionId: SessionId,
     ) {
-        updateCurrentSessionRequest(requestGeneration, query) { current ->
+        updateCurrentSessionRequest(requestGeneration) { current ->
             current.copy(
                 sessionMutations = retainRenameDraft(current.sessionMutations, sessionId),
                 openingSessionId = null,
@@ -3869,6 +3893,21 @@ class EntryStateHolder(
                 original
             } ?: return
         launchRunSubmission(input = originalMessage, recordDraft = false, rejectRunId = runId)
+    }
+
+    /**
+     * The pinned Gateway's history carries no Run linkage, so a settled failed Run stays
+     * retryable only through the client's own record: the Session summary exposes the
+     * explicit retry for the latest Run while its original input is still recoverable in
+     * process memory. A Run recovered after a restart — or any Run whose input this
+     * process never recorded — has no original message and is never offered for retry.
+     */
+    private fun latestRunRetryAvailable(
+        runs: List<Run>,
+        latestRunState: RunPresentationState?,
+    ): Boolean {
+        val latestRun = runs.latestRun() ?: return false
+        return isRunRetryEligible(latestRunState, submittedRunInputs[latestRun.id])
     }
 
     private fun launchRunSubmission(
@@ -4360,20 +4399,20 @@ class EntryStateHolder(
             val terminalRunIds =
                 reconciliation.discoveredRuns
                     .filter { run ->
-                        decideRunReconciliation(run, reconciliation.history) ==
+                        decideRunReconciliation(run) ==
                             RunReconciliationDecision.CONFIRMED
                     }
                     .map { it.id }
                     .plus(
                         submissionRun
-                            ?.takeIf { run -> decideRunReconciliation(run, reconciliation.history) == RunReconciliationDecision.CONFIRMED }
+                            ?.takeIf { run -> decideRunReconciliation(run) == RunReconciliationDecision.CONFIRMED }
                             ?.id,
                     )
                     .filterNotNull()
                     .toSet()
             val submissionConfirmed =
                 submissionRun != null &&
-                    decideRunReconciliation(submissionRun, reconciliation.history) ==
+                    decideRunReconciliation(submissionRun) ==
                     RunReconciliationDecision.CONFIRMED &&
                     uncertaintyBelongsToThisSubmission
             val recoveryStoreAllowsNoNewRun =
@@ -4461,6 +4500,11 @@ class EntryStateHolder(
                                         latestRun = knownRuns.latestRun(),
                                         activeRuns = knownRuns.activeRuns(),
                                         latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                        latestRunRetryAvailable =
+                                            latestRunRetryAvailable(
+                                                knownRuns,
+                                                latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                            ),
                                         activeResponse = observedMessageUiState(latestObservation),
                                         sendErrorCategory = clearedSendErrorCategory,
                                         hasUnresolvedSubmission = false,
@@ -4786,6 +4830,8 @@ class EntryStateHolder(
                                                 },
                                             hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
                                             latestRunState = observationState.state,
+                                            latestRunRetryAvailable =
+                                                latestRunRetryAvailable(knownRuns, observationState.state),
                                             activeResponse = observedMessageUiState(observationState),
                                             isReconciliationInProgress = !run.isActive(),
                                             isStale = !run.isActive() || recoveryPersistenceFailed,
@@ -4908,6 +4954,7 @@ class EntryStateHolder(
                                 openedSession =
                                     opened.copy(
                                         latestRunState = latestState,
+                                        latestRunRetryAvailable = latestRunRetryAvailable(knownRuns, latestState),
                                         activeResponse = latestResponse,
                                     ),
                             ),
@@ -5180,6 +5227,7 @@ class EntryStateHolder(
                                     latestRun = latestRun,
                                     activeRuns = knownRuns.activeRuns(),
                                     latestRunState = latestObservation?.state ?: next.state,
+                                    latestRunRetryAvailable = latestRunRetryAvailable(knownRuns, latestObservation?.state ?: next.state),
                                     activeResponse = observedMessageUiState(latestObservation) ?: observedMessageUiState(next),
                                     isRefreshing = opened.isRefreshing || terminal,
                                     isStale = opened.isStale || terminal,
@@ -5230,6 +5278,7 @@ class EntryStateHolder(
                             openedSession =
                                 opened.copy(
                                     latestRunState = latestState,
+                                    latestRunRetryAvailable = latestRunRetryAvailable(knownRuns, latestState),
                                     activeResponse = latestResponse,
                                 ),
                         ),
@@ -5323,13 +5372,21 @@ class EntryStateHolder(
             uncertainSubmissionRunIds[sessionId] == runId ||
             unresolvedLocalRunIds[recoverySessionKey(sessionId)]?.contains(runId) == true
 
+    /**
+     * The Run to reconcile after opening a Session. The pinned Gateway's history carries no
+     * Run linkage, so when the history exposes no Run the client reconciles the latest Run it
+     * tracks locally (created here or recovered after a restart) through the Run resource,
+     * which is the contract's only authoritative Run source.
+     */
     private fun historyRunIdToReconcile(
         sessionId: SessionId,
         openedSession: OpenedSession,
     ): RunId? =
         synchronized(sessionRequestLock) {
             val hasActiveLocalRun = sessionRuns[sessionId].orEmpty().any(Run::isActive)
-            openedSession.history.latestRun()?.id?.takeUnless {
+            val runIdToReconcile =
+                openedSession.history.latestRun()?.id ?: sessionRuns[sessionId].orEmpty().latestRun()?.id
+            runIdToReconcile?.takeUnless {
                 hasUnresolvedSubmission(sessionId) && !hasActiveLocalRun
             }
         }
@@ -5478,6 +5535,7 @@ private fun OpenedSession.toOpenSessionUiState(
     activeRuns: List<Run> = history.runs().activeRuns(),
     isSending: Boolean = false,
     latestRunState: RunPresentationState? = null,
+    latestRunRetryAvailable: Boolean = false,
     activeResponse: SessionMessageUiState? = null,
     isRefreshing: Boolean = false,
     messages: List<SessionMessageUiState> = history.messages.map { it.toSessionMessageUiState() }.chronological(),
@@ -5492,6 +5550,7 @@ private fun OpenedSession.toOpenSessionUiState(
         activeRuns = activeRuns,
         isSending = isSending,
         latestRunState = latestRunState,
+        latestRunRetryAvailable = latestRunRetryAvailable,
         activeResponse = activeResponse,
         isRefreshing = isRefreshing,
     )
@@ -5615,7 +5674,7 @@ private data class TimedOutSendReconciliationOutcome(
 private data class SessionRequestContext(
     val generation: Long,
     val query: String,
-    val cursor: String?,
+    val offset: Int?,
 )
 
 private data class CreateSessionRequest(

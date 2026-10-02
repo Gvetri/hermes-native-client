@@ -17,10 +17,15 @@ data class GatewayConnection(
     val bearerCredential: String? = null,
 )
 
+/**
+ * Session list request over the pinned `GET /api/sessions` contract.
+ *
+ * The pinned Gateway pages with `limit` and `offset` and reports `has_more`
+ * (projected to [SessionPage.nextOffset]); it does not accept a cursor token.
+ */
 data class SessionListRequest(
     val limit: Int = 20,
-    val cursor: String? = null,
-    val search: String? = null,
+    val offset: Int = 0,
 )
 
 data class Session(
@@ -28,12 +33,11 @@ data class Session(
     val title: String?,
     val preview: String?,
     val pinned: Boolean,
-    val updatedAt: String?,
 )
 
 data class SessionPage(
     val sessions: List<Session>,
-    val nextCursor: String?,
+    val nextOffset: Int?,
 )
 
 data class GatewayHistoryMessage(
@@ -49,7 +53,6 @@ data class GatewayHistoryMessage(
 data class SessionHistory(
     val sessionId: SessionId,
     val messages: List<GatewayHistoryMessage>,
-    val nextCursor: String?,
 )
 
 data class SessionPinResult(
@@ -76,6 +79,7 @@ private val terminalRunStatuses =
         "error",
         "cancelled",
         "canceled",
+        "interrupted",
     )
 
 fun Run.isActive(): Boolean = status.trim().lowercase(Locale.ROOT) !in terminalRunStatuses
@@ -102,6 +106,7 @@ enum class RunEventType {
     SUCCEEDED,
     FAILED,
     INTERRUPTED,
+    CANCELLED,
 }
 
 data class RunEvent(

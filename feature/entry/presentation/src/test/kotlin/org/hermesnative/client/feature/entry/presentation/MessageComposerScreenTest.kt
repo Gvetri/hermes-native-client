@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -105,9 +106,55 @@ class MessageComposerScreenTest {
         assertEquals(listOf(EntryUiEvent.SendMessageClicked), events)
     }
 
+    @Test
+    fun known_failed_run_summary_exposes_the_explicit_retry_for_a_recoverable_original_input() {
+        val events = mutableListOf<EntryUiEvent>()
+        val run = Run(RunId("run-failed"), SessionId("session-1"), "failed")
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        connectedState(
+                            latestRun = run,
+                            latestRunState = RunPresentationState.FAILED,
+                            latestRunRetryAvailable = true,
+                        ),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Run state: Failed").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Try again").assertIsDisplayed().assertHasClickAction().performClick()
+
+        assertEquals(listOf<EntryUiEvent>(EntryUiEvent.RetryRunClicked(RunId("run-failed"))), events)
+    }
+
+    @Test
+    fun known_failed_run_summary_offers_no_retry_without_a_recoverable_original_input() {
+        val run = Run(RunId("run-failed"), SessionId("session-1"), "failed")
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        connectedState(
+                            latestRun = run,
+                            latestRunState = RunPresentationState.FAILED,
+                        ),
+                    onEvent = {},
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Run state: Failed").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Try again").assertDoesNotExist()
+    }
+
     private fun connectedState(
         composerText: String = "",
         latestRun: Run? = null,
+        latestRunState: RunPresentationState? = null,
+        latestRunRetryAvailable: Boolean = false,
         sendErrorCategory: MessageSendErrorCategory? = null,
     ): EntryUiState =
         EntryUiState(
@@ -123,6 +170,8 @@ class MessageComposerScreenTest {
                             messages = emptyList(),
                             composerText = composerText,
                             latestRun = latestRun,
+                            latestRunState = latestRunState,
+                            latestRunRetryAvailable = latestRunRetryAvailable,
                             sendErrorCategory = sendErrorCategory,
                         ),
                 ),

@@ -1,7 +1,6 @@
 package org.hermesnative.client.fixture.journey
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -40,13 +39,41 @@ class JourneyScenarioTest {
     }
 
     @Test
-    fun session_list_response_includes_all_fixture_sessions_and_nullable_updated_at() {
+    fun every_journey_serves_valid_capability_json_before_device_execution() {
+        scenariosDir.listFiles { file -> file.extension == "json" }.orEmpty().forEach { file ->
+            val scenario = JourneyScenarioParser.parse(file, pinnedDescriptor.provenance.value)
+            val process = JourneyGatewayProcess.start(scenario.copy(port = freePort(), tls = false))
+            try {
+                val response = get(process.endpoint, "/v1/capabilities", scenario.requireBearerCredential)
+                assertTrue(response.startsWith("status=200 body="))
+                val body = Json.parseToJsonElement(response.substringAfter(" body=")).jsonObject
+                assertEquals("hermes.api_server.capabilities", body.getValue("object").jsonPrimitive.content)
+                assertEquals("synthetic", body.getValue("model").jsonPrimitive.content)
+                val endpoints = body.getValue("endpoints").jsonObject
+                assertEquals(scenario.capabilities.toSet(), endpoints.keys)
+                endpoints.forEach { (name, value) ->
+                    val expected = JourneyEndpointCatalog.endpoints.getValue(name)
+                    assertEquals(expected.method, value.jsonObject.getValue("method").jsonPrimitive.content)
+                    assertEquals(expected.path, value.jsonObject.getValue("path").jsonPrimitive.content)
+                }
+            } finally {
+                process.stop()
+            }
+        }
+    }
+
+    @Test
+    fun session_list_serves_the_pinned_list_object_with_endpoint_data() {
         val process = startGateway("session-list-first", tls = false)
         try {
-            val page = Json.parseToJsonElement(getBody(process.endpoint, "/v1/sessions")).jsonObject
-            val sessions = page.getValue("sessions").jsonArray
+            val page = Json.parseToJsonElement(getBody(process.endpoint, "/api/sessions")).jsonObject
+            assertEquals("list", page.getValue("object").jsonPrimitive.content)
+            val sessions = page.getValue("data").jsonArray
             assertEquals(2, sessions.size)
-            sessions.forEach { session -> assertEquals(JsonNull, session.jsonObject["updated_at"]) }
+            assertEquals("session-alpha", sessions[0].jsonObject.getValue("id").jsonPrimitive.content)
+            assertEquals(true, sessions[0].jsonObject.getValue("pinned").jsonPrimitive.content.toBoolean())
+            assertEquals(50, page.getValue("limit").jsonPrimitive.int)
+            assertEquals(0, page.getValue("offset").jsonPrimitive.int)
         } finally {
             process.stop()
         }
@@ -57,8 +84,8 @@ class JourneyScenarioTest {
         val process = startGateway("empty-sessions", tls = false)
         try {
             assertEquals(
-                """status=200 body={"sessions":[],"next_cursor":null}""",
-                get(process.endpoint, "/v1/sessions"),
+                "status=200 body={\"object\":\"list\",\"data\":[],\"limit\":50,\"offset\":0,\"has_more\":false}",
+                get(process.endpoint, "/api/sessions"),
             )
         } finally {
             process.stop()
@@ -73,6 +100,14 @@ class JourneyScenarioTest {
         val recoverySteps = flow.substringAfter(correctedCredential)
         assertTrue(recoverySteps.contains("Verify Gateway Connection"))
         assertFalse(recoverySteps.contains("Try again"))
+    }
+
+    @Test
+    fun retry_journey_uses_targeted_scroll_and_retries_unregistered_taps() {
+        val flow = File(repositoryRoot, "fixtures/hermes/journey/flows/explicit-retry.yaml").readText()
+        assertTrue(flow.contains("text: \"Try again\"\n    retryTapIfNoChange: true"))
+        assertTrue(flow.contains("scrollUntilVisible:"))
+        assertFalse(flow.contains("- swipe:"))
     }
 
     @Test
@@ -92,11 +127,24 @@ class JourneyScenarioTest {
         val file =
             tempScenario(
                 """{"name":"unknown-field","hermes_revision":"$revision",""" +
-                    """"port":18443,"tls":false,"capabilities":["client-manifest"],"mutable":"latest"}""",
+                    """"port":18443,"tls":false,"capabilities":["sessions"],"mutable":"latest"}""",
             )
         val error = runCatching { JourneyScenarioParser.parse(file, pinnedDescriptor.provenance.value) }.exceptionOrNull()
         assertTrue(error is JourneyScenarioFormatException)
         assertTrue(error!!.message.orEmpty().contains("unsupported"))
+    }
+
+    @Test
+    fun unknown_capability_endpoint_is_rejected() {
+        val revision = pinnedDescriptor.provenance.value
+        val file =
+            tempScenario(
+                """{"name":"unknown-endpoint","hermes_revision":"$revision","port":18443,"tls":false,""" +
+                    """"capabilities":["sessions","not_an_endpoint"]}""",
+            )
+        val error = runCatching { JourneyScenarioParser.parse(file, revision) }.exceptionOrNull()
+        assertTrue(error is JourneyScenarioFormatException)
+        assertTrue(error!!.message.orEmpty().contains("capability"))
     }
 
     @Test
@@ -105,9 +153,9 @@ class JourneyScenarioTest {
         val file =
             tempScenario(
                 """
-                {"name":"invalid-run","hermes_revision":"$revision","port":18443,"tls":false,"capabilities":["client-manifest"],
+                {"name":"invalid-run","hermes_revision":"$revision","port":18443,"tls":false,"capabilities":["sessions"],
                  "sessions":[{"id":"s1","title":"S","preview":null,"pinned":false}],
-                 "runs":[{"run_id":"r1","session_id":"s1","hold_open":true,"interrupt_after_events":1,"observation":[{"type":"run.started","status":"starting"}]}]}
+                 "runs":[{"run_id":"r1","session_id":"s1","hold_open":true,"interrupt_after_events":1,"observation":[{"type":"tool.started"}]}]}
                 """.trimIndent(),
             )
         val error = runCatching { JourneyScenarioParser.parse(file, revision) }.exceptionOrNull()
@@ -121,21 +169,23 @@ class JourneyScenarioTest {
             val endpoint = process.endpoint
             assertEquals(200, get(endpoint, "/health"))
             val capabilities = get(endpoint, "/v1/capabilities")
-            assertTrue(capabilities.contains("session.list"))
+            assertTrue(capabilities.contains("\"sessions\""))
+            assertTrue(capabilities.contains("\"run_events\""))
 
-            val sessions = get(endpoint, "/v1/sessions")
+            val sessions = get(endpoint, "/api/sessions")
             assertTrue(sessions.contains("Alpha Session"))
 
-            val create = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            val create = post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
             assertEquals(202, create.status)
             assertTrue(create.body.contains("run-success"))
+            assertTrue(create.body.contains("started"))
 
             val events = streamEvents(endpoint, "run-success")
-            assertEquals(listOf("run.started", "run.running", "run.succeeded"), events.map { it.type })
+            assertEquals(listOf("tool.started", "run.completed"), events.map { it.type })
 
             assertEquals(200, get(endpoint, "/v1/runs/run-success"))
             val statusBody = get(endpoint, "/v1/runs/run-success")
-            assertTrue(statusBody.contains("succeeded"))
+            assertTrue(statusBody.contains("completed"))
 
             val telemetry = Json.parseToJsonElement(getBody(endpoint, "/__fixture/telemetry")).toString()
             assertTrue(telemetry.contains("run-success"))
@@ -150,12 +200,13 @@ class JourneyScenarioTest {
         val process = startGateway("terminal-success", tls = false)
         try {
             val endpoint = process.endpoint
-            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
             val events = streamEvents(endpoint, "run-success")
-            assertEquals(3, events.size)
-            val history = getBody(endpoint, "/v1/sessions/session-alpha/history")
+            assertEquals(2, events.size)
+            val history = getBody(endpoint, "/api/sessions/session-alpha/messages")
             assertTrue(history.contains("message-success"))
             assertTrue(history.contains("Stable result"))
+            assertFalse(history.contains("run_id"))
         } finally {
             process.stop()
         }
@@ -166,9 +217,9 @@ class JourneyScenarioTest {
         val process = startGateway("terminal-success", tls = false)
         try {
             val endpoint = process.endpoint
-            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
             streamEvents(endpoint, "run-success")
-            val resubmit = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            val resubmit = post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
             assertEquals(404, resubmit.status)
             assertFalse(resubmit.body.contains("run-success"))
             val telemetry = Json.parseToJsonElement(getBody(endpoint, "/__fixture/telemetry")).jsonObject
@@ -219,27 +270,31 @@ class JourneyScenarioTest {
     }
 
     @Test
-    fun session_list_honors_the_requested_limit() {
+    fun session_list_honors_the_requested_limit_and_reports_has_more() {
         val process = startGateway("session-list-first", tls = false)
         try {
             val endpoint = process.endpoint
-            val page = Json.parseToJsonElement(getBody(endpoint, "/v1/sessions?limit=1")).jsonObject
-            assertEquals(1, page.getValue("sessions").jsonArray.size)
-            assertEquals("offset:1", page.getValue("next_cursor").jsonPrimitive.content)
+            val page = Json.parseToJsonElement(getBody(endpoint, "/api/sessions?limit=1")).jsonObject
+            assertEquals(1, page.getValue("data").jsonArray.size)
+            assertEquals(1, page.getValue("limit").jsonPrimitive.int)
+            assertEquals(0, page.getValue("offset").jsonPrimitive.int)
+            assertEquals("true", page.getValue("has_more").jsonPrimitive.content)
         } finally {
             process.stop()
         }
     }
 
     @Test
-    fun run_creation_requires_an_input_field() {
+    fun run_creation_requires_input_and_a_session_id() {
         val process = startGateway("terminal-success", tls = false)
         try {
             val endpoint = process.endpoint
-            val missing = post(endpoint, "/v1/sessions/session-alpha/runs", """{"nope":true}""")
+            val missing = post(endpoint, "/v1/runs", """{"nope":true}""")
             assertEquals(400, missing.status)
-            assertTrue(missing.body.contains("invalid-run-input"))
-            val empty = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":""}""")
+            assertTrue(missing.body.contains("invalid-run-request"))
+            val missingSession = post(endpoint, "/v1/runs", """{"input":"Run this"}""")
+            assertEquals(400, missingSession.status)
+            val empty = post(endpoint, "/v1/runs", """{"input":"","session_id":"session-alpha"}""")
             assertEquals(202, empty.status)
         } finally {
             process.stop()
@@ -258,7 +313,7 @@ class JourneyScenarioTest {
                   "hermes_revision": "$revision",
                   "port": 18443,
                   "tls": false,
-                  "capabilities": ["client-manifest", "session.list", "session.create", "session.open", "session.history", "session.rename", "session.delete", "session.pin", "session.unpin", "run.create", "run.status", "run.sse"],
+                  "capabilities": ["sessions", "session_create", "session", "session_update", "session_delete", "session_messages", "runs", "run_status", "run_events"],
                   "sessions": [
                     {"id": "session-alpha", "title": "Alpha Session", "preview": "Synthetic preview", "pinned": false}
                   ],
@@ -266,11 +321,11 @@ class JourneyScenarioTest {
                     {
                       "run_id": "empty-run",
                       "session_id": "session-alpha",
-                      "create_status": "starting",
+                      "create_status": "started",
                       "observation": [],
-                      "final_status": "succeeded",
+                      "final_status": "completed",
                       "terminal_history": [
-                        {"id": "message-empty", "role": "assistant", "content": "Empty result", "run_id": "empty-run", "run_status": "succeeded"}
+                        {"id": "message-empty", "role": "assistant", "content": "Empty result"}
                       ]
                     }
                   ]
@@ -281,14 +336,14 @@ class JourneyScenarioTest {
             val process = JourneyGatewayProcess.start(scenario.copy(port = freePort(), tls = false))
             try {
                 val endpoint = process.endpoint
-                val create = post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+                val create = post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
                 assertEquals(202, create.status)
                 assertEquals(emptyList<SseEvent>(), streamEvents(endpoint, "empty-run"))
                 val status = Json.parseToJsonElement(getBody(endpoint, "/v1/runs/empty-run")).jsonObject
-                assertEquals("succeeded", status.getValue("status").jsonPrimitive.content)
-                val history = Json.parseToJsonElement(getBody(endpoint, "/v1/sessions/session-alpha/history")).jsonObject
+                assertEquals("completed", status.getValue("status").jsonPrimitive.content)
+                val history = Json.parseToJsonElement(getBody(endpoint, "/api/sessions/session-alpha/messages")).jsonObject
                 val contents =
-                    history.getValue("messages").jsonArray.map { message ->
+                    history.getValue("data").jsonArray.map { message ->
                         message.jsonObject.getValue("content").jsonPrimitive.content
                     }
                 assertTrue(contents.contains("Empty result"))
@@ -305,9 +360,9 @@ class JourneyScenarioTest {
         val process = startGateway("interrupted-sse-refetch", tls = false)
         try {
             val endpoint = process.endpoint
-            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
             val events = streamEvents(endpoint, "interrupted-run")
-            assertEquals(listOf("run.started", "run.running", "message.delta"), events.map { it.type })
+            assertEquals(listOf("tool.started", "message.delta"), events.map { it.type })
             val status = get(endpoint, "/v1/runs/interrupted-run")
             assertTrue(status.contains("failed"))
         } finally {
@@ -320,17 +375,17 @@ class JourneyScenarioTest {
         val process = startGateway("streaming", tls = false)
         try {
             val endpoint = process.endpoint
-            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
             val connection = (endpoint.resolve("/v1/runs/streaming-run/events").toURL().openConnection() as HttpURLConnection)
             connection.connectTimeout = 2_000
             connection.readTimeout = 10_000
             connection.requestMethod = "GET"
             val lines = connection.inputStream.bufferedReader().lineSequence().iterator()
             val seen = mutableListOf<String>()
-            while (lines.hasNext() && seen.none { it.startsWith("event: message.delta") } && seen.size < 200) {
+            while (lines.hasNext() && seen.none { it.contains("\"event\":\"message.delta\"") } && seen.size < 200) {
                 seen += lines.next()
             }
-            assertTrue(seen.any { it.startsWith("event: message.delta") })
+            assertTrue(seen.any { it.contains("\"event\":\"message.delta\"") })
             connection.disconnect()
             awaitCondition { process.isRunning }
             val telemetry = get(endpoint, "/__fixture/telemetry")
@@ -358,8 +413,8 @@ class JourneyScenarioTest {
         val process = startGateway("pagination-search", tls = false)
         try {
             val endpoint = process.endpoint
-            val first = get(endpoint, "/v1/sessions")
-            assertTrue(first.contains("next_cursor"))
+            val first = get(endpoint, "/api/sessions")
+            assertTrue(first.contains(""""has_more":true"""))
             assertTrue(first.contains("Search Alpha One"))
             assertFalse(first.contains("Search Gamma Three"))
         } finally {
@@ -372,8 +427,8 @@ class JourneyScenarioTest {
         val process = startGateway("stale-recoverable", tls = false)
         try {
             val endpoint = process.endpoint
-            assertEquals(503, get(endpoint, "/v1/sessions"))
-            assertEquals(200, get(endpoint, "/v1/sessions"))
+            assertEquals(503, get(endpoint, "/api/sessions"))
+            assertEquals(200, get(endpoint, "/api/sessions"))
         } finally {
             process.stop()
         }
@@ -385,7 +440,7 @@ class JourneyScenarioTest {
         try {
             val endpoint = process.endpoint
             get(endpoint, "/health")
-            post(endpoint, "/v1/sessions/session-alpha/runs", """{"input":"Run this"}""")
+            post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
             streamEvents(endpoint, "run-success")
             get(endpoint, "/v1/runs/run-success")
             val telemetry = fetchTelemetry(endpoint.resolve("/__fixture/telemetry"))
@@ -518,15 +573,15 @@ class JourneyScenarioTest {
         connection.requestMethod = "GET"
         val lines = connection.inputStream.bufferedReader().lineSequence().iterator()
         val events = mutableListOf<SseEvent>()
-        var type: String? = null
         var lineCount = 0
         while (lines.hasNext() && lineCount < 200) {
             val line = lines.next()
             lineCount++
-            when {
-                line.startsWith("event:") -> type = line.removePrefix("event:").trim()
-                line.startsWith("data:") -> events += SseEvent(requireNotNull(type), line.removePrefix("data:").trim())
-                line.isEmpty() -> type = null
+            if (line.startsWith("data:")) {
+                // The pinned writer carries the event type inside the JSON payload and never
+                // writes a named `event:` line.
+                val data = Json.parseToJsonElement(line.removePrefix("data:").trim()).jsonObject
+                events += SseEvent(data.getValue("event").jsonPrimitive.content, data.toString())
             }
         }
         return events

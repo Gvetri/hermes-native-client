@@ -3,12 +3,13 @@
   "response": {
     "status": 200,
     "body": {
+      "object": "hermes.session",
       "session": {
         "id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
-        "title": null,
-        "preview": null,
+        "source": "api_server",
+        "title": "Opened session",
         "pinned": false,
-        "updated_at": null
+        "message_count": 2
       }
     }
   }

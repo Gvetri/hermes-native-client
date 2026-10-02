@@ -4,19 +4,16 @@
   "port": 18443,
   "tls": true,
   "capabilities": [
-    "client-manifest",
-    "session.list",
-    "session.create",
-    "session.open",
-    "session.history",
-    "session.rename",
-    "session.delete",
-    "session.pin",
-    "session.unpin",
-    "run.create",
-    "run.status",
-    "run.sse",
-    "future.additive"
+    "sessions",
+    "session_create",
+    "session",
+    "session_update",
+    "session_delete",
+    "session_messages",
+    "runs",
+    "run_status",
+    "run_events",
+    "gateway_future_endpoint"
   ],
   "sessions": [
     {
@@ -30,32 +27,21 @@
     {
       "run_id": "additive-run",
       "session_id": "session-alpha",
-      "create_status": "starting",
+      "create_status": "started",
       "observation": [
         {
-          "type": "run.started",
-          "status": "starting",
-          "id": "a1"
+          "type": "tool.started"
         },
         {
-          "type": "run.running",
-          "status": "running",
-          "id": "a2"
-        },
-        {
-          "type": "run.succeeded",
-          "status": "succeeded",
-          "id": "a3"
+          "type": "run.completed"
         }
       ],
-      "final_status": "succeeded",
+      "final_status": "completed",
       "terminal_history": [
         {
           "id": "message-additive",
           "role": "assistant",
-          "content": "Additive result",
-          "run_id": "additive-run",
-          "run_status": "succeeded"
+          "content": "Additive result"
         }
       ]
     }

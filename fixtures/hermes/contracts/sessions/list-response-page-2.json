@@ -3,8 +3,11 @@
   "response": {
     "status": 200,
     "body": {
-      "sessions": [],
-      "next_cursor": null
+      "object": "list",
+      "data": [],
+      "limit": 20,
+      "offset": 20,
+      "has_more": false
     }
   }
 }

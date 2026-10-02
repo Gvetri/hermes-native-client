@@ -231,8 +231,12 @@ internal object JourneyInvariants {
     }
 
     private fun verifyExplicitRetry(telemetry: JsonObject) {
+        // The pinned Gateway's history carries no Run linkage, so the client
+        // retries only the failed Run it created itself, reusing the original
+        // input it still holds in memory. The journey proves exactly one
+        // explicit retry submission over the Run resource.
         check(runCreatesFor(telemetry, RETRY_SESSION_ID) == 2) {
-            "The client did not submit exactly two Run creations (initial run plus one retry)."
+            "The client did not submit exactly two Run creations (initial run plus one explicit retry)."
         }
         check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile Run status." }
     }

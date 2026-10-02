@@ -3,19 +3,30 @@
   "response": {
     "status": 200,
     "body": {
+      "object": "list",
       "session_id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
-      "messages": [
+      "data": [
         {
-          "id": "message-1",
-          "role": null,
-          "content": null,
-          "run_id": "9f54cb79-8b45-4c4d-a4e2-6e7b42d9b1c8",
-          "run_status": "completed",
-          "run_result": null,
-          "timestamp": "2026-09-08T20:00:00Z"
+          "id": 1,
+          "session_id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
+          "role": "user",
+          "content": "Run this",
+          "timestamp": 1788897540.0
+        },
+        {
+          "id": 2,
+          "session_id": "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70",
+          "role": "assistant",
+          "content": "Authoritative result",
+          "timestamp": 1788897600.0
         }
       ],
-      "next_cursor": null
+      "pagination": {
+        "limit": 500,
+        "offset": 0,
+        "order": "latest",
+        "returned": 2
+      }
     }
   }
 }

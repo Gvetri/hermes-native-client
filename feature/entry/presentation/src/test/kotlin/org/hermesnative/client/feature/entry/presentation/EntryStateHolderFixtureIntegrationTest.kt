@@ -6,11 +6,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayClient
@@ -23,6 +18,7 @@ import org.hermesnative.client.feature.entry.data.OkHttpGatewayTransport
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnection
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
+import org.hermesnative.client.feature.entry.domain.GatewayEndpoint
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunEventObservation
@@ -56,13 +52,11 @@ class EntryStateHolderFixtureIntegrationTest {
             },
         )
     private val descriptorFile = repositoryRoot.resolve("fixtures/hermes/pinned-fixture.properties")
-    private val requiredCapabilities = PublicBetaGatewayCapabilityManifest.current.requiredIdentifiers
 
     @Test
     fun state_holder_deduplicates_overlapping_fixture_pages_without_loading_history() {
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         session(PINNED_A, "Pinned A", pinned = true),
@@ -87,7 +81,7 @@ class EntryStateHolderFixtureIntegrationTest {
                     initialState = EntryState(isGatewayConnectionConfigured = false),
                     verifyGatewayConnection =
                         VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                            GatewayCapabilities(requiredCapabilities)
+                            GatewayCapabilities(clientManifestEndpoints())
                         },
                     scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
                     sessionGatewayFactory = { _, _ -> client },
@@ -104,10 +98,10 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals("Server A refreshed", sessionList.sessions[1].title)
                 assertEquals(
                     listOf(
-                        "limit=20",
-                        "limit=20&cursor=offset%3A2",
+                        "limit=20&offset=0",
+                        "limit=20&offset=2",
                     ),
-                    behavior.requests.filter { it.path == "/v1/sessions" }.map { it.query },
+                    behavior.requests.filter { it.path == "/api/sessions" }.map { it.query },
                 )
                 assertTrue(behavior.requests.none { it.path.endsWith("/history") })
             } finally {
@@ -120,7 +114,6 @@ class EntryStateHolderFixtureIntegrationTest {
     fun confirmed_pin_reloads_the_first_page_before_loading_more_from_a_changed_server_order() {
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         session(SERVER_A, "Server A"),
@@ -140,10 +133,10 @@ class EntryStateHolderFixtureIntegrationTest {
 
                 val pinned = requireNotNull(holder.uiState.value.sessionList)
                 assertTrue(pinned.sessions.single().pinned)
-                assertEquals("offset:1", pinned.nextCursor)
+                assertEquals(1, pinned.nextOffset)
                 assertEquals(
-                    listOf("limit=20", "limit=20"),
-                    behavior.requests.filter { it.path == "/v1/sessions" }.map { it.query },
+                    listOf("limit=20&offset=0", "limit=20&offset=0"),
+                    behavior.requests.filter { it.path == "/api/sessions" }.map { it.query },
                 )
             } finally {
                 holder.close()
@@ -155,7 +148,6 @@ class EntryStateHolderFixtureIntegrationTest {
     fun confirmed_unpin_reloads_terminal_first_page_to_apply_gateway_order() {
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         session(PINNED_A, "Pinned A", pinned = true),
@@ -181,8 +173,8 @@ class EntryStateHolderFixtureIntegrationTest {
                 )
                 assertFalse(unpinned.sessions.last().pinned)
                 assertEquals(
-                    listOf("limit=20"),
-                    behavior.requests.filter { it.path == "/v1/sessions" }.map { it.query },
+                    listOf("limit=20&offset=0"),
+                    behavior.requests.filter { it.path == "/api/sessions" }.map { it.query },
                 )
             } finally {
                 holder.close()
@@ -195,7 +187,6 @@ class EntryStateHolderFixtureIntegrationTest {
         val targetId = SessionId(SERVER_A)
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions = listOf(session(SERVER_A, "Original")),
             ).apply {
                 failNextSessionRename = true
@@ -221,7 +212,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
 
@@ -233,7 +224,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     2,
                     behavior.requests.count {
-                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
             } finally {
@@ -247,12 +238,11 @@ class EntryStateHolderFixtureIntegrationTest {
         val targetId = SessionId(SERVER_A)
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions = listOf(session(SERVER_A, "Original")),
             )
         val transport =
             BlockingMutationResponseTransport {
-                it.method == "PATCH" && it.url.endsWith("/v1/sessions/$SERVER_A")
+                it.method == "PATCH" && it.url.endsWith("/api/sessions/$SERVER_A")
             }
 
         fixture(behavior).execute { context ->
@@ -271,7 +261,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
 
@@ -280,7 +270,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "PATCH" && it.path == "/v1/sessions/$SERVER_A"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
                 assertEquals("Original", requireNotNull(holder.uiState.value.sessionList).sessions.single().title)
@@ -303,12 +293,11 @@ class EntryStateHolderFixtureIntegrationTest {
         val targetId = SessionId(SERVER_A)
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions = listOf(session(SERVER_A, "Original")),
             )
         val transport =
             BlockingMutationResponseTransport {
-                it.method == "POST" && it.url.endsWith("/v1/sessions/$SERVER_A/pin")
+                it.method == "PATCH" && it.url.endsWith("/api/sessions/$SERVER_A")
             }
 
         fixture(behavior).execute { context ->
@@ -325,7 +314,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "POST" && it.path == "/v1/sessions/$SERVER_A/pin"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
 
@@ -334,7 +323,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "POST" && it.path == "/v1/sessions/$SERVER_A/pin"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
                 transport.release.countDown()
@@ -357,12 +346,11 @@ class EntryStateHolderFixtureIntegrationTest {
         val targetId = SessionId(SERVER_A)
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions = listOf(session(SERVER_A, "Original", pinned = true)),
             )
         val transport =
             BlockingMutationResponseTransport {
-                it.method == "DELETE" && it.url.endsWith("/v1/sessions/$SERVER_A/pin")
+                it.method == "PATCH" && it.url.endsWith("/api/sessions/$SERVER_A")
             }
 
         fixture(behavior).execute { context ->
@@ -379,7 +367,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A/pin"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
 
@@ -388,7 +376,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A/pin"
+                        it.method == "PATCH" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
                 transport.release.countDown()
@@ -411,12 +399,11 @@ class EntryStateHolderFixtureIntegrationTest {
         val targetId = SessionId(SERVER_A)
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions = listOf(session(SERVER_A, "Original")),
             )
         val transport =
             BlockingMutationResponseTransport {
-                it.method == "DELETE" && it.url.endsWith("/v1/sessions/$SERVER_A")
+                it.method == "DELETE" && it.url.endsWith("/api/sessions/$SERVER_A")
             }
 
         fixture(behavior).execute { context ->
@@ -434,7 +421,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A"
+                        it.method == "DELETE" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
 
@@ -443,7 +430,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 assertEquals(
                     1,
                     behavior.requests.count {
-                        it.method == "DELETE" && it.path == "/v1/sessions/$SERVER_A"
+                        it.method == "DELETE" && it.path == "/api/sessions/$SERVER_A"
                     },
                 )
                 transport.release.countDown()
@@ -464,7 +451,6 @@ class EntryStateHolderFixtureIntegrationTest {
         val targetId = SessionId(SERVER_A)
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         session(PINNED_A, "Already pinned", pinned = true),
@@ -517,8 +503,10 @@ class EntryStateHolderFixtureIntegrationTest {
                 holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
                 assertEquals(listOf(PINNED_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })
                 assertTrue(behavior.sessions.none { it.id == SERVER_A })
+                // The pinned Gateway has no pin/unpin routes: both are PATCH on the Session
+                // resource with a `pinned` field, so every mutation except delete is a PATCH.
                 assertEquals(
-                    listOf("PATCH", "POST", "POST", "DELETE", "DELETE", "DELETE", "DELETE"),
+                    listOf("PATCH", "PATCH", "PATCH", "PATCH", "PATCH", "DELETE", "DELETE"),
                     behavior.requests.filter { it.path.contains(SERVER_A) }.map { it.method },
                 )
             } finally {
@@ -532,7 +520,6 @@ class EntryStateHolderFixtureIntegrationTest {
         val targetId = SessionId(SERVER_A)
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         session(SERVER_A, "Listed title", pinned = false),
@@ -587,31 +574,23 @@ class EntryStateHolderFixtureIntegrationTest {
         val session = SessionId(sessionId)
         val localRun = Run(RunId("local-recovered"), session, "running")
         val recoveredRun = localRun.copy(status = "succeeded")
-        val externalRun = Run(RunId("external-run"), session, "succeeded")
         val history =
             listOf(
                 SyntheticGatewayMessage(
                     id = "external-result",
                     role = "assistant",
                     content = "External result",
-                    runId = externalRun.id.value,
-                    runStatus = externalRun.status,
-                    runResult = "External result",
                     timestamp = "2026-09-08T20:00:00Z",
                 ),
                 SyntheticGatewayMessage(
                     id = "local-result",
                     role = "assistant",
                     content = "Recovered result",
-                    runId = localRun.id.value,
-                    runStatus = recoveredRun.status,
-                    runResult = "Recovered result",
                     timestamp = "2026-09-08T21:00:00Z",
                 ),
             )
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         SyntheticGatewaySession(
@@ -619,14 +598,13 @@ class EntryStateHolderFixtureIntegrationTest {
                             title = "Recovery",
                             preview = null,
                             pinned = false,
-                            updatedAt = "2026-09-08T21:00:00Z",
                             history = history,
                         ),
                     ),
             )
         val runGateway =
             FixtureRunGateway(
-                statuses = mapOf(localRun.id to recoveredRun, externalRun.id to externalRun),
+                statuses = mapOf(localRun.id to recoveredRun),
             )
         val recoveryRegistry = InMemoryRunRecoveryRegistry(listOf(RunRecoveryEntry(session, localRun.id)))
 
@@ -658,34 +636,25 @@ class EntryStateHolderFixtureIntegrationTest {
     }
 
     @Test
-    fun external_runs_remain_authoritative_after_refresh_without_local_recovery_registration() {
+    fun history_without_run_metadata_never_invents_runs_or_local_recovery_entries() {
         val sessionId = "external-session"
-        val externalFailed = RunId("external-run-failed")
-        val externalSucceeded = RunId("external-run-succeeded")
         val history =
             listOf(
                 SyntheticGatewayMessage(
                     id = "external-message-failed",
-                    role = null,
-                    content = null,
-                    runId = externalFailed.value,
-                    runStatus = "failed",
-                    runResult = "Remote failure",
+                    role = "assistant",
+                    content = "Remote failure",
                     timestamp = "2026-09-08T20:00:00Z",
                 ),
                 SyntheticGatewayMessage(
                     id = "external-message-succeeded",
-                    role = null,
-                    content = null,
-                    runId = externalSucceeded.value,
-                    runStatus = "succeeded",
-                    runResult = "Remote result",
+                    role = "assistant",
+                    content = "Remote result",
                     timestamp = "2026-09-08T21:00:00Z",
                 ),
             )
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         SyntheticGatewaySession(
@@ -693,51 +662,46 @@ class EntryStateHolderFixtureIntegrationTest {
                             title = "External runs",
                             preview = null,
                             pinned = false,
-                            updatedAt = "2026-09-08T21:00:00Z",
                             history = history,
                         ),
                     ),
             )
-        val runGateway =
-            FixtureRunGateway(
-                statuses =
-                    mapOf(
-                        externalFailed to Run(externalFailed, SessionId(sessionId), "failed"),
-                        externalSucceeded to Run(externalSucceeded, SessionId(sessionId), "succeeded"),
-                    ),
-            )
+        val runGateway = FixtureRunGateway(statuses = emptyMap())
 
         fixture(behavior).execute { context ->
-            val client = client(context)
-            val holder = stateHolder(client, runGateway = runGateway)
+            val holder = stateHolder(client(context), runGateway = runGateway)
             try {
                 connect(holder)
                 holder.onEvent(EntryUiEvent.SessionClicked(SessionId(sessionId)))
                 awaitState(holder) { state ->
                     val opened = state.sessionList?.openedSession
-                    opened?.messages?.map { it.runId?.value } ==
-                        listOf(externalFailed.value, externalSucceeded.value) &&
-                        opened.latestRunState == RunPresentationState.SUCCEEDED &&
-                        !opened.isRefreshing &&
-                        runGateway.statusRequests.size == 1
+                    opened?.messages?.map { it.id } ==
+                        listOf("external-message-failed", "external-message-succeeded") &&
+                        !opened.isRefreshing
                 }
 
-                assertExternalHistoryVisible(holder, externalFailed, externalSucceeded)
-                assertNoExternalRunInLocalRecoveryRegistry(holder, SessionId(sessionId), setOf(externalFailed, externalSucceeded))
+                val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+                assertEquals(listOf("Remote failure", "Remote result"), opened.messages.map { it.content })
+                // The pinned message payload (api_server._message_response) never carries run
+                // linkage: the client must not invent run identity or status from history.
+                assertTrue(opened.messages.all { it.runId == null && it.runStatus == null && it.runResult == null })
+                assertEquals(null, opened.latestRun)
+                assertTrue(runGateway.statusRequests.isEmpty())
+                assertTrue(sessionRunsTrackedBy(holder, SessionId(sessionId)).isEmpty())
 
                 behavior.requests.clear()
                 holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
                 awaitState(holder) { state ->
-                    val opened = state.sessionList?.openedSession
-                    opened?.messages?.map { it.runId?.value } ==
-                        listOf(externalFailed.value, externalSucceeded.value) &&
-                        opened.latestRunState == RunPresentationState.SUCCEEDED &&
-                        !opened.isRefreshing &&
-                        runGateway.statusRequests.size == 2
+                    val refreshed = state.sessionList?.openedSession
+                    refreshed?.messages?.map { it.id } ==
+                        listOf("external-message-failed", "external-message-succeeded") &&
+                        !refreshed.isRefreshing
                 }
 
-                assertExternalHistoryVisible(holder, externalFailed, externalSucceeded)
-                assertNoExternalRunInLocalRecoveryRegistry(holder, SessionId(sessionId), setOf(externalFailed, externalSucceeded))
+                val refreshed = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
+                assertTrue(refreshed.messages.all { it.runId == null && it.runStatus == null })
+                assertTrue(runGateway.statusRequests.isEmpty())
+                assertTrue(sessionRunsTrackedBy(holder, SessionId(sessionId)).isEmpty())
             } finally {
                 holder.close()
             }
@@ -745,37 +709,44 @@ class EntryStateHolderFixtureIntegrationTest {
     }
 
     @Test
-    fun mixed_local_and_external_runs_keep_only_created_run_in_local_recovery_registry() {
+    fun a_created_run_stays_locally_tracked_after_history_refresh_without_inventing_history_runs() {
         val sessionId = "7c4d3b20-7c7a-4e2a-a593-3a11c2e93f70"
         val session = SessionId(sessionId)
         val localRun = Run(RunId("local-run-created"), session, "succeeded")
-        val externalHistory = historyFromContractFixture()
+        val externalHistory =
+            listOf(
+                SyntheticGatewayMessage(
+                    id = "external-message-failed",
+                    role = "assistant",
+                    content = "Remote failure",
+                    timestamp = "2026-09-08T20:00:00Z",
+                ),
+                SyntheticGatewayMessage(
+                    id = "external-message-succeeded",
+                    role = "assistant",
+                    content = "Remote result",
+                    timestamp = "2026-09-08T21:00:00Z",
+                ),
+            )
         val mixedHistory =
             listOf(
                 SyntheticGatewayMessage(
                     id = "local-message-user",
-                    role = null,
-                    content = null,
-                    runId = localRun.id.value,
-                    runStatus = "succeeded",
-                    runResult = null,
+                    role = "user",
+                    content = "Local request",
                     timestamp = "2026-09-08T19:00:00Z",
                 ),
             ) + externalHistory +
                 listOf(
                     SyntheticGatewayMessage(
                         id = "local-message-result",
-                        role = null,
-                        content = null,
-                        runId = localRun.id.value,
-                        runStatus = "succeeded",
-                        runResult = "Local result",
+                        role = "assistant",
+                        content = "Local result",
                         timestamp = "2026-09-08T22:00:00Z",
                     ),
                 )
         val behavior =
             SyntheticGatewayBehavior(
-                capabilities = requiredCapabilities + "client-manifest",
                 initialSessions =
                     listOf(
                         SyntheticGatewaySession(
@@ -783,21 +754,13 @@ class EntryStateHolderFixtureIntegrationTest {
                             title = "Mixed runs",
                             preview = null,
                             pinned = false,
-                            updatedAt = "2026-09-08T22:00:00Z",
                             history = externalHistory,
                         ),
                     ),
             )
-        val externalFailed = RunId("external-run-failed")
-        val externalSucceeded = RunId("external-run-succeeded")
         val runGateway =
             FixtureRunGateway(
-                statuses =
-                    mapOf(
-                        localRun.id to localRun,
-                        externalFailed to Run(externalFailed, session, "failed"),
-                        externalSucceeded to Run(externalSucceeded, session, "succeeded"),
-                    ),
+                statuses = mapOf(localRun.id to localRun),
                 createdRun = localRun,
             )
 
@@ -809,11 +772,11 @@ class EntryStateHolderFixtureIntegrationTest {
                 holder.onEvent(EntryUiEvent.SessionClicked(session))
                 awaitState(holder) { state ->
                     val opened = state.sessionList?.openedSession
-                    opened?.messages?.map { it.runId?.value } ==
-                        listOf(externalFailed.value, externalSucceeded.value) &&
-                        opened.latestRunState == RunPresentationState.SUCCEEDED &&
+                    opened?.messages?.map { it.id } ==
+                        listOf("external-message-failed", "external-message-succeeded") &&
                         !opened.isRefreshing
                 }
+                assertTrue(sessionRunsTrackedBy(holder, session).isEmpty())
 
                 behavior.sessions[0] = behavior.sessions.single().copy(history = mixedHistory)
                 holder.onEvent(EntryUiEvent.ComposerTextChanged("Local request"))
@@ -836,18 +799,9 @@ class EntryStateHolderFixtureIntegrationTest {
 
                 assertEquals(listOf(session to "Local request"), runGateway.createdRunRequests)
                 val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-                assertEquals(
-                    listOf(localRun.id, externalFailed, externalSucceeded, localRun.id),
-                    opened.messages.map { it.runId },
-                )
-                assertEquals(
-                    listOf("succeeded", "failed", "succeeded", "succeeded"),
-                    opened.messages.map { it.runStatus },
-                )
-                assertEquals(
-                    listOf(null, "Remote failure", "Remote result", "Local result"),
-                    opened.messages.map { it.runResult },
-                )
+                // History messages carry no run linkage on the pinned Gateway; only the
+                // Run acknowledged by the submission flow is tracked locally.
+                assertTrue(opened.messages.all { it.runId == null && it.runStatus == null && it.runResult == null })
                 assertEquals(
                     listOf(
                         "2026-09-08T19:00:00Z",
@@ -857,78 +811,38 @@ class EntryStateHolderFixtureIntegrationTest {
                     ),
                     opened.messages.map { it.timestamp?.toString() },
                 )
-                @Suppress("UNCHECKED_CAST")
-                val localRuns =
-                    (
-                        EntryStateHolder::class.java.getDeclaredField("sessionRuns").apply { isAccessible = true }
-                            .get(holder) as Map<SessionId, List<Run>>
-                    )[session].orEmpty()
-                assertTrue(localRuns.any { it.id == localRun.id })
-                assertTrue(localRuns.none { it.id == externalFailed || it.id == externalSucceeded })
+                assertEquals(listOf(localRun.id), sessionRunsTrackedBy(holder, session).map { it.id })
 
                 holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
                 awaitState(holder) { state ->
                     val refreshed = state.sessionList?.openedSession
-                    refreshed?.messages?.map { it.runId } ==
-                        listOf(localRun.id, externalFailed, externalSucceeded, localRun.id) &&
+                    refreshed?.messages?.map { it.id } ==
+                        listOf(
+                            "local-message-user",
+                            "external-message-failed",
+                            "external-message-succeeded",
+                            "local-message-result",
+                        ) &&
                         refreshed.latestRun?.id == localRun.id &&
                         !refreshed.isRefreshing
                 }
-                assertNoExternalRunInLocalRecoveryRegistry(holder, session, setOf(externalFailed, externalSucceeded))
+                assertEquals(listOf(localRun.id), sessionRunsTrackedBy(holder, session).map { it.id })
             } finally {
                 holder.close()
             }
         }
     }
 
-    private fun assertExternalHistoryVisible(
-        holder: EntryStateHolder,
-        failedRunId: RunId,
-        succeededRunId: RunId,
-    ) {
-        val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-        assertEquals(listOf(failedRunId.value, succeededRunId.value), opened.messages.map { it.runId?.value })
-        assertEquals(listOf("failed", "succeeded"), opened.messages.map { it.runStatus })
-        assertEquals(listOf("Remote failure", "Remote result"), opened.messages.map { it.runResult })
-        assertEquals(
-            listOf("2026-09-08T20:00:00Z", "2026-09-08T21:00:00Z"),
-            opened.messages.map { it.timestamp?.toString() },
-        )
-        assertEquals(null, opened.messages.first().role)
-        assertEquals(null, opened.messages.first().content)
-    }
+    private fun clientManifestEndpoints(): Map<String, GatewayEndpoint> = PublicBetaGatewayCapabilityManifest.current.requiredEndpoints
 
-    private fun assertNoExternalRunInLocalRecoveryRegistry(
+    private fun sessionRunsTrackedBy(
         holder: EntryStateHolder,
         sessionId: SessionId,
-        externalRunIds: Set<RunId>,
-    ) {
+    ): List<Run> {
         val field = EntryStateHolder::class.java.getDeclaredField("sessionRuns").apply { isAccessible = true }
 
         @Suppress("UNCHECKED_CAST")
-        val localRuns = (field.get(holder) as Map<SessionId, List<Run>>)[sessionId].orEmpty()
-        assertTrue(localRuns.none { it.id in externalRunIds })
-    }
-
-    private fun historyFromContractFixture(): List<SyntheticGatewayMessage> {
-        val root =
-            Json.parseToJsonElement(
-                repositoryRoot.resolve("fixtures/hermes/contracts/sessions/history-response-external-runs.json").readText(),
-            ).jsonObject
-        val messages =
-            root["response"]!!.jsonObject["body"]!!.jsonObject["messages"]!!.jsonArray
-        return messages.map { element ->
-            val message = element.jsonObject
-            SyntheticGatewayMessage(
-                id = message["id"]!!.jsonPrimitive.content,
-                role = message["role"]?.jsonPrimitive?.contentOrNull,
-                content = message["content"]?.jsonPrimitive?.contentOrNull,
-                runId = message["run_id"]?.jsonPrimitive?.contentOrNull,
-                runStatus = message["run_status"]?.jsonPrimitive?.contentOrNull,
-                runResult = message["run_result"]?.jsonPrimitive?.contentOrNull,
-                timestamp = message["timestamp"]?.jsonPrimitive?.contentOrNull,
-            )
-        }
+        return (field.get(holder) as Map<SessionId, List<Run>>)[sessionId].orEmpty()
     }
 
     private fun client(
@@ -951,7 +865,7 @@ class EntryStateHolderFixtureIntegrationTest {
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
                 VerifyGatewayConnection(FakeGatewayConnectionRepository()) { _, _ ->
-                    GatewayCapabilities(requiredCapabilities)
+                    GatewayCapabilities(clientManifestEndpoints())
                 },
             scope =
                 CoroutineScope(
@@ -996,7 +910,6 @@ class EntryStateHolderFixtureIntegrationTest {
             title = title,
             preview = preview,
             pinned = pinned,
-            updatedAt = "2026-09-08T20:00:00Z",
         )
 
     private fun fixture(behavior: SyntheticGatewayBehavior): DeterministicGatewayFixture =

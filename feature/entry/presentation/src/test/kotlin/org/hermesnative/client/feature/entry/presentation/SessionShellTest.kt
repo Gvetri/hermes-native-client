@@ -84,7 +84,7 @@ class SessionShellTest {
             sessionList =
                 SessionListUiState(
                     sessions = listOf(session("first", "First Session")),
-                    nextCursor = "next-page",
+                    nextOffset = 1,
                     createSession = SessionCreationUiState(),
                 ),
         )
@@ -529,7 +529,7 @@ class SessionShellTest {
             sessionList =
                 SessionListUiState(
                     sessions = listOf(session("first", "First Session")),
-                    nextCursor = "cursor-one",
+                    nextOffset = 1,
                     openedSession =
                         OpenSessionUiState(
                             session = session("first", "First Session"),

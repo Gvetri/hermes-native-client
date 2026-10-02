@@ -7,7 +7,38 @@ import org.junit.Test
 
 class RunReconciliationTest {
     @Test
-    fun a_terminal_run_with_a_matching_history_boundary_is_confirmed() {
+    fun a_terminal_run_is_confirmed_from_the_authoritative_run_resource_alone() {
+        // The pinned Gateway never links Session messages to Runs, so a terminal
+        // Run status must confirm even when history carries no run metadata.
+        val run = Run(RunId("run-1"), SessionId("session-1"), "succeeded")
+        val history = SessionHistory(run.sessionId, emptyList())
+
+        assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run))
+        assertTrue(history.runs().isEmpty())
+    }
+
+    @Test
+    fun a_completed_run_is_confirmed_against_an_empty_history_boundary() {
+        val run = Run(RunId("run-completed"), SessionId("session-1"), "completed")
+        val history = SessionHistory(run.sessionId, emptyList())
+
+        assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run))
+        assertTrue(history.runs().isEmpty())
+    }
+
+    @Test
+    fun a_failed_run_is_confirmed_against_an_empty_history_boundary() {
+        val run = Run(RunId("run-failed"), SessionId("session-1"), "failed")
+        val history = SessionHistory(run.sessionId, emptyList())
+
+        assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run))
+        assertTrue(history.runs().isEmpty())
+    }
+
+    @Test
+    fun additive_message_run_metadata_does_not_change_terminal_confirmation() {
+        // A future Gateway may add run linkage to messages; the authoritative
+        // terminal status already confirms, and the additive metadata is retained.
         val run = Run(RunId("run-1"), SessionId("session-1"), "succeeded")
         val history =
             SessionHistory(
@@ -22,85 +53,23 @@ class RunReconciliationTest {
                             runStatus = "succeeded",
                         ),
                     ),
-                nextCursor = null,
             )
 
-        assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run, history))
+        assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run))
+        assertEquals(listOf(run), history.runs())
     }
 
     @Test
-    fun a_completed_run_matches_a_successful_history_boundary() {
-        val run = Run(RunId("run-completed"), SessionId("session-1"), "completed")
+    fun an_active_run_remains_uncertain_even_when_history_carries_additive_run_metadata() {
+        val run = Run(RunId("run-1"), SessionId("session-1"), "running")
         val history =
             SessionHistory(
                 sessionId = run.sessionId,
-                messages = listOf(GatewayHistoryMessage("message-completed", "assistant", "Done", run.id, "succeeded")),
-                nextCursor = null,
+                messages = listOf(GatewayHistoryMessage("message-1", "user", "Input", run.id, "running")),
             )
 
-        assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run, history))
-    }
-
-    @Test
-    fun a_failed_run_matches_an_error_history_boundary() {
-        val run = Run(RunId("run-failed"), SessionId("session-1"), "failed")
-        val history =
-            SessionHistory(
-                sessionId = run.sessionId,
-                messages = listOf(GatewayHistoryMessage("message-failed", "assistant", "Failure", run.id, "error")),
-                nextCursor = null,
-            )
-
-        assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run, history))
-    }
-
-    @Test
-    fun canceled_and_cancelled_statuses_match_each_other_as_one_terminal_state() {
-        listOf("canceled" to "cancelled", "cancelled" to "canceled").forEach { (runStatus, historyStatus) ->
-            val run = Run(RunId("run-$runStatus"), SessionId("session-1"), runStatus)
-            val history =
-                SessionHistory(
-                    sessionId = run.sessionId,
-                    messages = listOf(GatewayHistoryMessage("message-$runStatus", "assistant", "Cancelled", run.id, historyStatus)),
-                    nextCursor = null,
-                )
-
-            assertEquals(RunReconciliationDecision.CONFIRMED, decideRunReconciliation(run, history))
-        }
-    }
-
-    @Test
-    fun a_stale_user_history_message_with_the_run_id_does_not_confirm_a_terminal_run() {
-        val run = Run(RunId("run-1"), SessionId("session-1"), "completed")
-        val history =
-            SessionHistory(
-                sessionId = run.sessionId,
-                messages = listOf(GatewayHistoryMessage("message-1", "user", "Original request", run.id)),
-                nextCursor = null,
-            )
-
-        assertEquals(RunReconciliationDecision.UNCERTAIN, decideRunReconciliation(run, history))
-    }
-
-    @Test
-    fun a_terminal_run_with_a_mismatched_terminal_history_status_remains_uncertain() {
-        val run = Run(RunId("run-mismatch"), SessionId("session-1"), "failed")
-        val history =
-            SessionHistory(
-                sessionId = run.sessionId,
-                messages = listOf(GatewayHistoryMessage("message-mismatch", "assistant", "Success", run.id, "succeeded")),
-                nextCursor = null,
-            )
-
-        assertEquals(RunReconciliationDecision.UNCERTAIN, decideRunReconciliation(run, history))
-    }
-
-    @Test
-    fun a_terminal_run_without_a_matching_history_boundary_remains_uncertain() {
-        val run = Run(RunId("run-1"), SessionId("session-1"), "succeeded")
-        val history = SessionHistory(run.sessionId, emptyList(), null)
-
-        assertEquals(RunReconciliationDecision.UNCERTAIN, decideRunReconciliation(run, history))
+        assertEquals(RunReconciliationDecision.UNCERTAIN, decideRunReconciliation(run))
+        assertEquals(listOf(run), history.runs())
     }
 
     @Test
@@ -111,7 +80,6 @@ class RunReconciliationTest {
             SessionHistory(
                 sessionId = sessionId,
                 messages = listOf(GatewayHistoryMessage("message-1", "user", "Input", runId, null)),
-                nextCursor = null,
             )
 
         assertEquals(listOf(Run(runId, sessionId, UNKNOWN_RUN_STATUS)), history.runs())
@@ -142,7 +110,24 @@ class RunReconciliationTest {
                             runStatus = null,
                         ),
                     ),
-                nextCursor = null,
+            )
+
+        assertEquals(listOf(Run(runId, sessionId, "succeeded")), history.runs())
+        assertFalse(history.runs().single().isActive())
+    }
+
+    @Test
+    fun a_blank_history_status_preserves_the_latest_known_status_for_the_same_run() {
+        val sessionId = SessionId("session-1")
+        val runId = RunId("run-with-known-status")
+        val history =
+            SessionHistory(
+                sessionId = sessionId,
+                messages =
+                    listOf(
+                        GatewayHistoryMessage("known", "assistant", "Done", runId, "succeeded"),
+                        GatewayHistoryMessage("blank", "assistant", "Metadata", runId, "   "),
+                    ),
             )
 
         assertEquals(listOf(Run(runId, sessionId, "succeeded")), history.runs())
@@ -162,7 +147,6 @@ class RunReconciliationTest {
                         GatewayHistoryMessage("progress", "assistant", "Working", runId, null),
                         GatewayHistoryMessage("failed", "assistant", "Failure", runId, "failed"),
                     ),
-                nextCursor = null,
             )
 
         assertEquals(listOf(Run(runId, sessionId, "failed")), history.runs())
@@ -195,7 +179,7 @@ class RunReconciliationTest {
                     timestamp = "2026-09-16T10:01:00Z",
                 ),
             )
-        val history = SessionHistory(sessionId, messages, null)
+        val history = SessionHistory(sessionId, messages)
 
         assertEquals(
             listOf(
@@ -220,22 +204,9 @@ class RunReconciliationTest {
                     runStatus = "succeeded",
                 ),
             )
-        val history = SessionHistory(sessionId, messages, null)
+        val history = SessionHistory(sessionId, messages)
 
         assertTrue(history.runs().isEmpty())
         assertEquals(messages, history.messages)
-    }
-
-    @Test
-    fun an_active_run_remains_uncertain_even_when_history_contains_the_run() {
-        val run = Run(RunId("run-1"), SessionId("session-1"), "running")
-        val history =
-            SessionHistory(
-                sessionId = run.sessionId,
-                messages = listOf(GatewayHistoryMessage("message-1", "user", "Input", run.id, "running")),
-                nextCursor = null,
-            )
-
-        assertEquals(RunReconciliationDecision.UNCERTAIN, decideRunReconciliation(run, history))
     }
 }

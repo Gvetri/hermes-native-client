@@ -28,6 +28,11 @@ import javax.net.ssl.TrustManagerFactory
  * session and Run data over HTTP or TLS, exposes deterministic SSE observation,
  * records request/observation telemetry, and verifies clean teardown. It never
  * contacts a public endpoint and uses no real provider credentials.
+ *
+ * The served shapes follow the pinned Hermes revision: `/v1/capabilities` advertises
+ * an `endpoints` table, session resources live under `/api/sessions`, Run admission is
+ * `POST /v1/runs`, and Run SSE frames carry the event type inside the JSON `data:`
+ * payload without a named `event:` line.
  */
 class JourneyGatewayProcess private constructor(
     private val server: HttpServer,
@@ -90,18 +95,17 @@ class JourneyGatewayProcess private constructor(
                 if (unauthorized(exchange, behavior)) {
                     respond(exchange, 401, """{"error":"unauthorized"}""")
                 } else {
-                    val capabilities = behavior.scenario.capabilities.sorted().joinToString(",") { GatewayHttpSupport.quote(it) }
-                    respond(exchange, 200, """{"capabilities":[$capabilities]}""")
+                    respond(exchange, 200, capabilitiesJson(scenario))
                 }
             }
-            server.createContext("/v1/sessions") { exchange ->
+            server.createContext("/api/sessions") { exchange ->
                 handleSessionList(exchange, behavior)
             }
-            server.createContext("/v1/sessions/") { exchange ->
+            server.createContext("/api/sessions/") { exchange ->
                 handleSessionResource(exchange, behavior)
             }
-            server.createContext("/v1/runs/") { exchange ->
-                handleRunResource(exchange, behavior)
+            server.createContext("/v1/runs") { exchange ->
+                handleRuns(exchange, behavior)
             }
             server.createContext("/") { exchange ->
                 record(exchange, behavior)
@@ -116,6 +120,26 @@ class JourneyGatewayProcess private constructor(
                 provenanceValue = scenario.hermesRevision,
             )
         }
+
+        private fun capabilitiesJson(scenario: JourneyScenario): String =
+            buildString {
+                append("""{"object":"hermes.api_server.capabilities","platform":"hermes-agent",""")
+                append(""""model":"synthetic","auth":{"type":"bearer","required":""")
+                append(scenario.requireBearerCredential != null)
+                append(
+                    "},\"features\":{\"run_submission\":true,\"run_status\":true," +
+                        "\"run_events_sse\":true,\"session_resources\":true},\"endpoints\":{",
+                )
+                append(
+                    scenario.capabilities.joinToString(",") { name ->
+                        val endpoint = JourneyEndpointCatalog.endpoints.getValue(name)
+                        """${GatewayHttpSupport.quote(
+                            name,
+                        )}:{"method":${GatewayHttpSupport.quote(endpoint.method)},"path":${GatewayHttpSupport.quote(endpoint.path)}}"""
+                    },
+                )
+                append("}}")
+            }
 
         private fun loadKeyStore(
             keystoreFile: File,
@@ -180,43 +204,26 @@ class JourneyGatewayProcess private constructor(
                         return
                     }
                     val query = GatewayHttpSupport.queryParameters(exchange.requestURI)
-                    val search = query["search"].orEmpty()
-                    val matchingSessions =
-                        behavior.sessions.filter { session ->
-                            search.isBlank() ||
-                                session.title.orEmpty().contains(search, ignoreCase = true) ||
-                                session.preview.orEmpty().contains(search, ignoreCase = true)
-                        }
-                    val cursor = query["cursor"]
-                    val parsedOffset = cursor?.removePrefix("offset:")?.toIntOrNull()
-                    if (cursor != null && !cursor.startsWith("offset:")) {
-                        respond(exchange, 400, """{"error":"invalid-cursor"}""")
-                        return
-                    }
-                    if (cursor != null && parsedOffset == null) {
-                        respond(exchange, 400, """{"error":"invalid-cursor"}""")
-                        return
-                    }
-                    val offset = parsedOffset ?: 0
-                    val requestedLimit = query["limit"]?.toIntOrNull() ?: Int.MAX_VALUE
-                    if (requestedLimit <= 0) {
-                        respond(exchange, 400, """{"error":"invalid-limit"}""")
-                        return
-                    }
-                    val serverPageSize = behavior.scenario.sessionPageSize ?: matchingSessions.size.coerceAtLeast(1)
-                    val pageSize = minOf(requestedLimit, serverPageSize)
-                    if (pageSize <= 0 || offset !in 0..matchingSessions.size) {
+                    val requestedLimit = query["limit"]?.toIntOrNull() ?: 50
+                    val offset = query["offset"]?.toIntOrNull() ?: 0
+                    if (requestedLimit <= 0 || offset < 0) {
                         respond(exchange, 400, """{"error":"invalid-pagination"}""")
                         return
                     }
-                    val page = matchingSessions.drop(offset).take(pageSize)
-                    val nextOffset = offset + page.size
-                    val nextCursor = nextOffset.takeIf { it < matchingSessions.size }?.let { next -> "offset:$next" }
+                    val matching = behavior.sessions.toList()
+                    if (offset > matching.size) {
+                        respond(exchange, 400, """{"error":"offset-out-of-range"}""")
+                        return
+                    }
+                    val serverCap = behavior.scenario.sessionPageSize ?: requestedLimit
+                    val effectiveLimit = minOf(requestedLimit, serverCap)
+                    val page = matching.drop(offset).take(effectiveLimit)
+                    val hasMore = offset + page.size < matching.size
                     val sessionsJson = page.joinToString(",") { sessionJson(it) }
                     respond(
                         exchange,
                         200,
-                        """{"sessions":[$sessionsJson],"next_cursor":${nextCursor.jsonValue()}}""",
+                        """{"object":"list","data":[$sessionsJson],"limit":$effectiveLimit,"offset":$offset,"has_more":$hasMore}""",
                     )
                 }
                 "POST" -> {
@@ -230,7 +237,7 @@ class JourneyGatewayProcess private constructor(
                         )
                     behavior.sessions.removeIf { it.id == created.id }
                     behavior.sessions += created
-                    respond(exchange, 201, """{"session":${sessionJson(created)}}""")
+                    respond(exchange, 201, """{"object":"hermes.session","session":${sessionJson(created)}}""")
                 }
                 else -> respond(exchange, 405, """{"error":"method-not-allowed"}""")
             }
@@ -245,13 +252,9 @@ class JourneyGatewayProcess private constructor(
                 respond(exchange, 401, """{"error":"unauthorized"}""")
                 return
             }
-            val resource = exchange.requestURI.path.removePrefix("/v1/sessions/")
+            val resource = exchange.requestURI.path.removePrefix("/api/sessions/")
             val segments = resource.split('/')
             val sessionId = segments.firstOrNull().orEmpty()
-            if (segments.size == 2 && segments[1] == "runs" && exchange.requestMethod == "POST") {
-                handleRunCreate(exchange, behavior, sessionId, body)
-                return
-            }
             val session = behavior.sessions.firstOrNull { it.id == sessionId }
             if (session == null || segments.size !in 1..2) {
                 respond(exchange, 404, """{"error":"session-not-found"}""")
@@ -260,70 +263,43 @@ class JourneyGatewayProcess private constructor(
             when (exchange.requestMethod) {
                 "GET" ->
                     when {
-                        segments.size == 1 -> respond(exchange, 200, """{"session":${sessionJson(session)}}""")
-                        segments[1] == "history" -> respond(exchange, 200, historyJson(behavior, session))
+                        segments.size == 1 ->
+                            respond(exchange, 200, """{"object":"hermes.session","session":${sessionJson(session)}}""")
+                        segments[1] == "messages" -> respond(exchange, 200, historyJson(behavior, session))
                         else -> respond(exchange, 404, """{"error":"not-found"}""")
                     }
                 "PATCH" -> {
                     if (segments.size != 1) {
                         respond(exchange, 404, """{"error":"not-found"}""")
                     } else {
-                        val renamed = session.copy(title = parseTitle(body))
-                        behavior.replaceSession(renamed)
-                        respond(exchange, 200, """{"session":${sessionJson(renamed)}}""")
+                        val pinned = parseBooleanField(body, "pinned")
+                        val updated =
+                            if (pinned != null) {
+                                session.copy(pinned = pinned)
+                            } else {
+                                session.copy(title = parseTitle(body))
+                            }
+                        behavior.replaceSession(updated)
+                        respond(exchange, 200, """{"object":"hermes.session","session":${sessionJson(updated)}}""")
                     }
                 }
-                "POST" -> {
-                    if (segments.size != 2 || segments[1] != "pin") {
+                "DELETE" -> {
+                    if (segments.size != 1) {
                         respond(exchange, 404, """{"error":"not-found"}""")
                     } else {
-                        val pinned = session.copy(pinned = true)
-                        behavior.replaceSession(pinned)
-                        respond(exchange, 200, pinJson(pinned))
+                        behavior.sessions.removeIf { it.id == sessionId }
+                        respond(
+                            exchange,
+                            200,
+                            """{"object":"hermes.session.deleted","id":${sessionId.jsonValue()},"deleted":true}""",
+                        )
                     }
                 }
-                "DELETE" ->
-                    when {
-                        segments.size == 2 && segments[1] == "pin" -> {
-                            val unpinned = session.copy(pinned = false)
-                            behavior.replaceSession(unpinned)
-                            respond(exchange, 200, pinJson(unpinned))
-                        }
-                        segments.size == 1 -> {
-                            behavior.sessions.removeIf { it.id == sessionId }
-                            respond(exchange, 204, "")
-                        }
-                        else -> respond(exchange, 404, """{"error":"not-found"}""")
-                    }
                 else -> respond(exchange, 405, """{"error":"method-not-allowed"}""")
             }
         }
 
-        private fun handleRunCreate(
-            exchange: HttpExchange,
-            behavior: JourneyGatewayBehavior,
-            sessionId: String,
-            body: String?,
-        ) {
-            if (parseRunInput(body) == null) {
-                respond(exchange, 400, """{"error":"invalid-run-input"}""")
-                return
-            }
-            val script =
-                behavior.nextRunScript(sessionId)
-                    ?: run {
-                        respond(exchange, 404, """{"error":"no-synthetic-run"}""")
-                        return
-                    }
-            val runId = script.runId
-            respond(
-                exchange,
-                202,
-                """{"run_id":${runId.jsonValue()},"session_id":${sessionId.jsonValue()},"status":${script.createStatus.jsonValue()}}""",
-            )
-        }
-
-        private fun handleRunResource(
+        private fun handleRuns(
             exchange: HttpExchange,
             behavior: JourneyGatewayBehavior,
         ) {
@@ -332,6 +308,48 @@ class JourneyGatewayProcess private constructor(
                 respond(exchange, 401, """{"error":"unauthorized"}""")
                 return
             }
+            if (exchange.requestURI.path == "/v1/runs") {
+                if (exchange.requestMethod != "POST") {
+                    respond(exchange, 405, """{"error":"method-not-allowed"}""")
+                    return
+                }
+                handleRunCreate(exchange, behavior, body)
+                return
+            }
+            handleRunResource(exchange, behavior)
+        }
+
+        private fun handleRunCreate(
+            exchange: HttpExchange,
+            behavior: JourneyGatewayBehavior,
+            body: String?,
+        ) {
+            val sessionId = parseStringField(body, "session_id")
+            if (sessionId == null || parseRunInput(body) == null) {
+                respond(exchange, 400, """{"error":"invalid-run-request"}""")
+                return
+            }
+            if (behavior.sessions.none { it.id == sessionId }) {
+                respond(exchange, 404, """{"error":"session-not-found"}""")
+                return
+            }
+            val script =
+                behavior.nextRunScript(sessionId)
+                    ?: run {
+                        respond(exchange, 404, """{"error":"no-synthetic-run"}""")
+                        return
+                    }
+            respond(
+                exchange,
+                202,
+                """{"run_id":${script.runId.jsonValue()},"status":${script.createStatus.jsonValue()},"replayed":false}""",
+            )
+        }
+
+        private fun handleRunResource(
+            exchange: HttpExchange,
+            behavior: JourneyGatewayBehavior,
+        ) {
             val resource = exchange.requestURI.path.removePrefix("/v1/runs/")
             val segments = resource.split('/')
             val runId = segments.firstOrNull().orEmpty()
@@ -352,9 +370,9 @@ class JourneyGatewayProcess private constructor(
                             respond(
                                 exchange,
                                 200,
-                                """{"run_id":${runId.jsonValue()},"session_id":${behavior.sessionIdOf(
+                                """{"object":"hermes.run","run_id":${runId.jsonValue()},"session_id":${behavior.sessionIdOf(
                                     runId,
-                                ).jsonValue()},"status":${status.jsonValue()}}""",
+                                ).jsonValue()},"status":${status.jsonValue()},"updated_at":1757325600.0}""",
                             )
                         }
                     }
@@ -429,28 +447,21 @@ class JourneyGatewayProcess private constructor(
         ): ByteArray {
             val data =
                 buildString {
-                    append("""{"run_id":${script.runId.jsonValue()}""")
-                    event.status?.let { append(""","status":${it.jsonValue()}""") }
+                    append("""{"event":${event.type.jsonValue()},"run_id":${script.runId.jsonValue()}""")
                     event.delta?.let { append(""","delta":${it.jsonValue()}""") }
                     append('}')
                 }
-            val rendered =
-                buildString {
-                    event.id?.let { append("id: ").append(it).append('\n') }
-                    append("event: ").append(event.type).append('\n')
-                    append("data: ").append(data).append('\n')
-                    append('\n')
-                }
+            val rendered = "data: $data\n\n"
             return rendered.toByteArray(Charsets.UTF_8)
         }
 
         private fun sessionJson(session: JourneySession): String =
             buildString {
                 append(
-                    """{"id":${session.id.jsonValue()},"title":${session.title.jsonValue()},""",
+                    """{"id":${session.id.jsonValue()},"source":"api_server","title":${session.title.jsonValue()},""",
                 )
-                append(""""preview":${session.preview.jsonValue()},"pinned":${session.pinned},"updated_at":null""")
-                append('}')
+                append(""""preview":${session.preview.jsonValue()},"pinned":${session.pinned},""")
+                append(""""message_count":${session.history.size}}""")
             }
 
         private fun historyJson(
@@ -459,36 +470,50 @@ class JourneyGatewayProcess private constructor(
         ): String {
             val messages = behavior.historyMessagesFor(session)
             return buildString {
-                append("""{"session_id":${session.id.jsonValue()},"messages":[""")
+                append("""{"object":"list","session_id":${session.id.jsonValue()},"data":[""")
                 append(messages.joinToString(",") { messageJson(it) })
-                append("""],"next_cursor":null}""")
+                append("""],"pagination":{"limit":500,"offset":0,"order":"latest","returned":${messages.size}}}""")
             }
         }
 
         private fun messageJson(message: JourneyMessage): String =
             buildString {
                 append("""{"id":${message.id.jsonValue()},"role":${message.role.jsonValue()},"content":${message.content.jsonValue()}""")
-                message.runId?.let { append(""","run_id":${it.jsonValue()}""") }
-                message.runStatus?.let { append(""","run_status":${it.jsonValue()}""") }
-                message.runResult?.let { append(""","run_result":${it.jsonValue()}""") }
                 message.timestamp?.let { append(""","timestamp":${it.jsonValue()}""") }
                 append('}')
             }
 
-        private fun pinJson(session: JourneySession): String = """{"session_id":${session.id.jsonValue()},"pinned":${session.pinned}}"""
+        private fun parseTitle(body: String?): String? = parseStringField(body, "title")
 
-        private fun parseTitle(body: String?): String? {
+        private fun parseStringField(
+            body: String?,
+            field: String,
+        ): String? {
             val text = body?.takeIf(String::isNotBlank) ?: return null
             val root =
                 runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
                     as? kotlinx.serialization.json.JsonObject
                     ?: return null
-            val title = root["title"] ?: return null
-            return if (title == kotlinx.serialization.json.JsonNull) {
+            val value = root[field] ?: return null
+            return if (value == kotlinx.serialization.json.JsonNull) {
                 null
             } else {
-                (title as? kotlinx.serialization.json.JsonPrimitive)?.content
+                (value as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
             }
+        }
+
+        private fun parseBooleanField(
+            body: String?,
+            field: String,
+        ): Boolean? {
+            val text = body?.takeIf(String::isNotBlank) ?: return null
+            val root =
+                runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
+                    as? kotlinx.serialization.json.JsonObject
+                    ?: return null
+            val value = root[field] as? kotlinx.serialization.json.JsonPrimitive ?: return null
+            if (value.isString || value.content !in setOf("true", "false")) return null
+            return value.content == "true"
         }
 
         private fun parseRunInput(body: String?): String? {
@@ -497,7 +522,7 @@ class JourneyGatewayProcess private constructor(
                 runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
                     as? kotlinx.serialization.json.JsonObject
                     ?: return null
-            // The documented contract requires an input field; its value may be
+            // The pinned contract requires an input field; its value may be
             // an empty string (see fixtures/hermes/contracts/runs/create-request.json).
             val input = root["input"] as? kotlinx.serialization.json.JsonPrimitive ?: return null
             return input.takeIf { it.isString }?.content
@@ -563,8 +588,7 @@ internal class JourneyGatewayBehavior(
     fun historyMessagesFor(session: JourneySession): List<JourneyMessage> {
         val terminalHistory =
             scenario.runs
-                .filter {
-                        run ->
+                .filter { run ->
                     run.sessionId == session.id && (observationDelivered[run.runId] == true || run.runId in interruptedRunIds)
                 }
                 .flatMap(JourneyRunScript::terminalHistory)

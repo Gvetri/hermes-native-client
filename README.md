@@ -2,7 +2,7 @@
 
 Hermes Native Client is an independent Android application built with Kotlin and Jetpack Compose. It provides a native shell for connecting to a pre-existing, compatible Hermes Gateway.
 
-This repository does not embed a local Hermes runtime, agent execution engine, desktop web interface, Electron application, or WebView wrapper. It provides one explicit HTTPS Gateway connection flow with process-memory bearer credentials by default and an explicit opt-in to authenticated, device-local credential persistence, followed by a Gateway-derived Session list with server-backed title and preview search and pagination, explicit in-memory Session creation, and read-only Session history entry with an in-memory message composer and explicit Gateway Run submission. Drafts remain memory-only per Session, Send is disabled while a submission or active Run exists, and failed submissions preserve the draft for retry.
+This repository does not embed a local Hermes runtime, agent execution engine, desktop web interface, Electron application, or WebView wrapper. It provides one explicit HTTPS Gateway connection flow with process-memory bearer credentials by default and an explicit opt-in to authenticated, device-local credential persistence, followed by a Gateway-derived Session list with filtering of loaded titles and previews and server-backed pagination, explicit in-memory Session creation, and read-only Session history entry with an in-memory message composer and explicit Gateway Run submission. Drafts remain memory-only per Session, Send is disabled while a submission or active Run exists, and failed submissions preserve the draft for retry.
 
 ## Current baseline
 
@@ -60,6 +60,20 @@ The repository workflow runs these checks on GitHub-hosted runners. Pull request
 ## Deterministic fixture provenance
 
 The repository validates one immutable Hermes fixture provenance value and its deterministic lifecycle contract. See [Deterministic Hermes fixture](docs/deterministic-fixture.md). Changing the pinned revision or image digest is a compatibility change that requires fixture, contract, and integration verification. See [Gateway contract fixtures](docs/gateway-contract-fixtures.md) for the client-owned request, response, and SSE boundary. The [deterministic emulator journeys](docs/deterministic-emulator-journeys.md) install the exact candidate APK on an emulator and exercise the supported journeys against the controlled fake Gateway. Mutable `main`, `latest`, and other mutable references are not compatibility or release evidence.
+
+## Local live smoke gate
+
+The [local live smoke gate](docs/local-live-smoke.md) is separate from deterministic
+validation. It uses the exact candidate APK, a disposable real Gateway at the
+repository's immutable Hermes revision, and three bounded synthetic text turns.
+It runs only in the designated local development environment, never in GitHub
+Actions, pull-request workflows, or Nightly workflows.
+
+Every **Stable Public Beta** release requires successful Live Smoke Evidence for
+the exact signed APK that will be attached to that release, in addition to the
+deterministic gates and explicit human release approval. Rebuilding or signing
+an APK changes its identity and invalidates earlier smoke evidence. Provider
+credentials and smoke videos are never public release assets.
 
 ## Architecture
 

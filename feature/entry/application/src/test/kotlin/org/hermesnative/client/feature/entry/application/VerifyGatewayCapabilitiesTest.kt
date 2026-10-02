@@ -8,7 +8,10 @@ import org.junit.Test
 class VerifyGatewayCapabilitiesTest {
     @Test
     fun application_consumes_the_typed_capability_port() {
-        val expected = GatewayCapabilities(setOf("session.list"))
+        val expected =
+            GatewayCapabilities(
+                mapOf("sessions" to org.hermesnative.client.feature.entry.domain.GatewayEndpoint("GET", "/api/sessions")),
+            )
 
         val result = VerifyGatewayCapabilities(FakeCapabilityPort(expected)).execute()
 
