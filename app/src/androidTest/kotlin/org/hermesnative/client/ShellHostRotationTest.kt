@@ -55,6 +55,11 @@ class ShellHostRotationTest {
             composeTestRule.runOnUiThread {
                 composeTestRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
+            composeTestRule.waitUntil(timeoutMillis = 10_000) {
+                runCatching {
+                    composeTestRule.activity.resources.configuration.screenWidthDp == widthBeforeRotation
+                }.getOrDefault(false)
+            }
             composeTestRule.waitForIdle()
         }
     }
