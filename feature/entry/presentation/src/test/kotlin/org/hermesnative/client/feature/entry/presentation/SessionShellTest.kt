@@ -465,6 +465,22 @@ class SessionShellTest {
     }
 
     @Test
+    @Config(qualifiers = "w411dp-h715dp")
+    fun pinned_phone_list_shows_more_than_one_session_row_with_first_use_guidance() {
+        setShellContent(
+            SessionListUiState(
+                sessions = listOf(session("first", "First Session"), session("second", "Second Session")),
+                showFirstUseGuidance = true,
+            ),
+        )
+
+        // The journey profile's pane shows both Session titles without a scroll, so the Session
+        // list keeps real room next to the pinned header and controls.
+        composeTestRule.onNodeWithText("First Session", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Second Session", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     @Config(qualifiers = "w1000dp-h411dp")
     fun short_window_reaches_the_composer_without_messages() {
         setShellContent(
