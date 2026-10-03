@@ -70,16 +70,28 @@ name: session-lifecycle
 - tapOn:
     text: "Unpin Session"
     below: "Renamed Session"
-- swipe:
-    start: "93%, 69%"
-    end: "93%, 57%"
-    duration: 500
+# The compact Session action row keeps Delete on the same row right below its
+# Session card, so the renamed Session's own Delete is the first match below
+# its card and no extra swipe is needed to reveal it.
 - assertVisible:
     text: "Delete Session"
-    below: "Rename Session"
+    below: "Renamed Session"
 - tapOn:
     text: "Delete Session"
-    below: "Rename Session"
+    below: "Renamed Session"
+# The inline delete confirmation sits below the Session card. Bring its
+# Confirm action into the list viewport with small bounded swipes instead of
+# a fixed gesture distance or a single coarse scroll.
+- repeat:
+    times: 6
+    while:
+      notVisible:
+        text: "Confirm Delete Session"
+    commands:
+      - swipe:
+          start: "50%, 68%"
+          end: "50%, 56%"
+          duration: 500
 - tapOn: "Confirm Delete Session"
 - extendedWaitUntil:
     notVisible: "Renamed Session"

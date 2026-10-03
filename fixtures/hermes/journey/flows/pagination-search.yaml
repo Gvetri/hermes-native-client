@@ -15,8 +15,13 @@ name: pagination-search
     visible: "Sessions"
     timeout: 30000
 - assertVisible: "Search Alpha One"
+# The compact Session action row makes the second row's title reachable with
+# fewer gestures; stop as soon as it is visible instead of a fixed count.
 - repeat:
-    times: 2
+    times: 4
+    while:
+      notVisible:
+        text: "Search Beta Two"
     commands:
       - swipe:
           start: "93%, 69%"

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -757,52 +758,61 @@ private fun SessionActionControls(
             )
         else -> {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        onEvent(
-                            when (mutation?.retryAction) {
-                                SessionMutationAction.PIN -> EntryUiEvent.PinSessionClicked(session.id)
-                                SessionMutationAction.UNPIN -> EntryUiEvent.UnpinSessionClicked(session.id)
-                                else ->
-                                    if (session.pinned) {
-                                        EntryUiEvent.UnpinSessionClicked(session.id)
-                                    } else {
-                                        EntryUiEvent.PinSessionClicked(session.id)
-                                    }
-                            },
+                // The three actions share one compact row, so one Session's controls no longer
+                // stand taller than the rows they belong to and a short pane still shows more
+                // than a single Session.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            onEvent(
+                                when (mutation?.retryAction) {
+                                    SessionMutationAction.PIN -> EntryUiEvent.PinSessionClicked(session.id)
+                                    SessionMutationAction.UNPIN -> EntryUiEvent.UnpinSessionClicked(session.id)
+                                    else ->
+                                        if (session.pinned) {
+                                            EntryUiEvent.UnpinSessionClicked(session.id)
+                                        } else {
+                                            EntryUiEvent.PinSessionClicked(session.id)
+                                        }
+                                },
+                            )
+                        },
+                        enabled = enabled && mutation?.pendingAction == null,
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Text(
+                            text =
+                                if (mutation?.retryAction == SessionMutationAction.PIN ||
+                                    mutation?.retryAction == SessionMutationAction.UNPIN
+                                ) {
+                                    "Try again"
+                                } else if (session.pinned) {
+                                    "Unpin Session"
+                                } else {
+                                    "Pin Session"
+                                },
                         )
-                    },
-                    enabled = enabled && mutation?.pendingAction == null,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) {
-                    Text(
-                        text =
-                            if (mutation?.retryAction == SessionMutationAction.PIN ||
-                                mutation?.retryAction == SessionMutationAction.UNPIN
-                            ) {
-                                "Try again"
-                            } else if (session.pinned) {
-                                "Unpin Session"
-                            } else {
-                                "Pin Session"
-                            },
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                OutlinedButton(
-                    onClick = { onEvent(EntryUiEvent.RenameSessionClicked(session.id)) },
-                    enabled = enabled && mutation?.pendingAction == null,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) {
-                    Text(text = "Rename Session")
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                OutlinedButton(
-                    onClick = { onEvent(EntryUiEvent.DeleteSessionClicked(session.id)) },
-                    enabled = enabled && mutation?.pendingAction == null,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) {
-                    Text(text = "Delete Session")
+                    }
+                    OutlinedButton(
+                        onClick = { onEvent(EntryUiEvent.RenameSessionClicked(session.id)) },
+                        enabled = enabled && mutation?.pendingAction == null,
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Text(text = "Rename Session")
+                    }
+                    OutlinedButton(
+                        onClick = { onEvent(EntryUiEvent.DeleteSessionClicked(session.id)) },
+                        enabled = enabled && mutation?.pendingAction == null,
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Text(text = "Delete Session")
+                    }
                 }
                 mutation?.pendingAction?.let { action ->
                     Spacer(modifier = Modifier.height(8.dp))
