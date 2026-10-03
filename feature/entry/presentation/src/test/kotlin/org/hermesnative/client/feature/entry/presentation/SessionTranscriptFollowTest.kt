@@ -57,6 +57,7 @@ class SessionTranscriptFollowTest {
         }
 
         composeTestRule.onNodeWithText("Paragraph 60").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
     }
 
     @Test
@@ -137,6 +138,7 @@ class SessionTranscriptFollowTest {
         }
 
         composeTestRule.onNodeWithText("Paragraph 60").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
     }
 
     @Test
@@ -188,6 +190,7 @@ class SessionTranscriptFollowTest {
         }
 
         composeTestRule.onNodeWithText("Paragraph 72").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
     }
 
     @Test
@@ -208,6 +211,7 @@ class SessionTranscriptFollowTest {
         }
 
         composeTestRule.onNodeWithText("Paragraph 72").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
     }
 
     private fun setTranscriptContent(state: () -> EntryUiState) {
