@@ -226,6 +226,26 @@ class SelectedVisualRegressionTest {
     }
 
     @Test
+    fun session_detail_overflowing_transcript() {
+        setContent(
+            connectedState(
+                SessionListUiState(
+                    openedSession =
+                        OpenSessionUiState(
+                            session = session("overflow-session", "Overflowing Session"),
+                            messages =
+                                (1..12).map { index ->
+                                    message("message-$index", "user", "Transcript message $index")
+                                },
+                        ),
+                ),
+            ),
+        )
+
+        capture()
+    }
+
+    @Test
     fun session_detail_active_run() {
         val sessionId = SessionId("active-session")
         val runId = RunId("active-run")

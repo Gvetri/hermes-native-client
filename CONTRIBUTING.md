@@ -97,6 +97,7 @@ Markdown rendering contracts.
 | `delete_session_confirmation` | Session list | Inline modal-equivalent delete confirmation mode |
 | `empty_session_detail` | Session detail | New Session with no history |
 | `session_detail_with_messages` | Session detail | Stable user and assistant history |
+| `session_detail_overflowing_transcript` | Session detail | A transcript longer than the pane, opened at its newest message |
 | `session_detail_active_run` | Session detail | Active run with a partial response |
 | `session_detail_error` | Session detail | Failed send with the draft preserved |
 
