@@ -5,5 +5,12 @@
             android:name="org.hermesnative.client.ShellHostActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|fontScale"
             android:exported="false" />
+        <!-- ShellIntegrationTest renders through this bare Compose host. A device configuration
+             change still settling from a preceding test would recreate the host and destroy the
+             composition the test had set, so it declares the shell's configuration contract plus
+             the system theme change. -->
+        <activity
+            android:name="androidx.activity.ComponentActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|fontScale|uiMode" />
     </application>
 </manifest>
