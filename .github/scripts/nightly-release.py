@@ -105,7 +105,7 @@ SIGNER = runpy.run_path(str(Path(__file__).with_name("sign-release-apk.py")))
 ASSETS = ("hermes-native-client.apk", "SHA256SUMS", "signing-metadata.json")
 
 
-def verify_artifact(directory, certificate, evidence, code):
+def verify_artifact(directory, certificate, evidence, code, signing_run_id=None, signing_run_attempt=None):
     """Bind the actual signed APK and its small metadata allowlist to the current run."""
     require({path.name for path in directory.iterdir()} == set(ASSETS), "Unexpected release asset set")
     require(all((directory / name).is_file() and not (directory / name).is_symlink() for name in ASSETS), "Unsafe release asset")
@@ -116,8 +116,8 @@ def verify_artifact(directory, certificate, evidence, code):
     }, "Unexpected signing metadata fields")
     for key, value in evidence.items():
         require(metadata.get(key) == value, "APK validation evidence does not match the selected source")
-    require(metadata["signing_run_id"] == POLICY["positive_integer"](os.environ.get("GITHUB_RUN_ID")), "APK belongs to another signing run")
-    require(metadata["signing_run_attempt"] == POLICY["positive_integer"](os.environ.get("GITHUB_RUN_ATTEMPT")), "APK belongs to an earlier signing attempt")
+    require(metadata["signing_run_id"] == (signing_run_id if signing_run_id is not None else POLICY["positive_integer"](os.environ.get("GITHUB_RUN_ID"))), "APK belongs to another signing run")
+    require(metadata["signing_run_attempt"] == (signing_run_attempt if signing_run_attempt is not None else POLICY["positive_integer"](os.environ.get("GITHUB_RUN_ATTEMPT"))), "APK belongs to an earlier signing attempt")
     tools = Path(os.environ["ANDROID_HOME"]) / "build-tools/35.0.0"
     environment = {name: os.environ[name] for name in ("PATH", "JAVA_HOME")}
     apk = directory / "hermes-native-client.apk"

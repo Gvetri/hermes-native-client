@@ -65,9 +65,9 @@ def verify_generation():
     require(os.environ.get("RELEASE_GENERATION_ATTEMPT") == os.environ["GITHUB_RUN_ATTEMPT"], "Partial rerun cannot reuse a prepared version; rerun all jobs")
 
 
-def verify_source():
-    verify_context()
-    run_id = positive_integer(os.environ.get("RELEASE_VALIDATION_RUN_ID"))
+def verify_validation_run(run_id):
+    """Check the full deterministic main validation without imposing a caller event."""
+    require(type(run_id) is int and run_id > 0, "Invalid validation run identity")
     run = api_get(f"actions/runs/{run_id}")
     workflow = api_get("actions/workflows/quality-gate.yml")
     require(type(workflow.get("id")) is int and workflow["id"] > 0, "Missing workflow identity")
@@ -82,9 +82,6 @@ def verify_source():
     require(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha), "Invalid source commit")
     attempt = run.get("run_attempt")
     require(type(attempt) is int and attempt > 0, "Missing validation attempt")
-    for name, actual in (("RELEASE_SOURCE_SHA", sha), ("RELEASE_VALIDATION_RUN_ATTEMPT", str(attempt))):
-        if name in os.environ:
-            require(os.environ[name] == actual, "Validation evidence changed after preparation")
     comparison = api_get(f"compare/{sha}...main")
     require(
         comparison.get("status") in {"ahead", "identical"}
@@ -123,6 +120,16 @@ def verify_source():
     return {"source_sha": sha, "validation_run_id": run_id, "validation_run_attempt": attempt}
 
 
+def verify_source():
+    verify_context()
+    evidence = verify_validation_run(positive_integer(os.environ.get("RELEASE_VALIDATION_RUN_ID")))
+    for name, actual in (("RELEASE_SOURCE_SHA", evidence["source_sha"]),
+                         ("RELEASE_VALIDATION_RUN_ATTEMPT", str(evidence["validation_run_attempt"]))):
+        if name in os.environ:
+            require(os.environ[name] == actual, "Validation evidence changed after preparation")
+    return evidence
+
+
 def verify_environment():
     require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY, "Untrusted repository")
     environment = api_get("environments/release-signing")
@@ -151,10 +158,8 @@ def verify_environment():
     return environment["id"]
 
 
-def verify_approval():
-    verify_context()
-    environment_id = verify_environment()
-    run_id = positive_integer(os.environ.get("GITHUB_RUN_ID"))
+def verify_run_approval(run_id, environment_id):
+    """Check run-bound approval; GitHub does not return an approval timestamp."""
     reviews = api_get(f"actions/runs/{run_id}/approvals")
     require(isinstance(reviews, list), "Missing release approval history")
     approvals = [review for review in reviews if any(
@@ -166,6 +171,13 @@ def verify_approval():
         and review.get("user", {}).get("login") == "Gvetri" and review.get("user", {}).get("type") == "User"
         for review in approvals
     ), "Explicit human approval for this signing run is missing or contradictory")
+
+
+def verify_approval():
+    verify_context()
+    environment_id = verify_environment()
+    run_id = positive_integer(os.environ.get("GITHUB_RUN_ID"))
+    verify_run_approval(run_id, environment_id)
 
 
 def main():

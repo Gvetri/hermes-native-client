@@ -5,7 +5,9 @@
 `release-signing.yml` is a manual or reusable workflow, not a pull-request or
 push workflow. It prepares a signed artifact; it does not publish a GitHub release.
 Automatic versioning and publication use the separate [Nightly workflow](nightly-releases.md).
-Stable Public Beta publication is a separate release decision.
+The [milestone-based Stable Public Beta workflow](stable-public-beta.md) promotes an
+existing signed Nightly with a separate human publication approval; it does not
+build, sign, or request these environment secrets again.
 
 The workflow has three jobs:
 
@@ -85,8 +87,10 @@ missing evidence blocks Stable Public Beta publication; it is not permission to
 substitute deterministic fixture results or bypass human approval.
 
 At publication, compare the attached APK's downloaded bytes with the successful
-smoke evidence, and retain the redacted evidence and video hash/metadata in the
-release record. Never attach provider credentials or video to a public release.
+smoke evidence. The [Stable Public Beta process](stable-public-beta.md) keeps the
+reviewed redacted evidence in source control but puts only its SHA-256 and pass
+status in public release notes, not its video hash, local paths, or raw metadata.
+Never attach provider credentials or video to a public release.
 Retained video must be encrypted, restricted to release maintainers, and deleted
 within 30 days under the local smoke retention policy. The redacted metadata can
 remain after video deletion. The existing Nightly publisher does not publish

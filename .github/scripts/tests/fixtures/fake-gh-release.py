@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Filesystem-backed stand-in for the gh release commands; used only by local tests."""
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -40,15 +41,29 @@ elif operation == "upload":
     for filename in arguments[3:arguments.index("--repo")]:
         source = Path(filename)
         shutil.copyfile(source, store / source.name)
-        release["assets"].append({"id": len(release["assets"]) + 1, "name": source.name, "size": source.stat().st_size})
+        release["assets"].append({
+            "id": len(release["assets"]) + 1, "name": source.name, "size": source.stat().st_size,
+            "state": "uploaded", "digest": "sha256:" + hashlib.sha256(source.read_bytes()).hexdigest(),
+            "download_count": 0,
+        })
         state.write_text(json.dumps(release))
         if (root / "fail-upload").exists():
             raise SystemExit(7)
 elif operation == "download":
     destination = Path(value("--dir"))
-    for source in (root / "assets").iterdir():
+    store = root / "nightly-assets" if tag.startswith("nightly-") and (root / "nightly-assets").exists() else root / "assets"
+    for source in store.iterdir():
         shutil.copyfile(source, destination / source.name)
-    if (root / "corrupt-download").exists():
+    # Downloads change provider statistics, not the artifact identity.
+    if store.name == "nightly-assets":
+        counter = root / "nightly-downloads"
+        counter.write_text(str((int(counter.read_text()) if counter.exists() else 0) + 1))
+    else:
+        release = json.loads(state.read_text())
+        for asset in release["assets"]:
+            asset["download_count"] += 1
+        state.write_text(json.dumps(release))
+    if (root / "corrupt-download").exists() or (tag.startswith("stable-beta-") and (root / "corrupt-stable-download").exists()):
         (destination / "hermes-native-client.apk").write_bytes(b"corrupt-fixture")
 elif operation == "edit":
     assert "--draft=false" in arguments and "--prerelease" in arguments and "--latest=false" in arguments

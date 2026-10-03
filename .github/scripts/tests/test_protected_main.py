@@ -497,14 +497,17 @@ class ApiStub:
 
     def __init__(self, routes):
         self.routes = routes
+        self.requests = []
         self.server = None
         self.thread = None
 
     def start(self):
         routes = self.routes
+        requests = self.requests
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
+                requests.append(self.path)
                 request_path = self.path if self.path in routes else self.path.split("?", 1)[0]
                 if request_path not in routes:
                     self.send_response(404)
