@@ -46,9 +46,10 @@ elif operation == "upload":
             raise SystemExit(7)
 elif operation == "download":
     destination = Path(value("--dir"))
-    for source in (root / "assets").iterdir():
+    store = root / "nightly-assets" if tag.startswith("nightly-") and (root / "nightly-assets").exists() else root / "assets"
+    for source in store.iterdir():
         shutil.copyfile(source, destination / source.name)
-    if (root / "corrupt-download").exists():
+    if (root / "corrupt-download").exists() or (tag.startswith("stable-beta-") and (root / "corrupt-stable-download").exists()):
         (destination / "hermes-native-client.apk").write_bytes(b"corrupt-fixture")
 elif operation == "edit":
     assert "--draft=false" in arguments and "--prerelease" in arguments and "--latest=false" in arguments

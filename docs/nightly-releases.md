@@ -3,6 +3,8 @@
 A **Nightly** is a development snapshot for testing. It can contain regressions and
 is **not a stable-support promise**. It is not a Stable Public Beta. This workflow
 does not publish Stable Public Beta releases or make a compatibility/support claim.
+See [milestone-based Stable Public Beta](stable-public-beta.md) for the separate,
+human-approved promotion of an existing signed Nightly.
 
 ## Daily path and source selection
 

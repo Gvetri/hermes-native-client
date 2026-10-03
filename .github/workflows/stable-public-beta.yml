@@ -1,0 +1,62 @@
+name: stable-public-beta
+
+on:
+  milestone:
+    types: [closed]
+
+permissions:
+  contents: read
+  actions: read
+
+# Do not allow two milestone closures or reruns to publish the same stable version.
+concurrency:
+  group: stable-public-beta-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: ${{ github.repository == 'Gvetri/hermes-native-client' && github.event.action == 'closed' && github.ref == 'refs/heads/main' && github.ref_protected }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      publish: ${{ steps.prepare.outputs.publish }}
+      freeze: ${{ steps.prepare.outputs.freeze }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify the declaration, existing Nightly, and exact-APK evidence
+        id: prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/stable-public-beta.py prepare .github/stable-public-beta/declaration.json .github/stable-public-beta/live-smoke.json .github/release-certificate.sha256
+
+  publish:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-signing
+    permissions:
+      contents: write
+      actions: read
+    env:
+      STABLE_BETA_FREEZE: ${{ needs.prepare.outputs.freeze }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Recheck approval and frozen candidate, publish, and read back
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/stable-public-beta.py publish .github/stable-public-beta/declaration.json .github/stable-public-beta/live-smoke.json .github/release-certificate.sha256

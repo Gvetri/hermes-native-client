@@ -55,6 +55,17 @@ class QualityGateConfigurationTest {
     }
 
     @Test
+    fun stable_beta_requires_closed_milestone_exact_candidate_and_fresh_approval() {
+        assumePosixWrapperSupport()
+        val process = ProcessBuilder("python3", repositoryRoot.resolve(".github/scripts/tests/test_stable_public_beta.py").absolutePath)
+            .directory(repositoryRoot)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        assertEquals(output, 0, process.waitFor())
+    }
+
+    @Test
     fun release_signing_fails_closed_and_verifies_apk_identity() {
         assumePosixWrapperSupport()
         val process =
