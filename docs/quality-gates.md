@@ -34,8 +34,8 @@ must report `skipped`, and any other outcome fails the aggregate; see
 | `commit-message` | `.github/scripts/verify-conventional-commits.py` | The squash-merge title or a commit of the pull request is not a Conventional Commit, or the API answer is unavailable, empty, or truncated |
 | `draft-validation` | `formatCheck :app:lintDebug` | The head of a draft pull request is unformatted or fails Android lint |
 | `fork-guard` | `.github/workflows/quality-gate.yml` | Never on its own: it reports the handling of an external-fork pull request, and the aggregate requires it for every pull request, then fails closed for an external fork |
-| `api24-instrumentation` | `:app:verifyConnectedAndroidTests` | Instrumentation produced no tests, skipped a test, or reported a failure. Required on schedule and manual runs; skipped on main pushes and pull requests by design |
-| `maestro-journeys` | `.github/scripts/journey-run.sh` | A deterministic emulator journey fails against the controlled fake Gateway. Required on schedule and manual runs; skipped on main pushes and pull requests by design |
+| `api24-instrumentation` | `:app:verifyConnectedAndroidTests` | Instrumentation produced no tests, skipped a test, or reported a failure. Required on scheduled and manual runs and on a ready in-repository pull request labeled `run-maestro`; skipped on main pushes, drafts, external forks, and unlabeled pull requests |
+| `maestro-journeys` | `.github/scripts/journey-run.sh` | A deterministic emulator journey fails against the controlled fake Gateway. Required on scheduled and manual runs and on a labeled ready in-repository pull request, after a passing `api24-instrumentation`; skipped on main pushes, drafts, external forks, and unlabeled pull requests |
 
 The aggregate job compares `.github/quality-gate/required-checks.txt` with its own `needs` list, so
 a check can neither be dropped from the declaration silently nor added without updating the

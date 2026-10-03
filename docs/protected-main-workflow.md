@@ -30,9 +30,10 @@ Use one issue-scoped branch per change, in the form `<type>/<issue>-<short-descr
 
 `.github/workflows/quality-gate.yml` runs on a pull request, a push to `main`, a nightly schedule at
 02:00 UTC, and a manual dispatch. A pull request triggers on `opened`, `synchronize`, `reopened`,
-`ready_for_review`, `converted_to_draft`, and `edited`: a draft transition and a title edit both
-re-evaluate the head, so a result from an earlier state of a pull request never stands for the
-current one.
+`ready_for_review`, `converted_to_draft`, `edited`, and `labeled`: a draft transition, a title edit,
+and a label edit all re-evaluate the head, so a result from an earlier state of a pull request never
+stands for the current one, and adding the `run-maestro` label starts the labeled emulator suites on
+an open pull request.
 
 The concurrency group is the pull-request number with `cancel-in-progress`, so the runs of one pull
 request never race: a newer run replaces the obsolete pending one, and only the current head's own
@@ -42,11 +43,18 @@ run publishes the required status. Results are published per check, and only the
 
 | Run | Checks that execute | Checks that stay skipped |
 | --- | --- | --- |
-| Ready in-repository pull request | The complete gate: `formatting`, `static-analysis`, `unit-tests`, `fixture-descriptor`, `fixture-lifecycle`, `fixture-contract`, `android-build`, `architecture-check`, `coverage-mutation`, `compose-jvm-tests`, `conformance`, `commit-message`, `draft-validation`, `fork-guard` | `api24-instrumentation`, `maestro-journeys` |
+| Ready in-repository pull request | The complete gate: `formatting`, `static-analysis`, `unit-tests`, `fixture-descriptor`, `fixture-lifecycle`, `fixture-contract`, `android-build`, `architecture-check`, `coverage-mutation`, `compose-jvm-tests`, `conformance`, `commit-message`, `draft-validation`, `fork-guard` | `api24-instrumentation`, `maestro-journeys`, unless the pull request carries the `run-maestro` label (next row) |
+| Ready in-repository pull request labeled `run-maestro` | The complete gate plus `api24-instrumentation` and, only after it passes, `maestro-journeys` | None |
 | Draft in-repository pull request | `draft-validation` (`formatCheck` and `:app:lintDebug` only), `fork-guard` | Every other check |
 | External-fork pull request | `fork-guard` | Every other check |
 | Push to `main` | JVM, static, fixture, architecture, coverage/mutation and conformance validation; `android-build` compiles debug/release Kotlin without packaging the application | `api24-instrumentation`, `maestro-journeys`, `draft-validation`, `commit-message`, `fork-guard` |
-| Nightly validation, manual validation | The complete gate plus `api24-instrumentation` and `maestro-journeys` | `draft-validation`, `commit-message`, `fork-guard` |
+| Nightly validation, manual validation | The complete gate plus `api24-instrumentation` and, only after it passes, `maestro-journeys` | `draft-validation`, `commit-message`, `fork-guard` |
+
+The emulator suites are opt-in on pull requests. A ready in-repository pull request runs them only
+with the `run-maestro` label: `api24-instrumentation` runs first, and `maestro-journeys` starts only
+after it passes, so a build or device-suite failure never reaches the journey lane. An unlabeled
+pull request reports both suites as `skipped`, and the aggregate requires exactly that routing; the
+label on a draft or an external-fork pull request starts nothing.
 
 A merge does not package or publish an application APK or generate a product version.
 Signing-policy tests may create minimal disposable APK fixtures; those are not application
