@@ -18,8 +18,15 @@ name: markdown-links
 - extendedWaitUntil:
     visible: "Back to Sessions"
     timeout: 30000
-# Emphasis renders natively: the markers are never part of the shown text, and
-# each message card carries its own explicit actions.
+# The transcript opens at its newest content; walk up to the first message,
+# then read down through the history. Emphasis renders natively: the markers
+# are never part of the shown text, and each message card carries its own
+# explicit actions.
+- scrollUntilVisible:
+    element:
+      text: "Safe Markdown text"
+    direction: UP
+    timeout: 30000
 - assertVisible: "Safe Markdown text"
 - assertVisible: "Copy message"
 - assertVisible: "Share message"
