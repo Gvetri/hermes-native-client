@@ -491,6 +491,58 @@ redact_file "$runner_output" || status=$?
                                     capture_output=True, timeout=10)
             self.assertNotEqual(0, result.returncode)
 
+    def test_aggregate_gates_the_emulator_suites_on_the_run_maestro_label(self):
+        block = WORKFLOW.read_text().split(
+            "      - name: Verify declared checks and results", 1
+        )[1].split("        run: |\n", 1)[1]
+        script = textwrap.dedent(block)
+        core = [
+            "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
+            "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
+            "ARCHITECTURE_CHECK", "COVERAGE_MUTATION", "COMPOSE_TEST", "CONFORMANCE",
+        ]
+        base = {
+            **os.environ,
+            **{f"{job}_RESULT": "success" for job in core},
+            "EVENT_NAME": "pull_request",
+            "EVENT_BASE_REF": "main",
+            "EVENT_FORK": "false",
+            "EVENT_DRAFT": "false",
+            "FORK_GUARD_RESULT": "success",
+            "DRAFT_VALIDATION_RESULT": "success",
+            "COMMIT_MESSAGE_RESULT": "success",
+            "API24_INSTRUMENTATION_RESULT": "success",
+            "MAESTRO_JOURNEYS_RESULT": "success",
+        }
+
+        def run(env):
+            return subprocess.run(["bash", "-c", script], cwd=ROOT, env=env,
+                                  capture_output=True, text=True, timeout=10)
+
+        # A labeled ready pull request passes only when both emulator suites succeeded; the Maestro
+        # run follows the API 24 run, so a skipped, failed, or cancelled suite fails the aggregate.
+        for labels in ('["run-maestro"]', '["ready-for-agent","run-maestro"]'):
+            with self.subTest(labels=labels):
+                labeled = {**base, "EVENT_LABELS": labels}
+                self.assertEqual(0, run(labeled).returncode)
+                for job in ("API24_INSTRUMENTATION_RESULT", "MAESTRO_JOURNEYS_RESULT"):
+                    for outcome in ("skipped", "failure", "cancelled", ""):
+                        with self.subTest(labels=labels, job=job, outcome=outcome):
+                            self.assertNotEqual(0, run({**labeled, job: outcome}).returncode)
+        # A label on a draft starts nothing, a lookalike label never matches, and an unlabeled ready
+        # pull request keeps both suites skipped.
+        draft = {**base, "EVENT_LABELS": '["run-maestro"]', "EVENT_DRAFT": "true",
+                 "COMMIT_MESSAGE_RESULT": "skipped",
+                 "API24_INSTRUMENTATION_RESULT": "skipped", "MAESTRO_JOURNEYS_RESULT": "skipped",
+                 **{f"{job}_RESULT": "skipped" for job in core}}
+        self.assertEqual(0, run(draft).returncode)
+        lookalike = {**base, "EVENT_LABELS": '["run-maestro-extra"]',
+                     "API24_INSTRUMENTATION_RESULT": "skipped", "MAESTRO_JOURNEYS_RESULT": "skipped"}
+        self.assertEqual(0, run(lookalike).returncode)
+        unlabeled = {**base, "EVENT_LABELS": "[]",
+                     "API24_INSTRUMENTATION_RESULT": "skipped", "MAESTRO_JOURNEYS_RESULT": "skipped"}
+        self.assertEqual(0, run(unlabeled).returncode)
+
 
 if __name__ == "__main__":
     unittest.main()

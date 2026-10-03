@@ -175,9 +175,9 @@ class QualityGateConfigurationTest {
                 emulatorJob.contains("        if: \${{ always() }}"),
         )
         assertTrue(
-            "The API 24 job must combine always() with its event filter for cancellation finalization.",
+            "The API 24 job must combine always() with its label-gated event filter for cancellation finalization.",
             emulatorJob.contains(
-                "    if: \${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}",
+                "    if: \${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork && contains(github.event.pull_request.labels.*.name, 'run-maestro'))) }}",
             ),
         )
         assertTrue(
@@ -716,10 +716,10 @@ class QualityGateConfigurationTest {
     }
 
     @Test
-    fun api24_instrumentation_is_nightly_and_manual_while_pull_requests_keep_jvm_compose_coverage() {
+    fun api24_instrumentation_is_nightly_manual_and_label_gated_on_pull_requests() {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val composeJob = workflow.substringAfter("  compose_test:").substringBefore("  api24_instrumentation:")
-        val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  quality-gate:")
+        val api24Job = workflow.substringAfter("  api24_instrumentation:").substringBefore("  maestro_journeys:")
 
         assertTrue(
             "The workflow must run for pull requests, including a draft transition and a title edit.",
@@ -729,11 +729,14 @@ class QualityGateConfigurationTest {
         assertTrue("The workflow must schedule the API 24 suite nightly.", workflow.contains("  schedule:\n    - cron:"))
         assertTrue("The workflow must support manual API 24 execution.", workflow.contains("  workflow_dispatch:"))
         assertTrue(
-            "The API 24 suite must run only on scheduled and manual validation, not main pushes.",
+            "The API 24 suite must run on scheduled and manual validation and on a labeled, ready, in-repository pull request, never on main pushes.",
             !api24Job.contains("github.event_name == 'push'") &&
                 api24Job.contains("github.event_name == 'schedule'") &&
                 api24Job.contains("github.event_name == 'workflow_dispatch'") &&
-                !api24Job.contains("github.event_name == 'pull_request'"),
+                api24Job.contains("github.event_name == 'pull_request'") &&
+                api24Job.contains("!github.event.pull_request.draft") &&
+                api24Job.contains("!github.event.pull_request.head.repo.fork") &&
+                api24Job.contains("contains(github.event.pull_request.labels.*.name, 'run-maestro')"),
         )
         assertTrue(
             "The pull-request Compose job must use the JVM replacement.",
@@ -1014,17 +1017,21 @@ class QualityGateConfigurationTest {
     }
 
     @Test
-    fun maestro_journeys_is_a_deterministic_scheduled_check() {
+    fun maestro_journeys_is_a_deterministic_api24_gated_check() {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val requiredChecks = repositoryRoot.resolve(".github/quality-gate/required-checks.txt").readLines()
+        val maestroJob = workflow.substringAfter("  maestro_journeys:").substringBefore("  create_nightly_failure_issue:")
 
         assertTrue("The workflow must define a Maestro journey job.", workflow.contains("  maestro_journeys:"))
         assertTrue("The Maestro journey job must be named explicitly.", workflow.contains("    name: maestro-journeys"))
         assertTrue(
-            "The Maestro journey job must run only outside pull requests.",
-            workflow.contains(
-                "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
-            ),
+            "The Maestro journey job must wait for a passing API 24 suite and run on scheduled, manual, or labeled ready pull requests.",
+            maestroJob.contains("    needs: [api24_instrumentation]") &&
+                maestroJob.contains("needs.api24_instrumentation.result == 'success'") &&
+                maestroJob.contains("github.event_name == 'schedule'") &&
+                maestroJob.contains("github.event_name == 'workflow_dispatch'") &&
+                maestroJob.contains("github.event_name == 'pull_request'") &&
+                maestroJob.contains("contains(github.event.pull_request.labels.*.name, 'run-maestro')"),
         )
         assertTrue(
             "The Maestro journey job must run the pinned runner script.",
@@ -1040,7 +1047,7 @@ class QualityGateConfigurationTest {
             workflow.contains("steps.journeys.outcome != 'success' && steps.redact_journey_evidence.outcome == 'success'"),
         )
         assertTrue(
-            "The aggregate gate must expect the journey lane to skip on pull requests and pass otherwise.",
+            "The aggregate gate must expect the journey lane to skip on unlabeled pull requests and to pass otherwise.",
             workflow.contains("test \"\$MAESTRO_JOURNEYS_RESULT\" = skipped") &&
                 workflow.contains("test \"\$MAESTRO_JOURNEYS_RESULT\" = success"),
         )

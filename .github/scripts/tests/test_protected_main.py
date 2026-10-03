@@ -135,9 +135,26 @@ class TestProtectedMainWorkflow(unittest.TestCase):
             self.assertEqual(HEAVY_JOBS_RUN, jobs[job][1], f"{job} must run for a ready in-repository pull request")
         aggregate = job_block(self.workflow, "quality-gate")
         self.assertIn('expected_state=success', aggregate)
-        emulator_condition = "${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}"
-        for job in ("api24_instrumentation", "maestro_journeys"):
-            self.assertEqual(emulator_condition, job_key(job_block(self.workflow, job), "if"), f"{job} must stay outside pull requests")
+        # The emulator suites are label-gated on pull requests, and the Maestro run waits for a
+        # passing API 24 run, so a broken build never reaches the journey lane.
+        emulator_gate = (
+            "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || "
+            "(github.event_name == 'pull_request' && !github.event.pull_request.draft && "
+            "!github.event.pull_request.head.repo.fork && "
+            "contains(github.event.pull_request.labels.*.name, 'run-maestro'))"
+        )
+        self.assertEqual(
+            "${{ always() && (" + emulator_gate + ") }}",
+            job_key(job_block(self.workflow, "api24_instrumentation"), "if"),
+        )
+        self.assertEqual(
+            "${{ always() && needs.api24_instrumentation.result == 'success' && (" + emulator_gate + ") }}",
+            job_key(job_block(self.workflow, "maestro_journeys"), "if"),
+        )
+        self.assertEqual(
+            "[api24_instrumentation]",
+            job_key(job_block(self.workflow, "maestro_journeys"), "needs"),
+        )
         self.assertIn('expected_state=skipped', aggregate)
         self.assertIn('if [ "$EVENT_BASE_REF" != main ]', aggregate)
         self.assertIn('if [ "$EVENT_FORK" = true ]', aggregate)
@@ -168,10 +185,10 @@ class TestProtectedMainWorkflow(unittest.TestCase):
         self.assertIn("run: python3 .github/scripts/verify-repository-conformance.py\n", conformance)
         self.assertEqual(CONFORMANCE_RUN, job_key(conformance, "if"))
 
-    def test_the_pull_request_triggers_re_evaluate_a_draft_transition_and_a_title_edit(self):
+    def test_the_pull_request_triggers_re_evaluate_the_head_on_every_declared_activity(self):
         triggers = self.workflow.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
         self.assertIn("  pull_request:\n    types:\n", triggers)
-        for activity in ("opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft", "edited"):
+        for activity in ("opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft", "edited", "labeled"):
             self.assertIn(f"      - {activity}\n", triggers, f"{activity} must trigger the workflow")
 
     def test_every_declared_token_scope_is_a_documented_one(self):
