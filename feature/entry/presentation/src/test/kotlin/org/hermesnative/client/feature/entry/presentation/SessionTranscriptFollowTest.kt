@@ -35,21 +35,25 @@ class SessionTranscriptFollowTest {
 
     @Test
     fun opened_session_shows_the_newest_content_of_a_transcript_taller_than_the_pane() {
-        setTranscriptContent { streamingState(activeResponse = streamedResponse(transcriptBody(1, 48))) }
+        setTranscriptContent { streamingState(activeResponse = streamedResponse(transcriptBody(48))) }
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
+        // The message's last line sits at the viewport's end, so the end is pinned, not merely
+        // near the fold.
+        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
         composeTestRule.onNodeWithText("Paragraph 1").assertIsNotDisplayed()
     }
 
     @Test
     fun growing_streamed_response_stays_in_view_while_the_reader_stays_at_the_newest_content() {
-        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(1, 48))))
+        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(48))))
         setTranscriptContent { state.value }
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
 
         composeTestRule.runOnIdle {
-            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(1, 60)))
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(60)))
         }
 
         composeTestRule.onNodeWithText("Paragraph 60").assertIsDisplayed()
@@ -57,7 +61,7 @@ class SessionTranscriptFollowTest {
 
     @Test
     fun newly_arrived_message_stays_in_view_while_the_reader_stays_at_the_newest_content() {
-        val longReply = message("message-2", "assistant", transcriptBody(1, 48))
+        val longReply = message("message-2", "assistant", transcriptBody(48))
         val state =
             mutableStateOf(
                 streamingState(
@@ -89,7 +93,7 @@ class SessionTranscriptFollowTest {
 
     @Test
     fun a_reader_who_dragged_away_from_the_newest_content_is_not_pulled_back_by_growth() {
-        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(1, 48))))
+        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(48))))
         setTranscriptContent { state.value }
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
@@ -100,7 +104,7 @@ class SessionTranscriptFollowTest {
         composeTestRule.onNodeWithText("Paragraph 48").assertIsNotDisplayed()
 
         composeTestRule.runOnIdle {
-            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(1, 60)))
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(60)))
         }
 
         composeTestRule.onNodeWithText("Paragraph 60").assertIsNotDisplayed()
@@ -109,7 +113,7 @@ class SessionTranscriptFollowTest {
 
     @Test
     fun follow_returns_once_the_reader_settles_back_at_the_newest_content() {
-        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(1, 48))))
+        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(48))))
         setTranscriptContent { state.value }
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
@@ -129,7 +133,7 @@ class SessionTranscriptFollowTest {
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
 
         composeTestRule.runOnIdle {
-            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(1, 60)))
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(60)))
         }
 
         composeTestRule.onNodeWithText("Paragraph 60").assertIsDisplayed()
@@ -143,7 +147,7 @@ class SessionTranscriptFollowTest {
                     messages =
                         listOf(
                             message("message-1", "user", "Show me the long answer"),
-                            message("message-2", "assistant", transcriptBody(1, 48)),
+                            message("message-2", "assistant", transcriptBody(48)),
                         ),
                 ),
             )
@@ -157,8 +161,8 @@ class SessionTranscriptFollowTest {
                     messages =
                         listOf(
                             message("message-1", "user", "Show me the long answer"),
-                            message("message-2", "assistant", transcriptBody(1, 48)),
-                            message("message-3", "assistant", transcriptBody(1, 30, label = "Second reply")),
+                            message("message-2", "assistant", transcriptBody(48)),
+                            message("message-3", "assistant", transcriptBody(30, label = "Second reply")),
                         ),
                 )
         }
@@ -169,7 +173,7 @@ class SessionTranscriptFollowTest {
 
     @Test
     fun a_burst_of_chunks_still_ends_at_the_newest_content() {
-        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(1, 48))))
+        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(48))))
         setTranscriptContent { state.value }
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
@@ -177,10 +181,30 @@ class SessionTranscriptFollowTest {
         // Two chunks arrive before the next idle, so the follow has to coalesce or re-anchor
         // instead of fighting an in-flight scroll.
         composeTestRule.runOnUiThread {
-            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(1, 60)))
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(60)))
         }
         composeTestRule.runOnUiThread {
-            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(1, 72)))
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(72)))
+        }
+
+        composeTestRule.onNodeWithText("Paragraph 72").assertIsDisplayed()
+    }
+
+    @Test
+    fun a_chunk_arriving_right_after_a_follow_scroll_still_ends_at_the_newest_content() {
+        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(48))))
+        setTranscriptContent { state.value }
+
+        composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
+
+        // The second chunk lands while the follow of the first one has not settled, so the follow
+        // must re-anchor instead of cancelling into a stalled position.
+        composeTestRule.runOnUiThread {
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(60)))
+        }
+        composeTestRule.mainClock.advanceTimeBy(100)
+        composeTestRule.runOnUiThread {
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(72)))
         }
 
         composeTestRule.onNodeWithText("Paragraph 72").assertIsDisplayed()
@@ -225,11 +249,10 @@ class SessionTranscriptFollowTest {
      * in place exactly as later chunks arrive.
      */
     private fun transcriptBody(
-        firstParagraph: Int,
         paragraphCount: Int,
         label: String = "Paragraph",
     ): String =
-        (firstParagraph until firstParagraph + paragraphCount).joinToString("\n\n") { number ->
+        (1..paragraphCount).joinToString("\n\n") { number ->
             "$label $number"
         }
 }

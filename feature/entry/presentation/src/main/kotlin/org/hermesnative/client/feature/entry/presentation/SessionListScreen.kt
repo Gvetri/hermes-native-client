@@ -1029,12 +1029,13 @@ internal fun SessionDetailContent(
         if (transcriptPositionPending) {
             // Clear the flag only once the jump has been applied, so a message that arrives
             // mid-jump re-runs the initial positioning instead of leaving it undone.
-            transcriptListState.scrollToItem(newestMessageItemIndex, Int.MAX_VALUE)
+            transcriptListState.scrollToItem(newestMessageItemIndex, PIN_TO_END_OFFSET)
             transcriptPositionPending = false
         } else if (followNewestMessages) {
-            // A restarted effect cancels the previous scroll, so a burst of chunks cannot
-            // fight an older one.
-            transcriptListState.animateScrollToItem(newestMessageItemIndex, Int.MAX_VALUE)
+            // Re-anchoring in one pass, not across frames: a restarted effect cancels the
+            // previous scroll, and a burst of chunks can neither fight an older scroll nor
+            // cancel it into a stalled position.
+            transcriptListState.scrollToItem(newestMessageItemIndex, PIN_TO_END_OFFSET)
         }
     }
     Column(
@@ -1189,6 +1190,14 @@ internal fun SessionDetailContent(
         }
     }
 }
+
+/**
+ * A scroll offset far larger than any message can measure. The list resolves an overshooting
+ * offset to the content's end, so pinning this offset to the newest item puts that item's end at
+ * the end of the viewport: a message taller than the pane keeps its newest lines in view instead
+ * of its start.
+ */
+private const val PIN_TO_END_OFFSET = 1_000_000
 
 /**
  * Whether the transcript should follow its newest content. The follow stays on while the
