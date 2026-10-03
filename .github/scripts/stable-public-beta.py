@@ -53,6 +53,10 @@ def event_context():
             and os.environ.get("GITHUB_REF") == "refs/heads/main"
             and os.environ.get("GITHUB_REF_PROTECTED") == "true"
             and os.environ.get("GITHUB_EVENT_NAME") == "milestone", "Untrusted Stable Public Beta context")
+    # Review history is run-scoped, not attempt-scoped. A new closure creates a
+    # new run and environment approval; reruns must not reuse a previous approval.
+    require(os.environ.get("GITHUB_RUN_ATTEMPT") == "1",
+            "Promotion reruns require a new milestone closure and human approval")
     head = sha(os.environ.get("GITHUB_SHA"))
     branch = api_get("branches/main")
     require(branch.get("protected") is True and branch.get("commit", {}).get("sha") == head,
@@ -214,18 +218,38 @@ def verify_signing_run(metadata, code, source):
                 and matches[0].get("conclusion") == "success" and matches[0].get("head_sha") == run["head_sha"],
                 "Nightly protected signing job did not pass")
     environment_id = POLICY["verify_environment"]()
-    POLICY["verify_run_approval"](run_id, environment_id, attempt_run)
+    POLICY["verify_run_approval"](run_id, environment_id)
     return run_id, attempt
 
 
+def asset_identity(assets):
+    """Keep artifact identity, not mutable download statistics or user profiles."""
+    require(type(assets) is list, "Missing release assets")
+    for asset in assets:
+        require(type(asset) is dict and isinstance(asset.get("name"), str)
+                and asset.get("state") == "uploaded", "Invalid release asset identity")
+        number(asset.get("id"))
+        number(asset.get("size"))
+    return sorted(({key: asset.get(key) for key in ("id", "name", "size", "digest")}
+                   for asset in assets), key=lambda asset: asset["name"])
+
+
+def release_identity(release):
+    return {**{key: release.get(key) for key in
+               ("id", "tag_name", "target_commitish", "name", "body", "prerelease", "draft")},
+            "assets": asset_identity(release.get("assets"))}
+
+
 def verify_assets(directory, release, certificate, evidence, code, run_id, attempt):
-    assets = release.get("assets", [])
+    assets = asset_identity(release.get("assets"))
     require(type(assets) is list and len(assets) == len(NIGHTLY["ASSETS"])
             and {asset.get("name") for asset in assets} == set(NIGHTLY["ASSETS"])
             and len({asset.get("id") for asset in assets}) == len(assets), "Unexpected Nightly asset set")
     metadata = NIGHTLY["verify_artifact"](directory, certificate, evidence, code, run_id, attempt)
     require(all(type(asset.get("size")) is int and asset["size"] == (directory / asset["name"]).stat().st_size
                 for asset in assets), "Nightly asset sizes changed")
+    require(all(asset["digest"] in (None, "sha256:" + file_hash(directory / asset["name"]))
+                for asset in assets), "Release asset digest does not match its downloaded bytes")
     return metadata
 
 
@@ -266,8 +290,7 @@ def prepare(declaration_path, smoke_path, certificate, staging=None):
         "run_id": POLICY["positive_integer"](os.environ.get("GITHUB_RUN_ID")), "attempt": attempt,
         "head": head, "event_milestone": event_milestone, "declaration_hash": file_hash(declaration_path),
         "smoke_hash": file_hash(smoke_path), "candidate_id": release["id"], "candidate_tag": release["tag_name"],
-        "candidate_release_hash": hashlib.sha256(json.dumps(release, sort_keys=True).encode()).hexdigest(),
-        "candidate_assets": release["assets"], "source": source, "validation": validation,
+        "candidate_release": release_identity(release), "source": source, "validation": validation,
         "signing_run_id": run_id, "signing_attempt": metadata["signing_run_attempt"],
         "asset_hashes": asset_hashes, "version": list(version), "tag": tag,
     }
@@ -311,8 +334,7 @@ def read_release(tag, source, title, body, draft, expected_id=None):
             and release.get("target_commitish") == source and release.get("name") == title
             and release.get("body") == body and release.get("prerelease") is True
             and release.get("draft") is draft, "Stable release read-back does not match the request")
-    require(all(listed.get(key) == release.get(key) for key in
-                ("id", "tag_name", "target_commitish", "name", "body", "prerelease", "draft", "assets")),
+    require(release_identity(listed) == release_identity(release),
             "Stable release listing and exact identity disagree")
     return release
 
@@ -334,7 +356,7 @@ def publish(declaration_path, smoke_path, certificate):
     require(attempt_run.get("run_attempt") == attempt and attempt_run.get("id") == run_id,
             "Partial rerun cannot reuse prepared promotion")
     environment_id = POLICY["verify_environment"]()
-    POLICY["verify_run_approval"](run_id, environment_id, attempt_run)
+    POLICY["verify_run_approval"](run_id, environment_id)
     with tempfile.TemporaryDirectory(prefix="stable-beta-publish-", dir=os.environ["RUNNER_TEMP"]) as temporary:
         staging = Path(temporary) / "candidate"
         staging.mkdir()
@@ -357,7 +379,7 @@ def publish(declaration_path, smoke_path, certificate):
         require(release.get("assets") == [], "New stable draft unexpectedly contains assets")
         NIGHTLY["gh_release"](["upload", tag, *(str(staging / name) for name in NIGHTLY["ASSETS"])])
         release = read_release(tag, source, title, body, True, release_id)
-        assets = release.get("assets", [])
+        assets = asset_identity(release.get("assets"))
         require(type(assets) is list and len(assets) == len(NIGHTLY["ASSETS"])
                 and {asset.get("name") for asset in assets} == set(NIGHTLY["ASSETS"])
                 and len({asset.get("id") for asset in assets}) == len(assets)
@@ -376,7 +398,7 @@ def publish(declaration_path, smoke_path, certificate):
                       metadata["signing_run_id"], metadata["signing_run_attempt"])
         NIGHTLY["gh_release"](["edit", tag, "--draft=false", "--prerelease", "--latest=false", "--title", title])
         release = read_release(tag, source, title, body, False, release_id)
-        require(release.get("assets") == assets, "Published stable assets changed")
+        require(asset_identity(release.get("assets")) == assets, "Published stable assets changed")
         reference = api_get(f"git/ref/tags/{tag}")
         require(ref_source(reference, source),
                 "Published stable tag does not identify its exact source")

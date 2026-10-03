@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Fail closed before a protected release build or signing operation."""
-import datetime
 import json
 import os
 from pathlib import Path
@@ -159,21 +158,8 @@ def verify_environment():
     return environment["id"]
 
 
-def approval_time(value):
-    require(isinstance(value, str) and value.endswith("Z"), "Approval time missing")
-    try:
-        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise ReleaseError("Approval time is invalid") from error
-
-
-def verify_run_approval(run_id, environment_id, attempt_run=None):
-    """The protected human must approve this run; promotions also bind its attempt."""
-    start = None
-    if attempt_run is not None:
-        require(attempt_run.get("id") == run_id and type(attempt_run.get("run_attempt")) is int,
-                "Approval run attempt changed")
-        start = approval_time(attempt_run.get("run_started_at"))
+def verify_run_approval(run_id, environment_id):
+    """Check run-bound approval; GitHub does not return an approval timestamp."""
     reviews = api_get(f"actions/runs/{run_id}/approvals")
     require(isinstance(reviews, list), "Missing release approval history")
     approvals = [review for review in reviews if any(
@@ -183,7 +169,6 @@ def verify_run_approval(run_id, environment_id, attempt_run=None):
     require(approvals and all(
         review.get("state") == "approved" and review.get("user", {}).get("id") == 8773754
         and review.get("user", {}).get("login") == "Gvetri" and review.get("user", {}).get("type") == "User"
-        and (attempt_run is None or (start is not None and approval_time(review.get("created_at")) >= start))
         for review in approvals
     ), "Explicit human approval for this signing run is missing or contradictory")
 

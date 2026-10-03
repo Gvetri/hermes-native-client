@@ -85,14 +85,21 @@ milestone, candidate release, draft, or orphan destination tag requires operator
 inspection; publication never overwrites a draft or uses `--clobber`.
 
 Preparation freezes the declaration/evidence byte hashes, source, selected
-Nightly release/asset identity, APK hashes, validation and signing identities,
-version, event, run and attempt. The separate publication job waits on the
+Nightly release identity and asset IDs, names, sizes and digests, APK hashes,
+validation and signing identities, version, event, run and attempt. The separate publication job waits on the
 **existing** `release-signing` environment. Its one required reviewer is Gvetri
 (user ID 8773754); administrators cannot bypass, and only protected `main` is
 allowed. Publication rechecks that configuration, the **current promotion run's
 fresh approval** (not the old Nightly signing approval), and recomputes the
-frozen candidate after the wait. A partial rerun, new Nightly/rerun, altered
-smoke/declaration, moved main, weakened environment, or old approval fails before
+frozen candidate after the wait. Download counters and user-profile metadata are
+not identity fields; ordinary downloads cannot invalidate the candidate.
+GitHub's review history identifies an approved run but has no approval timestamp
+or attempt identifier. Therefore, promotion accepts **only attempt 1**: both full
+and partial reruns require a new milestone closure, a new run ID, and a new human
+environment approval. Existing Nightly signing approval remains run-bound, with
+the exact successful signing attempt and signed APK verified separately.
+A promotion rerun, new Nightly/rerun, altered smoke/declaration, moved main,
+weakened environment, or approval belonging only to another run fails before
 any GitHub release write. The workflow has no signing secrets, build, re-signing,
 provider credentials, or live smoke invocation. Only the publisher has
 `contents: write`; publisher concurrency is serialized across milestones.

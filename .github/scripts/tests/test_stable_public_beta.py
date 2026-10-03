@@ -1,5 +1,6 @@
 """Provider-free Stable Public Beta release tests at the CLI/GitHub boundary."""
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -96,7 +97,7 @@ class StableBetaTest(unittest.TestCase):
         self.routes = {
             f"{self.prefix}/branches/main": {"commit": {"sha": self.head}, "protected": True},
             f"{self.prefix}/milestones/42": copy.deepcopy(self.milestone),
-            f"{self.prefix}/releases": lambda: self.releases + ([json.loads(self.release_file.read_text())] if self.release_file.exists() else []),
+            f"{self.prefix}/releases": self.release_listing,
             f"{self.prefix}/actions/workflows/quality-gate.yml": {"id": 45},
             f"{self.prefix}/actions/runs/123": self.validation_run,
             f"{self.prefix}/actions/runs/123/attempts/1/jobs": {"total_count": len(self.jobs), "jobs": self.jobs},
@@ -127,8 +128,8 @@ class StableBetaTest(unittest.TestCase):
             f"{self.prefix}/environments/release-signing/deployment-branch-policies": {
                 "total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}],
             },
-            f"{self.prefix}/actions/runs/456/approvals": [self.approval("2026-10-02T09:05:00Z")],
-            f"{self.prefix}/actions/runs/999/approvals": [self.approval("2026-10-03T12:05:00Z")],
+            f"{self.prefix}/actions/runs/456/approvals": [self.approval()],
+            f"{self.prefix}/actions/runs/999/approvals": [self.approval()],
         }
         commits = [
             (self.head, self.end, "chore: after milestone"),
@@ -164,8 +165,20 @@ class StableBetaTest(unittest.TestCase):
         (binary / "gh").chmod(0o755)
         self.environment["PATH"] = str(binary) + os.pathsep + self.environment["PATH"]
 
-    def approval(self, created_at):
-        return {"state": "approved", "created_at": created_at,
+    def release_listing(self):
+        releases = copy.deepcopy(self.releases)
+        counter = self.provider / "nightly-downloads"
+        for release in releases:
+            if release["tag_name"].startswith("nightly-"):
+                for asset in release.get("assets", []):
+                    asset["download_count"] += int(counter.read_text()) if counter.exists() else 0
+        if self.release_file.exists():
+            releases.append(json.loads(self.release_file.read_text()))
+        return releases
+
+    def approval(self):
+        # GitHub review history has no review timestamp or run-attempt field.
+        return {"state": "approved", "comment": "Release approved",
                 "user": {"id": 8773754, "login": "Gvetri", "type": "User"},
                 "environments": [{"id": 9, "name": "release-signing"}]}
 
@@ -180,7 +193,9 @@ class StableBetaTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.certificate = fixture.certificate_file
         self.nightly["assets"] = [
-            {"id": index, "name": name, "size": (signed / name).stat().st_size}
+            {"id": index, "name": name, "size": (signed / name).stat().st_size,
+             "state": "uploaded", "digest": "sha256:" + hashlib.sha256((signed / name).read_bytes()).hexdigest(),
+             "download_count": 0}
             for index, name in enumerate(("hermes-native-client.apk", "SHA256SUMS", "signing-metadata.json"), 1)
         ]
         store = self.provider / "nightly-assets"
@@ -211,7 +226,7 @@ class StableBetaTest(unittest.TestCase):
         self.assertEqual("456", values["signing_run_id"])
         self.assertEqual("1", values["generation_attempt"])
 
-    def test_nightly_approval_must_belong_to_its_signing_attempt_and_environment(self):
+    def test_documented_approval_shape_is_bound_to_the_signing_run_and_environment(self):
         self.signed_candidate()
         environment = self.routes[f"{self.prefix}/environments/release-signing"]
         environment["id"] = 11
@@ -219,7 +234,7 @@ class StableBetaTest(unittest.TestCase):
         result, values = self.prepare()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("true", values["publish"])
-        self.routes[f"{self.prefix}/actions/runs/456/approvals"][0]["created_at"] = "2026-10-02T08:59:00Z"
+        self.routes[f"{self.prefix}/actions/runs/456/approvals"] = []
         result, values = self.prepare()
         self.assertNotEqual(0, result.returncode)
         self.assertEqual({}, values)
@@ -260,11 +275,26 @@ class StableBetaTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(["download", "download", "create", "upload", "download", "edit"],
                          (self.provider / "operations").read_text().splitlines())
+    def test_download_counters_and_profile_metadata_do_not_change_candidate_identity(self):
+        self.signed_candidate()
+        result, prepared = self.prepare()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.environment["STABLE_BETA_FREEZE"] = prepared["freeze"]
+        self.nightly["assets"][0]["download_count"] += 10
+        self.nightly["author"] = {"login": "updated-profile"}
+        result, _ = self.command("publish")
+        self.assertEqual(0, result.returncode, result.stderr)
+        release = json.loads(self.release_file.read_text())
+        self.assertFalse(release["draft"])
+        self.assertTrue(all(asset["download_count"] == 1 for asset in release["assets"]))
+
     def test_release_listing_may_include_extra_fields_not_in_exact_release(self):
         self.signed_candidate()
         original = self.routes[f"{self.prefix}/releases"]
         self.routes[f"{self.prefix}/releases"] = lambda: [
-            {**release, "listing_only": "provider metadata"} if release.get("tag_name", "").startswith("stable-beta-")
+            {**release, "listing_only": "provider metadata", "assets": [
+                {**asset, "download_count": asset["download_count"] + 1} for asset in release["assets"]
+            ]} if release.get("tag_name", "").startswith("stable-beta-")
             else release for release in original()
         ]
         result, prepared = self.prepare()
@@ -395,10 +425,23 @@ class StableBetaTest(unittest.TestCase):
         result, _ = self.command("publish")
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(["download"], (self.provider / "operations").read_text().splitlines())
-        self.routes[f"{self.prefix}/actions/runs/999/approvals"] = [self.approval("2026-10-03T11:59:00Z")]
+        self.routes[f"{self.prefix}/actions/runs/999/approvals"] = [self.approval()]
+        self.routes[f"{self.prefix}/actions/runs/999/approvals"][0]["user"]["id"] = 1
         result, _ = self.command("publish")
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(["download"], (self.provider / "operations").read_text().splitlines())
+
+    def test_promotion_reruns_require_a_new_closure_run_and_human_approval(self):
+        self.signed_candidate()
+        self.environment["GITHUB_RUN_ATTEMPT"] = "2"
+        self.environment["STABLE_BETA_FREEZE"] = "f" * 64
+        for operation in ("prepare", "publish"):
+            with self.subTest(operation=operation):
+                result, values = self.command(operation)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("new milestone closure", result.stderr)
+                self.assertEqual({}, values)
+                self.assertFalse((self.provider / "operations").exists())
 
     def test_freeze_rejects_evidence_edits_and_partial_reruns_before_any_write(self):
         self.signed_candidate()
