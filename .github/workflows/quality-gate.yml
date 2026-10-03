@@ -2,7 +2,8 @@ name: quality-gate
 
 on:
   # A draft transition re-evaluates the head, so a draft run can never stand in for the complete
-  # gate of a ready pull request, and a title edit re-verifies the squash-merge title.
+  # gate of a ready pull request, and a title edit re-verifies the squash-merge title. A label
+  # edit re-evaluates the head as well, so adding run-maestro starts the labeled emulator suites.
   pull_request:
     types:
       - opened
@@ -11,6 +12,7 @@ on:
       - ready_for_review
       - converted_to_draft
       - edited
+      - labeled
   push:
     branches:
       - main
@@ -317,7 +319,7 @@ jobs:
 
   api24_instrumentation:
     name: api24-instrumentation
-    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork && contains(github.event.pull_request.labels.*.name, 'run-maestro'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -502,7 +504,8 @@ jobs:
 
   maestro_journeys:
     name: maestro-journeys
-    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    needs: [api24_instrumentation]
+    if: ${{ always() && needs.api24_instrumentation.result == 'success' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && !github.event.pull_request.draft && !github.event.pull_request.head.repo.fork && contains(github.event.pull_request.labels.*.name, 'run-maestro'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 80
     env:
@@ -643,6 +646,7 @@ jobs:
           EVENT_DRAFT: ${{ github.event.pull_request.draft }}
           EVENT_FORK: ${{ github.event.pull_request.head.repo.fork }}
           EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           set -euo pipefail
           expected="$(awk 'NF' .github/quality-gate/required-checks.txt)"
@@ -720,8 +724,15 @@ jobs:
                 exit 1
               fi
             done
-            test "$API24_INSTRUMENTATION_RESULT" = skipped
-            test "$MAESTRO_JOURNEYS_RESULT" = skipped
+            # A ready pull request runs the emulator suites only with the run-maestro label, and the
+            # Maestro run itself follows a passing API 24 run, so a labeled run must report both.
+            if [ "$EVENT_DRAFT" != true ] && [[ "${EVENT_LABELS:-}" == *'"run-maestro"'* ]]; then
+              test "$API24_INSTRUMENTATION_RESULT" = success
+              test "$MAESTRO_JOURNEYS_RESULT" = success
+            else
+              test "$API24_INSTRUMENTATION_RESULT" = skipped
+              test "$MAESTRO_JOURNEYS_RESULT" = skipped
+            fi
           else
             for result in \
               "$FORMATTING_RESULT" \
