@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -37,6 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1009,6 +1011,33 @@ internal fun SessionDetailContent(
     // scrolls as one surface and the composer and Send stay reachable in short windows.
     val paneScrollState = rememberScrollState()
     val tailScrollState = rememberScrollState()
+    // The transcript opens at its newest content and follows the messages that arrive while
+    // the reader is at that content; a reader who scrolled away is never pulled back down.
+    // The newest item is pinned by its end, so a message taller than the pane keeps its newest
+    // lines in view instead of its start. The header and summary occupy item 0, so the count
+    // of messages is the newest item's index.
+    val transcriptListState = rememberLazyListState()
+    val newestMessageItemIndex = displayedMessages.size
+    val followNewestMessages = rememberTranscriptFollow(transcriptListState)
+    var transcriptPositionPending by remember(state.session.id) { mutableStateOf(true) }
+    // A streamed response grows in place without changing the item count, so its content is
+    // part of the key: every later chunk re-runs the follow while the reader is at the newest
+    // content.
+    val streamedResponseContent = state.activeResponse?.content
+    LaunchedEffect(state.session.id, newestMessageItemIndex, streamedResponseContent) {
+        if (newestMessageItemIndex == 0) return@LaunchedEffect
+        if (transcriptPositionPending) {
+            // Clear the flag only once the jump has been applied, so a message that arrives
+            // mid-jump re-runs the initial positioning instead of leaving it undone.
+            transcriptListState.pinNewestItemEnd(newestMessageItemIndex)
+            transcriptPositionPending = false
+        } else if (followNewestMessages) {
+            // The pin is a snap, so a restarted effect cancels the previous scroll and lands the
+            // newest content's end again: a burst of chunks can neither fight an older scroll
+            // nor cancel it into a stalled position.
+            transcriptListState.pinNewestItemEnd(newestMessageItemIndex)
+        }
+    }
     Column(
         modifier =
             if (displayedMessages.isEmpty()) {
@@ -1046,6 +1075,7 @@ internal fun SessionDetailContent(
             Text(text = "No messages in this Session.")
         } else {
             LazyColumn(
+                state = transcriptListState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1159,6 +1189,45 @@ internal fun SessionDetailContent(
             }
         }
     }
+}
+
+/**
+ * Pins the newest item's end to the end of the viewport. An item whose measured size is not
+ * known yet is first brought into view, and the offset is then computed from that measured size,
+ * so no message is too tall for the pin.
+ */
+private suspend fun LazyListState.pinNewestItemEnd(index: Int) {
+    if (layoutInfo.visibleItemsInfo.none { item -> item.index == index }) {
+        scrollToItem(index)
+    }
+    val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+    val itemSize = layoutInfo.visibleItemsInfo.firstOrNull { item -> item.index == index }?.size ?: return
+    scrollToItem(index, (itemSize - viewportHeight).coerceAtLeast(0))
+}
+
+/**
+ * Whether the transcript should follow its newest content. The follow stays on while the
+ * newest content's end is visible, turns off when the reader scrolls it out of view, and
+ * returns once the transcript shows the newest content again, so a reader who scrolled up
+ * is not pulled away from what they are reading.
+ */
+@Composable
+internal fun rememberTranscriptFollow(listState: LazyListState): Boolean {
+    val follow by
+        remember(listState) {
+            derivedStateOf {
+                val layoutInfo = listState.layoutInfo
+                val newestItem = layoutInfo.visibleItemsInfo.lastOrNull()
+                layoutInfo.totalItemsCount == 0 ||
+                    (
+                        newestItem != null &&
+                            newestItem.index == layoutInfo.totalItemsCount - 1 &&
+                            newestItem.offset.toLong() + newestItem.size.toLong() <=
+                            layoutInfo.viewportEndOffset.toLong()
+                    )
+            }
+        }
+    return follow
 }
 
 /**
