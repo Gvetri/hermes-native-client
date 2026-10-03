@@ -1222,7 +1222,8 @@ internal fun rememberTranscriptFollow(listState: LazyListState): Boolean {
                     (
                         newestItem != null &&
                             newestItem.index == layoutInfo.totalItemsCount - 1 &&
-                            newestItem.offset + newestItem.size <= layoutInfo.viewportEndOffset
+                            newestItem.offset.toLong() + newestItem.size.toLong() <=
+                            layoutInfo.viewportEndOffset.toLong()
                     )
             }
         }
