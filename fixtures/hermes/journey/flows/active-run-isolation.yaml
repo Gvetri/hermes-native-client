@@ -25,6 +25,14 @@ name: active-run-isolation
 - extendedWaitUntil:
     visible: "Active partial"
     timeout: 30000
+# The transcript follows a growing response by pinning its newest content, so the
+# summary's refresh control can scroll out of view above; bring it back into view
+# first.
+- scrollUntilVisible:
+    element:
+      text: "Refresh history"
+    direction: UP
+    timeout: 30000
 - tapOn: "Refresh history"
 - extendedWaitUntil:
     visible: "Run state: Uncertain"
