@@ -18,14 +18,14 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Pins the transcript follow behavior: an opened Session shows its newest content, a streamed
- * response that grows in place stays followed, a newly arrived message stays followed, a reader
- * who dragged away is not pulled back, and the follow returns once the reader settles back at the
- * newest content.
+ * Pins the transcript follow behavior for a message taller than the pane: an opened Session
+ * shows the newest content's end, a streamed response that grows in place stays followed to its
+ * newest lines, a long arriving message is followed to its end, a reader who dragged away is not
+ * pulled back, and the follow returns once the reader settles back at the newest content.
  *
  * Every transcript here is taller than the pane before the asserted change, so a pass cannot come
- * from layout slack: the newest line only ends up displayed when the transcript actually follows
- * it.
+ * from layout slack: the newest line only ends up displayed when the transcript is actually
+ * pinned to the newest content's end.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w411dp-h891dp")
@@ -135,6 +135,57 @@ class SessionTranscriptFollowTest {
         composeTestRule.onNodeWithText("Paragraph 60").assertIsDisplayed()
     }
 
+    @Test
+    fun a_long_arriving_message_is_followed_to_its_end() {
+        val state =
+            mutableStateOf(
+                streamingState(
+                    messages =
+                        listOf(
+                            message("message-1", "user", "Show me the long answer"),
+                            message("message-2", "assistant", transcriptBody(1, 48)),
+                        ),
+                ),
+            )
+        setTranscriptContent { state.value }
+
+        composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
+
+        composeTestRule.runOnIdle {
+            state.value =
+                streamingState(
+                    messages =
+                        listOf(
+                            message("message-1", "user", "Show me the long answer"),
+                            message("message-2", "assistant", transcriptBody(1, 48)),
+                            message("message-3", "assistant", transcriptBody(1, 30, label = "Second reply")),
+                        ),
+                )
+        }
+
+        composeTestRule.onNodeWithText("Second reply 30").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Second reply 1").assertIsNotDisplayed()
+    }
+
+    @Test
+    fun a_burst_of_chunks_still_ends_at_the_newest_content() {
+        val state = mutableStateOf(streamingState(activeResponse = streamedResponse(transcriptBody(1, 48))))
+        setTranscriptContent { state.value }
+
+        composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
+
+        // Two chunks arrive before the next idle, so the follow has to coalesce or re-anchor
+        // instead of fighting an in-flight scroll.
+        composeTestRule.runOnUiThread {
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(1, 60)))
+        }
+        composeTestRule.runOnUiThread {
+            state.value = streamingState(activeResponse = streamedResponse(transcriptBody(1, 72)))
+        }
+
+        composeTestRule.onNodeWithText("Paragraph 72").assertIsDisplayed()
+    }
+
     private fun setTranscriptContent(state: () -> EntryUiState) {
         composeTestRule.setContent {
             HermesTheme {
@@ -170,14 +221,15 @@ class SessionTranscriptFollowTest {
         )
 
     /**
-     * One Markdown paragraph per sentence, so the streamed message is a single LazyColumn item
-     * that grows in place exactly as later chunks arrive.
+     * One Markdown paragraph per sentence, so a message is a single LazyColumn item that can grow
+     * in place exactly as later chunks arrive.
      */
     private fun transcriptBody(
         firstParagraph: Int,
         paragraphCount: Int,
+        label: String = "Paragraph",
     ): String =
         (firstParagraph until firstParagraph + paragraphCount).joinToString("\n\n") { number ->
-            "Paragraph $number"
+            "$label $number"
         }
 }
