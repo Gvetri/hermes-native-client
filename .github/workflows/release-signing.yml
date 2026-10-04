@@ -46,15 +46,19 @@ jobs:
       source_sha: ${{ steps.source.outputs.source_sha }}
       validation_run_id: ${{ steps.source.outputs.validation_run_id }}
       validation_run_attempt: ${{ steps.source.outputs.validation_run_attempt }}
+      signing_environment: ${{ steps.environment.outputs.signing_environment }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Verify the protected signing environment
+      - name: Select and verify the trusted signing environment
+        id: environment
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/release-signing.py environment
+          RELEASE_VERSION_CODE: ${{ inputs.nightly_version_code }}
+          RELEASE_GENERATION_ATTEMPT: ${{ inputs.generation_attempt }}
+        run: python3 .github/scripts/release-signing.py signing-environment
       - name: Verify exact-source deterministic validation
         id: source
         env:
@@ -114,7 +118,7 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: release-signing
+    environment: ${{ needs.prepare.outputs.signing_environment }}
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
     env:
@@ -139,14 +143,14 @@ jobs:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
           path: unsigned
           merge-multiple: true
-      - name: Recheck the exact validation attempt after the approval wait
+      - name: Recheck the exact validation attempt before signing
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/release-signing.py source
-      - name: Verify this run's explicit human approval
+      - name: Verify this run's signing authority
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/release-signing.py approval
+        run: python3 .github/scripts/release-signing.py authorization
       - name: Reject a retained Nightly version from an earlier attempt
         if: ${{ inputs.nightly_version_code != '' }}
         run: python3 .github/scripts/release-signing.py generation

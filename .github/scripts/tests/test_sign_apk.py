@@ -67,6 +67,7 @@ class SignApkTest(unittest.TestCase):
     def test_missing_material_bad_password_and_modified_apk_fail_without_output(self):
         cases = (
             ("ANDROID_RELEASE_KEYSTORE_BASE64", ""),
+            ("ANDROID_RELEASE_KEYSTORE_PASSWORD", ""),
             ("ANDROID_RELEASE_KEYSTORE_BASE64", "not-base64"),
             ("ANDROID_RELEASE_KEYSTORE_PASSWORD", "wrong-disposable-password"),
             ("RELEASE_UNSIGNED_SHA256", "0" * 64),
@@ -81,6 +82,14 @@ class SignApkTest(unittest.TestCase):
                 self.assertEqual([], list(self.root.glob("release-signing-*")))
                 self.assertNotIn(self.environment["ANDROID_RELEASE_KEYSTORE_BASE64"], result.stdout + result.stderr)
                 self.assertNotIn(self.environment["ANDROID_RELEASE_KEYSTORE_PASSWORD"], result.stdout + result.stderr)
+
+    def test_empty_workflow_secret_inputs_report_the_exact_missing_material_failure(self):
+        self.env.update(ANDROID_RELEASE_KEYSTORE_BASE64="", ANDROID_RELEASE_KEYSTORE_PASSWORD="")
+        result = self.sign()
+        self.assertEqual(1, result.returncode)
+        self.assertEqual("Release signing refused: Signing material is unavailable", result.stderr.strip())
+        self.assertFalse(self.output.exists())
+        self.assertEqual([], list(self.root.glob("release-signing-*")))
 
     def test_rejects_a_nightly_apk_with_the_wrong_embedded_version(self):
         self.env["RELEASE_VERSION_CODE"] = "7002"

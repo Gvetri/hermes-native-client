@@ -316,6 +316,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/release-signing.py environment
+      - name: Verify unattended Nightly signing protections without secret access
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release-signing.py nightly-environment
 
   api24_instrumentation:
     name: api24-instrumentation
