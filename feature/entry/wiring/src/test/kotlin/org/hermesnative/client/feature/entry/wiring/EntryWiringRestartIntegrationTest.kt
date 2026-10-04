@@ -3,6 +3,7 @@ package org.hermesnative.client.feature.entry.wiring
 import android.content.Context
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -27,6 +28,7 @@ import org.hermesnative.client.feature.entry.domain.SessionPage
 import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
 import org.hermesnative.client.feature.entry.presentation.EntryUiEvent
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -35,6 +37,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -42,6 +45,23 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class EntryWiringRestartIntegrationTest {
+    private val holders = mutableListOf<EntryStateHolder>()
+    private val gateways = mutableSetOf<RestartGateway>()
+
+    @After
+    fun finishHolderWork() {
+        gateways.forEach { gateway ->
+            gateway.releaseCreate.countDown()
+            gateway.releaseStatus.countDown()
+        }
+        holders.forEach(EntryStateHolder::close)
+        holders.forEach(::joinHolder)
+        gateways.flatMap { it.observations }.forEach { observation ->
+            assertEquals(0L, observation.closed.count)
+            if (observation.started.count == 0L) assertEquals(0L, observation.finished.count)
+        }
+    }
+
     @Test
     fun production_wiring_recovers_persisted_run_for_the_same_endpoint() {
         val context = RuntimeEnvironment.getApplication()
@@ -60,11 +80,14 @@ class EntryWiringRestartIntegrationTest {
                 firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Persist this run"))
                 firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
                 awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
-                assertTrue(gateway.observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                assertTrue(gateway.observationStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                // Open reconciliation can display the bound Run before submission finishes saving it.
+                awaitRecoveryEntries(storage, setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)))
                 assertEquals(1, storage.load().size)
                 assertTrue(otherEndpointStorage.load().isEmpty())
             } finally {
                 firstHolder.close()
+                joinHolder(firstHolder)
             }
 
             gateway.terminal = true
@@ -104,11 +127,14 @@ class EntryWiringRestartIntegrationTest {
                 firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Persist before reconnect"))
                 firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
                 awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
+                awaitRecoveryEntries(storage, setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)))
             } finally {
                 firstHolder.close()
+                joinHolder(firstHolder)
             }
 
-            assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
+            val expectedRecovery = setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id))
+            assertEquals(expectedRecovery, storage.load())
             gateway.blockStatus = true
             val restartedHolder = createHolder(context, gateway)
             try {
@@ -153,8 +179,10 @@ class EntryWiringRestartIntegrationTest {
                 firstHolder.onEvent(EntryUiEvent.ComposerTextChanged("Keep recovery"))
                 firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
                 awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
+                awaitRecoveryEntries(storage, setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)))
             } finally {
                 firstHolder.close()
+                joinHolder(firstHolder)
             }
 
             assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
@@ -168,12 +196,43 @@ class EntryWiringRestartIntegrationTest {
                 }
                 assertTrue(gateway.statusRequests.contains(gateway.activeRun.id))
                 // The pinned Gateway's history carries no Run linkage, so the terminal Run
-                // resource itself settles the recovery entry and it is removed.
+                // resource itself settles the recovery entry and it is removed. The
+                // reconciliation flag can drop before that removal lands, so wait for the
+                // settled storage and assert the settled state instead of racing it.
+                awaitCondition { storage.load().isEmpty() }
                 assertTrue(storage.load().isEmpty())
             } finally {
                 restartedHolder.close()
             }
         } finally {
+            storage.clearForTest()
+        }
+    }
+
+    @Test
+    fun production_wiring_retains_recovery_when_closed_as_soon_as_the_run_is_visible() {
+        val context = RuntimeEnvironment.getApplication()
+        val gateway = RestartGateway()
+        val endpoint = "https://gateway.example/profile"
+        val storage = SharedPreferencesRunRecoveryStorage(context) { endpoint }
+        storage.clearForTest()
+        val holder = createHolder(context, gateway)
+        try {
+            connect(holder, endpoint, hasSavedEndpoint = false)
+            openSession(holder, gateway.session.id)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Close immediately"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
+
+            // No storage or observer barrier precedes close. This is holder shutdown, not process death.
+            holder.close()
+            joinHolder(holder)
+
+            assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
+            assertEquals(1, gateway.runRequests.size)
+        } finally {
+            holder.close()
+            joinHolder(holder)
             storage.clearForTest()
         }
     }
@@ -393,6 +452,7 @@ class EntryWiringRestartIntegrationTest {
                 assertTrue(gateway.runRequests.isEmpty())
             } finally {
                 holder.close()
+                dispatcher.drain()
             }
         } finally {
             storage.clearForTest()
@@ -415,7 +475,10 @@ class EntryWiringRestartIntegrationTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             coroutineScope = coroutineScope,
-        )
+        ).also {
+            holders += it
+            gateways += gateway
+        }
 
     private fun connect(
         holder: EntryStateHolder,
@@ -469,6 +532,16 @@ class EntryWiringRestartIntegrationTest {
         }
     }
 
+    private fun joinHolder(holder: EntryStateHolder) {
+        val scope =
+            EntryStateHolder::class.java.getDeclaredField("scope")
+                .apply { isAccessible = true }
+                .get(holder) as CoroutineScope
+        runBlocking {
+            withTimeout(TEST_TIMEOUT_MILLIS) { scope.coroutineContext[Job]?.join() }
+        }
+    }
+
     private fun SharedPreferencesRunRecoveryStorage.clearForTest() {
         save(emptySet())
     }
@@ -483,13 +556,25 @@ class EntryWiringRestartIntegrationTest {
         val externalRun = Run(RunId("external-run"), SESSION_ID, "succeeded")
         val statusRequests = CopyOnWriteArrayList<RunId>()
         val runRequests = CopyOnWriteArrayList<Pair<SessionId, String>>()
-        val observation = BlockingObservation()
-        val statusByRun = mutableMapOf<RunId, Run>()
+        val observationStarted = CountDownLatch(1)
+        val observations = CopyOnWriteArrayList<BlockingObservation>()
+        val statusByRun = ConcurrentHashMap<RunId, Run>()
+
+        @Volatile
         var terminal = false
+
+        @Volatile
         var failCreateAfterAcceptance = false
+
+        @Volatile
         var acceptedRunVisible = false
+
+        @Volatile
         var blockCreate = false
+
+        @Volatile
         var blockStatus = false
+
         val runStarted = CountDownLatch(1)
         val runFinished = CountDownLatch(1)
         val releaseCreate = CountDownLatch(1)
@@ -587,25 +672,35 @@ class EntryWiringRestartIntegrationTest {
             return statusByRun[runId] ?: if (terminal) activeRun.copy(status = "succeeded") else activeRun
         }
 
-        override fun observeRun(runId: RunId): RunEventObservation = observation
+        override fun observeRun(runId: RunId): RunEventObservation = BlockingObservation(observationStarted).also { observations += it }
     }
 
-    private class BlockingObservation : RunEventObservation {
+    private class BlockingObservation(
+        private val anyObservationStarted: CountDownLatch,
+    ) : RunEventObservation {
         val started = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        val finished = CountDownLatch(1)
         private val release = CountDownLatch(1)
 
         override fun iterator(): Iterator<RunEvent> =
             object : Iterator<RunEvent> {
                 override fun hasNext(): Boolean {
                     started.countDown()
-                    release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-                    return false
+                    anyObservationStarted.countDown()
+                    return try {
+                        release.await()
+                        false
+                    } finally {
+                        finished.countDown()
+                    }
                 }
 
                 override fun next(): RunEvent = error("not used")
             }
 
         override fun close() {
+            closed.countDown()
             release.countDown()
         }
     }
@@ -618,6 +713,14 @@ class EntryWiringRestartIntegrationTest {
 
         val queuedCount: Int
             get() = synchronized(queued) { queued.size }
+
+        fun drain() {
+            paused = false
+            while (true) {
+                val next = synchronized(queued) { queued.removeFirstOrNull() } ?: return
+                next.run()
+            }
+        }
 
         override fun dispatch(
             context: kotlin.coroutines.CoroutineContext,
