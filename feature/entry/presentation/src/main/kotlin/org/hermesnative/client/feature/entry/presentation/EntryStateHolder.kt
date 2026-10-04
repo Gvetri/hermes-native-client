@@ -4889,6 +4889,7 @@ class EntryStateHolder(
                 opened == null ||
                 opened.session.id != sessionId ||
                 !run.isActive() ||
+                scope.coroutineContext[Job]?.isActive == false ||
                 sessionGateway == null ||
                 runGateway == null
             ) {

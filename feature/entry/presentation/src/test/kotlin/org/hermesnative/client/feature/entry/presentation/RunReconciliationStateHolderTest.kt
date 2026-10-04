@@ -1,11 +1,13 @@
 package org.hermesnative.client.feature.entry.presentation
 
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -1325,6 +1327,73 @@ class RunReconciliationStateHolderTest {
         }
     }
 
+    @Test(timeout = TEST_TIMEOUT_MILLIS)
+    fun direct_parent_cancellation_releases_a_queued_observer_without_restarting() {
+        assertParentCancellationReleasesObserver(cancelDuringRegistration = false)
+    }
+
+    @Test(timeout = TEST_TIMEOUT_MILLIS)
+    fun direct_parent_cancellation_during_observer_registration_still_releases_ownership() {
+        assertParentCancellationReleasesObserver(cancelDuringRegistration = true)
+    }
+
+    private fun assertParentCancellationReleasesObserver(cancelDuringRegistration: Boolean) {
+        val session = session()
+        val run = Run(RunId("parent-cancelled-run"), session.id, "running")
+        val dispatcher = PausingDispatcher()
+        val parent = SupervisorJob()
+        val failures = CopyOnWriteArrayList<Throwable>()
+        val scope = CoroutineScope(parent + dispatcher + CoroutineExceptionHandler { _, error -> failures += error })
+        val gateway = FakeGateway(session).apply { runs.add(run) }
+        val holder = holder(gateway, scope = scope)
+        val registrations = AtomicInteger(0)
+        val observerJobs =
+            object : LinkedHashMap<SessionId, Job>() {
+                override fun put(
+                    key: SessionId,
+                    value: Job,
+                ): Job? {
+                    // Bound a broken synchronous restart chain before it can exhaust the test worker's stack.
+                    check(registrations.incrementAndGet() <= 3) { "Observer restart did not stop after parent cancellation." }
+                    val previous = super.put(key, value)
+                    if (cancelDuringRegistration) parent.cancel()
+                    return previous
+                }
+            }
+        privateField(holder, "runObservationJobs", observerJobs)
+
+        try {
+            open(holder, gateway)
+            dispatcher.paused = true
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Cancel the parent"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            dispatcher.runNext()
+            if (!cancelDuringRegistration) {
+                assertEquals(1, dispatcher.queuedCount)
+                assertTrue(observerJobs.values.single().isActive)
+            }
+
+            // Do not call holder.close(): gateways and visible Run state must still be present.
+            scope.cancel()
+            dispatcher.drain()
+            runBlocking { withTimeout(TEST_TIMEOUT_MILLIS) { parent.join() } }
+
+            assertEquals("A cancelled parent must not register replacement observers.", 1, registrations.get())
+            assertTrue("Unexpected coroutine failures: $failures", failures.isEmpty())
+            assertTrue(parent.isCompleted)
+            assertTrue(observerJobs.isEmpty())
+            assertTrue((privateField(holder, "runObservationRunIds") as Map<*, *>).isEmpty())
+            assertTrue((privateField(holder, "pendingRunObservationRequests") as Map<*, *>).isEmpty())
+            assertTrue(gateway.observedRunIds.isEmpty())
+            assertEquals(listOf(session.id to "Cancel the parent"), gateway.runRequests)
+            assertEquals(run.id, holder.uiState.value.sessionList?.openedSession?.latestRun?.id)
+        } finally {
+            holder.close()
+            dispatcher.drain()
+            joinHolder(holder)
+        }
+    }
+
     @Test
     fun a_blocked_observer_open_keeps_ownership_until_cancellation_finishes_before_next_run() {
         val session = session()
@@ -2386,6 +2455,7 @@ class RunReconciliationStateHolderTest {
         sendTimeoutMillis: Long = 30_000L,
         recoveryRegistry: RunRecoveryRegistry? = null,
         uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
+        scope: CoroutineScope = CoroutineScope(SupervisorJob() + dispatcher),
     ): EntryStateHolder {
         val repository: GatewayConnectionRepository =
             DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())
@@ -2395,7 +2465,7 @@ class RunReconciliationStateHolderTest {
                 VerifyGatewayConnection(repository) { _, _ ->
                     GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                 },
-            scope = CoroutineScope(SupervisorJob() + dispatcher),
+            scope = scope,
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             runRecoveryRegistry = recoveryRegistry,
