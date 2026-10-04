@@ -61,6 +61,10 @@ class EntryWiringRestartIntegrationTest {
                 firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
                 awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
                 assertTrue(gateway.observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+                // The persisted entry can land after the Run tile and the observation start;
+                // wait for the settled storage so the assertion reads the settled state
+                // instead of racing the persist.
+                awaitCondition { storage.load() == setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)) }
                 assertEquals(1, storage.load().size)
                 assertTrue(otherEndpointStorage.load().isEmpty())
             } finally {
@@ -108,7 +112,12 @@ class EntryWiringRestartIntegrationTest {
                 firstHolder.close()
             }
 
-            assertEquals(setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)), storage.load())
+            // The first Run tile can be visible before the recovery-entry persist is
+            // observable. Wait for the settled storage so the assertion reads the settled
+            // state instead of racing the persist.
+            val expectedRecovery = setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id))
+            awaitCondition { storage.load() == expectedRecovery }
+            assertEquals(expectedRecovery, storage.load())
             gateway.blockStatus = true
             val restartedHolder = createHolder(context, gateway)
             try {
@@ -168,7 +177,10 @@ class EntryWiringRestartIntegrationTest {
                 }
                 assertTrue(gateway.statusRequests.contains(gateway.activeRun.id))
                 // The pinned Gateway's history carries no Run linkage, so the terminal Run
-                // resource itself settles the recovery entry and it is removed.
+                // resource itself settles the recovery entry and it is removed. The
+                // reconciliation flag can drop before that removal lands, so wait for the
+                // settled storage and assert the settled state instead of racing it.
+                awaitCondition { storage.load().isEmpty() }
                 assertTrue(storage.load().isEmpty())
             } finally {
                 restartedHolder.close()
