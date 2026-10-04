@@ -21,6 +21,11 @@ on:
         required: false
         default: ''
         type: string
+    secrets:
+      ANDROID_RELEASE_KEYSTORE_BASE64:
+        required: false
+      ANDROID_RELEASE_KEYSTORE_PASSWORD:
+        required: false
     outputs:
       source_sha:
         description: Exact validated source commit

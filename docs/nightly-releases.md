@@ -59,7 +59,9 @@ a successful full validation of a Nightly-capable source is needed to bootstrap.
 ## Signing and publication boundaries
 
 The daily workflow calls [the protected signer](release-signing.md), without
-`secrets: inherit`. Its preparation and unsigned build have no signing secrets.
+`secrets: inherit`. It explicitly maps only the two declared signing-secret names;
+their values remain in the called job's environment. Its preparation and unsigned
+build have no signing secrets.
 The trusted Nightly caller uses the main-only `nightly-signing` environment with
 no human reviewer or approval wait. Signing and publication are unattended. A
 daily schedule is not a promise of publication when validation or signing
