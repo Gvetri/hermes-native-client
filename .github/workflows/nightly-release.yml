@@ -45,6 +45,11 @@ jobs:
       validation_run_id: ${{ needs.prepare.outputs.validation_run_id }}
       nightly_version_code: ${{ needs.prepare.outputs.version_code }}
       generation_attempt: ${{ needs.prepare.outputs.generation_attempt }}
+    # Explicit names bind the reusable workflow's environment-secret contract.
+    # Values remain in the signing environment, not repository-wide secrets.
+    secrets:
+      ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+      ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
 
   publish:
     needs: [prepare, sign]

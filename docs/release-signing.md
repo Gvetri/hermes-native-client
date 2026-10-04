@@ -37,6 +37,12 @@ repository. A reusable caller uses the same repository's workflow and passes
 `validation_run_id`; the Nightly caller also passes its generated `nightly_version_code`
 and `generation_attempt`. The signer verifies these against the caller's run number and
 current attempt, not a manual version choice. Do not use `secrets: inherit`.
+The reusable contract declares only the two signing-secret names, and the Nightly
+caller maps those names explicitly. GitHub can otherwise supply empty inputs to
+the reusable job even when environment secrets exist (see
+[the runner report](https://github.com/actions/runner/issues/1490)). Keep the
+values in the signing environment; do not add repository-wide copies. The called
+job's environment supplies the values, overriding the empty caller context.
 The unattended path also requires the exact caller workflow reference
 `Gvetri/hermes-native-client/.github/workflows/nightly-release.yml@refs/heads/main`.
 Preparation chooses one of the two fixed environments; callers cannot pass an

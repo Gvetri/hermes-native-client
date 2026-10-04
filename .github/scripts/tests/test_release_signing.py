@@ -293,6 +293,11 @@ class SigningWorkflowTest(unittest.TestCase):
         self.assertNotIn("pull_request", text)
         self.assertNotIn("secrets: inherit", text)
         self.assertNotIn("contents: write", text)
+        self.assertIn("    secrets:\n"
+                      "      ANDROID_RELEASE_KEYSTORE_BASE64:\n"
+                      "        required: false\n"
+                      "      ANDROID_RELEASE_KEYSTORE_PASSWORD:\n"
+                      "        required: false\n", text.split("jobs:", 1)[0])
         for job in ("prepare", "build"):
             block = job_block(text, job)
             self.assertNotIn("secrets.", block)
