@@ -130,24 +130,29 @@ def verify_source():
     return evidence
 
 
-def verify_environment():
+def verify_environment(name="release-signing"):
     require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY, "Untrusted repository")
-    environment = api_get("environments/release-signing")
-    require(environment.get("name") == "release-signing" and type(environment.get("id")) is int, "Missing signing environment")
+    require(name in {"release-signing", "nightly-signing"}, "Unknown signing environment")
+    environment = api_get(f"environments/{name}")
+    require(environment.get("name") == name and type(environment.get("id")) is int, "Missing signing environment")
     require(environment.get("can_admins_bypass") is False, "Administrator bypass must be disabled")
-    rules = [rule for rule in environment.get("protection_rules", []) if rule.get("type") == "required_reviewers"]
-    require(len(rules) == 1, "Required human approval is missing")
-    reviewers = rules[0].get("reviewers", [])
-    require(
-        len(reviewers) == 1 and reviewers[0].get("type") == "User"
-        and reviewers[0].get("reviewer", {}).get("id") == 8773754
-        and reviewers[0].get("reviewer", {}).get("login") == "Gvetri",
-        "The signing environment must require the declared human reviewer",
-    )
+    if name == "release-signing":
+        rules = [rule for rule in environment.get("protection_rules", []) if rule.get("type") == "required_reviewers"]
+        require(len(rules) == 1, "Required human approval is missing")
+        reviewers = rules[0].get("reviewers", [])
+        require(
+            len(reviewers) == 1 and reviewers[0].get("type") == "User"
+            and reviewers[0].get("reviewer", {}).get("id") == 8773754
+            and reviewers[0].get("reviewer", {}).get("login") == "Gvetri",
+            "The signing environment must require the declared human reviewer",
+        )
+    else:
+        require([rule.get("type") for rule in environment.get("protection_rules", [])] == ["branch_policy"],
+                "Nightly signing must be main-only with no approval or wait gate")
     require(environment.get("deployment_branch_policy") == {
         "protected_branches": False, "custom_branch_policies": True,
     }, "Only the declared branch policy is allowed")
-    policies = api_get("environments/release-signing/deployment-branch-policies?per_page=100")
+    policies = api_get(f"environments/{name}/deployment-branch-policies?per_page=100")
     branches = policies.get("branch_policies", [])
     require(
         policies.get("total_count") == 1 and len(branches) == 1
@@ -180,6 +185,31 @@ def verify_approval():
     verify_run_approval(run_id, environment_id)
 
 
+def verify_nightly_authorization():
+    """Only the trusted Nightly caller can sign without a human approval."""
+    verify_generation()
+    require(os.environ.get("GITHUB_WORKFLOW_REF") ==
+            f"{REPOSITORY}/.github/workflows/nightly-release.yml@refs/heads/main",
+            "Only the protected Nightly workflow may use unattended signing")
+    verify_environment("nightly-signing")
+
+
+def signing_environment():
+    verify_context()
+    if os.environ.get("RELEASE_VERSION_CODE"):
+        verify_nightly_authorization()
+        return "nightly-signing"
+    verify_environment()
+    return "release-signing"
+
+
+def verify_authorization():
+    if os.environ.get("RELEASE_VERSION_CODE"):
+        verify_nightly_authorization()
+    else:
+        verify_approval()
+
+
 def main():
     try:
         if sys.argv[1:] == ["source"]:
@@ -189,6 +219,14 @@ def main():
                     output.write(f"{key}={value}\n")
         elif sys.argv[1:] == ["environment"]:
             verify_environment()
+        elif sys.argv[1:] == ["nightly-environment"]:
+            verify_environment("nightly-signing")
+        elif sys.argv[1:] == ["signing-environment"]:
+            name = signing_environment()
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                output.write(f"signing_environment={name}\n")
+        elif sys.argv[1:] == ["authorization"]:
+            verify_authorization()
         elif sys.argv[1:] == ["approval"]:
             verify_approval()
         elif sys.argv[1:] == ["generation"]:

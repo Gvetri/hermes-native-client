@@ -147,7 +147,7 @@ def gh_release(arguments):
 def publish(directory, certificate):
     POLICY["verify_generation"]()
     evidence = POLICY["verify_source"]()
-    POLICY["verify_approval"]()
+    POLICY["verify_nightly_authorization"]()
     code = POLICY["generation_code"]()
     metadata = verify_artifact(directory, certificate, evidence, code)
     sha = evidence["source_sha"]

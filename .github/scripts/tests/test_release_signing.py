@@ -166,6 +166,79 @@ class SigningEnvironmentTest(unittest.TestCase):
             "GITHUB_REPOSITORY": REPOSITORY, "GITHUB_REF": "refs/heads/main",
             "GITHUB_REF_PROTECTED": "true", "GITHUB_EVENT_NAME": "workflow_dispatch",
         }
+        self.nightly = {
+            "id": 10, "name": "nightly-signing", "can_admins_bypass": False,
+            "protection_rules": [{"type": "branch_policy"}],
+            "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+        }
+        self.routes[f"/repos/{REPOSITORY}/environments/nightly-signing"] = self.nightly
+        self.routes[f"/repos/{REPOSITORY}/environments/nightly-signing/deployment-branch-policies"] = self.branches
+
+    def nightly_context(self):
+        self.environment.update(
+            GITHUB_WORKFLOW_REF=f"{REPOSITORY}/.github/workflows/nightly-release.yml@refs/heads/main",
+            GITHUB_RUN_NUMBER="7", GITHUB_RUN_ATTEMPT="2",
+            RELEASE_VERSION_CODE="7002", RELEASE_GENERATION_ATTEMPT="2",
+        )
+
+    def test_nightly_authorization_needs_no_human_approval(self):
+        self.nightly_context()
+        self.approvals.clear()
+        for event in ("schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.environment["GITHUB_EVENT_NAME"] = event
+                result = self.check("authorization")
+                self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(any("/approvals" in path for path in self.api.requests))
+
+    def test_signing_environment_selection_is_not_a_caller_supplied_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "outputs"
+            self.environment["GITHUB_OUTPUT"] = str(output)
+            result = self.check("signing-environment")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("signing_environment=release-signing\n", output.read_text())
+            output.unlink()
+            self.nightly_context()
+            result = self.check("signing-environment")
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("signing_environment=nightly-signing\n", output.read_text())
+
+    def test_other_callers_and_stale_versions_cannot_use_unattended_authorization(self):
+        self.nightly_context()
+        for field, value in (
+            ("GITHUB_WORKFLOW_REF", f"{REPOSITORY}/.github/workflows/release-signing.yml@refs/heads/main"),
+            ("GITHUB_WORKFLOW_REF", f"{REPOSITORY}/.github/workflows/nightly-release.yml@refs/heads/feature"),
+            ("GITHUB_WORKFLOW_REF", ""), ("GITHUB_REPOSITORY", "someone/fork"),
+            ("GITHUB_REF", "refs/pull/3/merge"), ("GITHUB_REF_PROTECTED", "false"),
+            ("GITHUB_EVENT_NAME", "pull_request"), ("RELEASE_VERSION_CODE", "7001"),
+            ("RELEASE_GENERATION_ATTEMPT", "1"),
+        ):
+            with self.subTest(field=field):
+                original = self.environment[field]
+                self.environment[field] = value
+                self.assertNotEqual(0, self.check("authorization").returncode)
+                self.environment[field] = original
+
+    def test_standalone_authorization_still_requires_the_human(self):
+        result = self.check("authorization")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.approvals.clear()
+        self.assertNotEqual(0, self.check("authorization").returncode)
+
+    def test_nightly_environment_rejects_approval_waits_bypass_and_wider_branches(self):
+        result = self.check("nightly-environment")
+        self.assertEqual(0, result.returncode, result.stderr)
+        for kind in ("required_reviewers", "wait_timer", "custom"):
+            with self.subTest(kind=kind):
+                self.nightly["protection_rules"].append({"type": kind})
+                self.assertNotEqual(0, self.check("nightly-environment").returncode)
+                self.nightly["protection_rules"].pop()
+        self.nightly["can_admins_bypass"] = True
+        self.assertNotEqual(0, self.check("nightly-environment").returncode)
+        self.nightly["can_admins_bypass"] = False
+        self.branches["branch_policies"][0]["name"] = "*"
+        self.assertNotEqual(0, self.check("nightly-environment").returncode)
 
     def check(self, command="environment"):
         return subprocess.run(
@@ -225,12 +298,15 @@ class SigningWorkflowTest(unittest.TestCase):
             self.assertNotIn("secrets.", block)
             self.assertIsNone(job_key(block, "environment"))
         sign = job_block(text, "sign")
-        self.assertEqual("release-signing", job_key(sign, "environment"))
+        self.assertEqual("${{ needs.prepare.outputs.signing_environment }}", job_key(sign, "environment"))
         self.assertEqual("[prepare, build]", job_key(sign, "needs"))
         self.assertIn("artifact-ids: ${{ needs.build.outputs.artifact_id }}", sign)
         self.assertNotIn("gradlew", sign)
         self.assertLess(sign.index("release-signing.py source"), sign.index("sign-release-apk.py"))
-        self.assertLess(sign.index("release-signing.py approval"), sign.index("sign-release-apk.py"))
+        self.assertLess(sign.index("release-signing.py authorization"), sign.index("sign-release-apk.py"))
+        prepare = job_block(text, "prepare")
+        self.assertIn("release-signing.py signing-environment", prepare)
+        self.assertIn("signing_environment: ${{ steps.environment.outputs.signing_environment }}", prepare)
         self.assertIn("ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}", sign)
         self.assertIn("ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}", sign)
         self.assertNotIn("secrets.", (ROOT / ".github/workflows/quality-gate.yml").read_text())

@@ -68,7 +68,7 @@ ancestry within the declared range, with one published `Nightly` prerelease.
 A later rerun of an older source never outranks a newer source. An incomplete
 newer Nightly is an error, not permission to fall back to older APK/smoke. The
 candidate's exact tag, target SHA, release state, signing run and attempt, all
-protected signing jobs and earlier human approval, validated source and full
+protected signing jobs and main-only Nightly signing environment, validated source and full
 quality-gate jobs/attempt, actual Android version code/name and ABI, pinned
 signing certificate, APK signature and checksum, three public asset sizes, and
 complete exact-APK Local Live Smoke are checked. Only the existing Nightly APK
@@ -90,14 +90,14 @@ validation and signing identities, version, event, run and attempt. The separate
 **existing** `release-signing` environment. Its one required reviewer is Gvetri
 (user ID 8773754); administrators cannot bypass, and only protected `main` is
 allowed. Publication rechecks that configuration, the **current promotion run's
-fresh approval** (not the old Nightly signing approval), and recomputes the
+fresh approval** (not the unattended Nightly's success), and recomputes the
 frozen candidate after the wait. Download counters and user-profile metadata are
 not identity fields; ordinary downloads cannot invalidate the candidate.
 GitHub's review history identifies an approved run but has no approval timestamp
 or attempt identifier. Therefore, promotion accepts **only attempt 1**: both full
 and partial reruns require a new milestone closure, a new run ID, and a new human
-environment approval. Existing Nightly signing approval remains run-bound, with
-the exact successful signing attempt and signed APK verified separately.
+environment approval. The unattended Nightly's exact successful signing attempt
+and signed APK are verified separately; Nightly success never authorizes promotion.
 A promotion rerun, new Nightly/rerun, altered smoke/declaration, moved main,
 weakened environment, or approval belonging only to another run fails before
 any GitHub release write. The workflow has no signing secrets, build, re-signing,

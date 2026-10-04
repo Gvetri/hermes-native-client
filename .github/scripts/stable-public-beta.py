@@ -217,8 +217,7 @@ def verify_signing_run(metadata, code, source):
         require(len(matches) == 1 and matches[0].get("status") == "completed"
                 and matches[0].get("conclusion") == "success" and matches[0].get("head_sha") == run["head_sha"],
                 "Nightly protected signing job did not pass")
-    environment_id = POLICY["verify_environment"]()
-    POLICY["verify_run_approval"](run_id, environment_id)
+    POLICY["verify_environment"]("nightly-signing")
     return run_id, attempt
 
 

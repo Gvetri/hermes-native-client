@@ -9,7 +9,7 @@ permissions:
   contents: read
   actions: read
 
-# One publisher at a time, including the human signing-approval wait.
+# One publisher at a time, from source selection through signed asset read-back.
 concurrency:
   group: nightly-release-${{ github.repository }}
   cancel-in-progress: false

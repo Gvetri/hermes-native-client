@@ -60,19 +60,21 @@ a successful full validation of a Nightly-capable source is needed to bootstrap.
 
 The daily workflow calls [the protected signer](release-signing.md), without
 `secrets: inherit`. Its preparation and unsigned build have no signing secrets.
-The human must still approve **each signing run** in GitHub's `release-signing`
-environment. Automation cannot grant that approval. A daily schedule is not a
-promise of daily publication when validation or human approval is missing.
+The trusted Nightly caller uses the main-only `nightly-signing` environment with
+no human reviewer or approval wait. Signing and publication are unattended. A
+daily schedule is not a promise of publication when validation or signing
+material is unavailable. Standalone signing and Stable Public Beta promotion
+retain their separate human approval in `release-signing`.
 
 The signing job has only the two environment-scoped Android signing secrets. It
 has no provider credentials and performs no live-provider smoke test. It verifies
 the pinned certificate and uploads an immutable, same-run signed artifact.
 
 Only the separate publication job has `contents: write`; it has no signing
-environment or signing secrets. Before writing it rechecks validation, human
-approval, run/attempt, version, source, certificate, APK checksum, and the exact
+environment or signing secrets. Before writing it rechecks validation, trusted
+Nightly caller and environment, run/attempt, version, source, certificate, APK checksum, and the exact
 three-file artifact allowlist. Workflow concurrency serializes daily/manual runs,
-including the signing-approval wait, and the publisher rechecks duplicate history.
+and the publisher rechecks duplicate history.
 It refuses an existing tag or source, including a draft visible to its write token.
 The read-only preparation token may not see drafts; the publication check remains
 authoritative and refuses a second write.
@@ -136,5 +138,6 @@ python3 -m unittest discover -s .github/scripts/tests -p 'test_*sign*.py'
 
 Use JDK 21, Android SDK Platform 35, Build Tools 35.0.0, `JAVA_HOME`, and
 `ANDROID_HOME`. The existing required `architecture-check` job runs these policy
-and workflow tests. Production signing and publication still need a successful
-exact-source validation and the operator's explicit deployment approval.
+and workflow tests. Production signing and publication still need successful
+exact-source validation and the verified main-only Nightly signing boundary,
+but no operator deployment approval.

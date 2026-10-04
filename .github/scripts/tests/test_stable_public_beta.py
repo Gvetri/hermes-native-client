@@ -128,7 +128,15 @@ class StableBetaTest(unittest.TestCase):
             f"{self.prefix}/environments/release-signing/deployment-branch-policies": {
                 "total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}],
             },
-            f"{self.prefix}/actions/runs/456/approvals": [self.approval()],
+            f"{self.prefix}/environments/nightly-signing": {
+                "id": 10, "name": "nightly-signing", "can_admins_bypass": False,
+                "protection_rules": [{"type": "branch_policy"}],
+                "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+            },
+            f"{self.prefix}/environments/nightly-signing/deployment-branch-policies": {
+                "total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}],
+            },
+            f"{self.prefix}/actions/runs/456/approvals": [],
             f"{self.prefix}/actions/runs/999/approvals": [self.approval()],
         }
         commits = [
@@ -226,15 +234,13 @@ class StableBetaTest(unittest.TestCase):
         self.assertEqual("456", values["signing_run_id"])
         self.assertEqual("1", values["generation_attempt"])
 
-    def test_documented_approval_shape_is_bound_to_the_signing_run_and_environment(self):
+    def test_unattended_nightly_requires_main_only_signing_not_an_old_human_approval(self):
         self.signed_candidate()
-        environment = self.routes[f"{self.prefix}/environments/release-signing"]
-        environment["id"] = 11
-        self.routes[f"{self.prefix}/actions/runs/456/approvals"][0]["environments"][0]["id"] = 11
         result, values = self.prepare()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("true", values["publish"])
-        self.routes[f"{self.prefix}/actions/runs/456/approvals"] = []
+        self.assertFalse(any("/456/approvals" in path for path in self.api.requests))
+        self.routes[f"{self.prefix}/environments/nightly-signing"]["deployment_branch_policy"] = None
         result, values = self.prepare()
         self.assertNotEqual(0, result.returncode)
         self.assertEqual({}, values)
@@ -416,7 +422,7 @@ class StableBetaTest(unittest.TestCase):
         self.assertEqual({"publish": "false"}, values)
         self.assertFalse((self.provider / "operations").exists())
 
-    def test_current_approval_is_distinct_from_the_old_nightly_approval(self):
+    def test_current_human_approval_is_required_even_for_an_unattended_nightly(self):
         self.signed_candidate()
         result, prepared = self.prepare()
         self.assertEqual(0, result.returncode, result.stderr)

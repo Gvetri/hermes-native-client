@@ -110,6 +110,7 @@ class NightlyPreparationTest(unittest.TestCase):
             "PATH": os.environ["PATH"], "GITHUB_REPOSITORY": self.repository,
             "GITHUB_REF": "refs/heads/main", "GITHUB_REF_PROTECTED": "true",
             "GITHUB_EVENT_NAME": "schedule", "GITHUB_TOKEN": "synthetic-token",
+            "GITHUB_WORKFLOW_REF": f"{self.repository}/.github/workflows/nightly-release.yml@refs/heads/main",
             "GITHUB_API_URL": self.api.url, "GITHUB_RUN_NUMBER": "7", "GITHUB_RUN_ATTEMPT": "2",
             "GITHUB_OUTPUT": str(Path(self.directory.name) / "output"),
         }
@@ -264,16 +265,13 @@ class NightlyPreparationTest(unittest.TestCase):
             f"{prefix}/releases/1": lambda: json.loads(self.release_file.read_text()),
             f"{prefix}/git/matching-refs/tags/{self.tag}": [],
             f"{prefix}/git/ref/tags/{self.tag}": {"object": {"type": "commit", "sha": self.selected}},
-            f"{prefix}/environments/release-signing": {
-                "id": 9, "name": "release-signing", "can_admins_bypass": False,
-                "protection_rules": [{"type": "required_reviewers", "reviewers": [{"type": "User", "reviewer": {"id": 8773754, "login": "Gvetri"}}]}],
+            f"{prefix}/environments/nightly-signing": {
+                "id": 10, "name": "nightly-signing", "can_admins_bypass": False,
+                "protection_rules": [{"type": "branch_policy"}],
                 "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
             },
-            f"{prefix}/environments/release-signing/deployment-branch-policies": {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]},
-            f"{prefix}/actions/runs/456/approvals": [{
-                "state": "approved", "user": {"id": 8773754, "login": "Gvetri", "type": "User"},
-                "environments": [{"id": 9, "name": "release-signing"}],
-            }],
+            f"{prefix}/environments/nightly-signing/deployment-branch-policies": {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]},
+            f"{prefix}/actions/runs/456/approvals": [],
         })
 
     def publish(self):
@@ -287,6 +285,7 @@ class NightlyPreparationTest(unittest.TestCase):
         result = self.publish()
         self.assertEqual(0, result.returncode, result.stderr)
         release = json.loads(self.release_file.read_text())
+        self.assertFalse(any("/approvals" in path for path in self.api.requests))
         self.assertEqual("Nightly", release["name"])
         self.assertIs(False, release["draft"])
         self.assertIs(True, release["prerelease"])
@@ -339,7 +338,7 @@ class NightlyPreparationTest(unittest.TestCase):
         self.assertNotEqual(0, self.publish().returncode)
         self.assertFalse((self.provider / "operations").exists())
         self.jobs[0]["conclusion"] = "success"
-        self.routes[f"/repos/{self.repository}/actions/runs/456/approvals"] = []
+        self.routes[f"/repos/{self.repository}/environments/nightly-signing"]["can_admins_bypass"] = True
         self.assertNotEqual(0, self.publish().returncode)
         self.assertFalse((self.provider / "operations").exists())
 

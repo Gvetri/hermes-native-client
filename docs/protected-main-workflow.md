@@ -108,10 +108,12 @@ reads the enforced rules, the active rulesets and their bypass actors, and the w
 back from the GitHub API, and fails when a rule is missing, weakened, or replaced by a bypass. The
 `conformance` check runs it on every push, ready pull request, nightly run, and manual run.
 
-The same check also runs `.github/scripts/release-signing.py environment` with read-only
-`actions` access. It verifies the `release-signing` environment's required human reviewer,
-disabled administrator bypass, main-only branch policy, and protected `main` branch. Missing,
-weakened, or unreadable settings fail the check; no signing secret is exposed to validation.
+The same check also runs `.github/scripts/release-signing.py environment` and
+`nightly-environment` with read-only `actions` access. It verifies the `release-signing`
+environment's required human reviewer and the absence of approval/wait gates in
+`nightly-signing`. Both require disabled administrator bypass, a main-only branch policy,
+and protected `main`. Missing, changed, or unreadable settings fail the check; no signing
+secret is exposed to validation.
 See [Protected Android release signing](release-signing.md) for the separate signing workflow.
 
 The repository Actions settings need the Administration permission, which a workflow token cannot
