@@ -14,11 +14,14 @@ import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
 import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
+import org.hermesnative.client.feature.entry.data.DefaultRunSubmissionUncertaintyStore
 import org.hermesnative.client.feature.entry.data.InMemoryGatewayConnectionDataSource
 import org.hermesnative.client.feature.entry.data.InMemoryRunRecoveryRegistry
+import org.hermesnative.client.feature.entry.data.RunSubmissionUncertaintyStorage
 import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
+import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunEvent
@@ -29,6 +32,8 @@ import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
 import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintySnapshot
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyStore
 import org.hermesnative.client.feature.entry.domain.Session
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
@@ -1145,6 +1150,182 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun cancelling_a_queued_observer_hands_off_to_the_next_run() {
+        val session = session()
+        val firstRun = Run(RunId("queued-run"), session.id, "running")
+        val nextRun = Run(RunId("next-run"), session.id, "running")
+        val dispatcher = PausingDispatcher()
+        val gateway =
+            FakeGateway(session).apply {
+                runs.add(firstRun)
+                runs.add(nextRun)
+                statuses.add(firstRun.copy(status = "succeeded"))
+                statuses.add(nextRun)
+                observation =
+                    ScriptedObservation(
+                        listOf(RunEvent(RunEventType.MESSAGE_DELTA, nextRun.id, "running", "Replacement event", "delta")),
+                    )
+            }
+        val holder = holder(gateway, dispatcher)
+
+        try {
+            open(holder, gateway)
+            dispatcher.paused = true
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            dispatcher.runNext()
+            assertEquals(firstRun.id, holder.uiState.value.sessionList?.openedSession?.latestRun?.id)
+            assertEquals(1, dispatcher.queuedCount)
+            assertTrue(gateway.observedRunIds.isEmpty())
+
+            // Complete the refresh ahead of the successfully started, but still queued, observer.
+            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
+            dispatcher.runLast()
+            assertEquals(RunPresentationState.SUCCEEDED, holder.uiState.value.sessionList?.openedSession?.latestRunState)
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Second"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            dispatcher.runLast()
+            assertEquals(nextRun.id, holder.uiState.value.sessionList?.openedSession?.latestRun?.id)
+            assertEquals(2, gateway.runRequests.size)
+            assertTrue(gateway.observedRunIds.isEmpty())
+
+            dispatcher.drain()
+
+            assertEquals(listOf(nextRun.id), gateway.observedRunIds)
+            assertEquals("Replacement event", holder.uiState.value.sessionList?.openedSession?.activeResponse?.content)
+        } finally {
+            holder.close()
+            dispatcher.drain()
+        }
+    }
+
+    @Test
+    fun submission_replaces_the_queued_observer_started_by_open_reconciliation() {
+        val session = session()
+        val run = Run(RunId("overlapping-run"), session.id, "running")
+        val registry = BlockingRecoveryRegistry()
+        val dispatcher = PausingDispatcher(Dispatchers.Default)
+        val gateway =
+            FakeGateway(session).apply {
+                runs.add(run)
+                statuses.add(run)
+                statuses.add(run)
+                observation =
+                    ScriptedObservation(
+                        listOf(RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Recovered observation", "delta")),
+                    )
+            }
+        val holder =
+            holder(
+                gateway,
+                dispatcher,
+                recoveryRegistry = registry,
+                uncertaintyStore = DefaultRunSubmissionUncertaintyStore(InMemoryUncertaintyStorage()),
+            )
+
+        try {
+            connect(holder, gateway)
+            awaitCondition { privateField(holder, "recoveryLoadPending") == false }
+            registry.blockLoads = true
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            assertTrue(registry.loadStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            registry.blockSaves = true
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("One submission"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(registry.saveStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            // Open can reconcile the bound Run while submission persistence is still blocked.
+            dispatcher.paused = true
+            registry.releaseLoad.countDown()
+            awaitCondition { dispatcher.queuedCount == 1 }
+            assertEquals(run.id, holder.uiState.value.sessionList?.openedSession?.latestRun?.id)
+            assertTrue(registry.load().isEmpty())
+            assertTrue(gateway.observedRunIds.isEmpty())
+            registry.releaseSave.countDown()
+            assertTrue(gateway.submissionCompleted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+
+            dispatcher.drain()
+
+            assertEquals(listOf(run.id), gateway.observedRunIds)
+            assertEquals("Recovered observation", holder.uiState.value.sessionList?.openedSession?.activeResponse?.content)
+            assertEquals(listOf(RunRecoveryEntry(session.id, run.id)), registry.load())
+            assertEquals(listOf(session.id to "One submission"), gateway.runRequests)
+        } finally {
+            registry.releaseLoad.countDown()
+            registry.releaseSave.countDown()
+            holder.close()
+            dispatcher.drain()
+            joinHolder(holder)
+        }
+    }
+
+    @Test
+    fun a_cancelled_queued_observer_cannot_remove_the_reopened_sessions_observer() {
+        val session = session()
+        val run = Run(RunId("reopened-run"), session.id, "running")
+        val dispatcher = PausingDispatcher()
+        val gateway =
+            FakeGateway(session).apply {
+                runs.add(run)
+                statuses.add(run)
+                statuses.add(run)
+                observation =
+                    ScriptedObservation(
+                        listOf(RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Reopened event", "delta")),
+                    )
+            }
+        val holder = holder(gateway, dispatcher)
+        try {
+            open(holder, gateway)
+            dispatcher.paused = true
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            dispatcher.runNext()
+            assertEquals(1, dispatcher.queuedCount)
+            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            dispatcher.runLast()
+
+            dispatcher.drain()
+
+            assertEquals(listOf(run.id), gateway.observedRunIds)
+            assertEquals("Reopened event", holder.uiState.value.sessionList?.openedSession?.activeResponse?.content)
+            assertEquals(1, gateway.runRequests.size)
+        } finally {
+            holder.close()
+            dispatcher.drain()
+        }
+    }
+
+    @Test
+    fun a_cancelled_queued_observer_cannot_restart_after_connection_removal_or_close() {
+        listOf(false, true).forEach { closeHolder ->
+            val session = session()
+            val run = Run(RunId("abandoned-run"), session.id, "running")
+            val dispatcher = PausingDispatcher()
+            val gateway = FakeGateway(session).apply { runs.add(run) }
+            val holder = holder(gateway, dispatcher)
+            try {
+                open(holder, gateway)
+                dispatcher.paused = true
+                holder.onEvent(EntryUiEvent.ComposerTextChanged("First"))
+                holder.onEvent(EntryUiEvent.SendMessageClicked)
+                dispatcher.runNext()
+                assertEquals(1, dispatcher.queuedCount)
+
+                if (closeHolder) holder.close() else holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
+                dispatcher.drain()
+
+                assertTrue(gateway.observedRunIds.isEmpty())
+                assertEquals(1, gateway.runRequests.size)
+            } finally {
+                holder.close()
+                dispatcher.drain()
+            }
+        }
+    }
+
+    @Test
     fun a_blocked_observer_open_keeps_ownership_until_cancellation_finishes_before_next_run() {
         val session = session()
         val firstRun = Run(RunId("run-blocked-open-1"), session.id, "starting")
@@ -1819,6 +2000,50 @@ class RunReconciliationStateHolderTest {
     }
 
     @Test
+    fun overlapping_startup_and_open_recovery_keep_send_blocked_until_terminal_removal_finishes() {
+        val session = session()
+        val run = Run(RunId("terminal-recovery"), session.id, "succeeded")
+        val entry = RunRecoveryEntry(session.id, run.id)
+        val registry =
+            BlockingRecoveryRegistry().apply {
+                save(entry)
+                blockRemovals = true
+            }
+        val gateway =
+            FakeGateway(session).apply {
+                statuses.add(run)
+                statuses.add(run)
+            }
+        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = registry)
+        try {
+            connect(holder, gateway)
+            awaitCondition { registry.removeRequests.get() == 1 }
+            holder.onEvent(EntryUiEvent.SessionClicked(session.id))
+            awaitCondition { gateway.statusRequests.size == 2 }
+            // The holder serializes writes; Open's removal waits behind startup's removal.
+            assertEquals(1, registry.removeRequests.get())
+            assertEquals(listOf(entry), registry.load())
+            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not duplicate"))
+            holder.onEvent(EntryUiEvent.SendMessageClicked)
+            assertTrue(gateway.runRequests.isEmpty())
+
+            registry.releaseRemove.countDown()
+            awaitCondition { registry.load().isEmpty() }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.let { opened ->
+                    !opened.isReconciliationInProgress && !opened.isRefreshing && !opened.hasUnresolvedSubmission
+                } == true
+            }
+            assertEquals(listOf(run.id, run.id), gateway.statusRequests)
+            assertTrue(gateway.observedRunIds.isEmpty())
+        } finally {
+            registry.releaseRemove.countDown()
+            holder.close()
+            joinHolder(holder)
+        }
+    }
+
+    @Test
     fun startup_and_late_recovery_claim_the_same_entry_only_once() {
         val session = session()
         val run = Run(RunId("run-recovery-claim"), session.id, "running")
@@ -2160,6 +2385,7 @@ class RunReconciliationStateHolderTest {
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
         sendTimeoutMillis: Long = 30_000L,
         recoveryRegistry: RunRecoveryRegistry? = null,
+        uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
     ): EntryStateHolder {
         val repository: GatewayConnectionRepository =
             DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())
@@ -2173,6 +2399,7 @@ class RunReconciliationStateHolderTest {
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
             runRecoveryRegistry = recoveryRegistry,
+            runSubmissionUncertaintyStore = uncertaintyStore,
             persistRunRecoveryEntry = recoveryRegistry?.let { registry -> { _, entry -> registry.save(entry) } },
             removeRunRecoveryEntry = recoveryRegistry?.let { registry -> { _, entry -> registry.remove(entry) } },
             removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
@@ -2223,6 +2450,14 @@ class RunReconciliationStateHolderTest {
         runBlocking {
             withTimeout(TEST_TIMEOUT_MILLIS) {
                 while (!predicate()) delay(10)
+            }
+        }
+    }
+
+    private fun joinHolder(holder: EntryStateHolder) {
+        runBlocking {
+            withTimeout(TEST_TIMEOUT_MILLIS) {
+                (privateField(holder, "scope") as CoroutineScope).coroutineContext[Job]?.join()
             }
         }
     }
@@ -2520,7 +2755,20 @@ class RunReconciliationStateHolderTest {
         val loadStarted = CountDownLatch(1)
         val loadFinished = CountDownLatch(1)
         val releaseLoad = CountDownLatch(1)
+
+        @Volatile
         var blockLoads = false
+
+        @Volatile
+        var blockSaves = false
+
+        @Volatile
+        var blockRemovals = false
+
+        val saveStarted = CountDownLatch(1)
+        val releaseSave = CountDownLatch(1)
+        val removeRequests = AtomicInteger(0)
+        val releaseRemove = CountDownLatch(1)
 
         override fun load(): List<RunRecoveryEntry> {
             val shouldSignalCompletion = blockLoads
@@ -2536,12 +2784,20 @@ class RunReconciliationStateHolderTest {
         }
 
         override fun save(entry: RunRecoveryEntry) {
+            if (blockSaves) {
+                saveStarted.countDown()
+                check(releaseSave.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Recovery save was not released." }
+            }
             synchronized(entries) {
                 if (entry !in entries) entries += entry
             }
         }
 
         override fun remove(entry: RunRecoveryEntry) {
+            removeRequests.incrementAndGet()
+            if (blockRemovals) {
+                check(releaseRemove.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Recovery removal was not released." }
+            }
             synchronized(entries) { entries -= entry }
         }
     }
@@ -2565,6 +2821,58 @@ class RunReconciliationStateHolderTest {
             EntryStateHolder::class.java.declaredMethods.single { it.name.startsWith("historyRunIdToReconcile") }
                 .apply { isAccessible = true }
         return (method.invoke(holder, sessionId.value, openedSession) as String?)?.let(::RunId)
+    }
+
+    private class InMemoryUncertaintyStorage : RunSubmissionUncertaintyStorage {
+        private val records = mutableMapOf<PendingRunSubmissionKey, RunSubmissionUncertaintySnapshot>()
+
+        override fun read(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? = records[key]
+
+        override fun write(
+            key: PendingRunSubmissionKey,
+            snapshot: RunSubmissionUncertaintySnapshot,
+        ) {
+            records[key] = snapshot
+        }
+
+        override fun remove(key: PendingRunSubmissionKey) {
+            records.remove(key)
+        }
+    }
+
+    private class PausingDispatcher(
+        private val delegate: CoroutineDispatcher? = null,
+    ) : CoroutineDispatcher() {
+        @Volatile
+        var paused = false
+
+        private val queued = ArrayDeque<Runnable>()
+        val queuedCount: Int get() = synchronized(queued) { queued.size }
+
+        override fun dispatch(
+            context: kotlin.coroutines.CoroutineContext,
+            block: Runnable,
+        ) {
+            if (paused) {
+                synchronized(queued) { queued.addLast(block) }
+            } else if (delegate != null) {
+                delegate.dispatch(context, block)
+            } else {
+                block.run()
+            }
+        }
+
+        fun runNext() = synchronized(queued) { queued.removeFirst() }.run()
+
+        fun runLast() = synchronized(queued) { queued.removeLast() }.run()
+
+        fun drain() {
+            repeat(100) {
+                if (queuedCount == 0) return
+                runNext()
+            }
+            error("Dispatcher did not become idle.")
+        }
     }
 
     private class DelayedUnwindObservation : RunEventObservation {

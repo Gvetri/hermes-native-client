@@ -4952,52 +4952,12 @@ class EntryStateHolder(
                                     ),
                             ),
                     )
-                lateinit var observationJob: Job
-                observationJob =
+                val observationJob =
                     scope.launch(start = CoroutineStart.LAZY) {
-                        try {
-                            observeRun(
-                                sessionId = sessionId,
-                                run = run,
-                            )
-                        } finally {
-                            val restartRequest =
-                                synchronized(sessionRequestLock) {
-                                    if (runObservationJobs[sessionId] !== observationJob) {
-                                        null
-                                    } else {
-                                        runObservationJobs.remove(sessionId)
-                                        runObservationRunIds.remove(sessionId)
-                                        val pendingRequest = pendingRunObservationRequests.remove(sessionId)
-                                        val nextRun =
-                                            pendingRequest?.run?.takeIf(Run::isActive)
-                                                ?: visibleSessionRuns(sessionId).latestActiveRun()
-                                        if (!observationJob.isCancelled && pendingRequest == null) {
-                                            null
-                                        } else {
-                                            val current = _uiState.value.sessionList
-                                            val opened = current?.openedSession?.takeIf { it.session.id == sessionId }
-                                            if (opened == null || nextRun == null || runGateway == null || sessionGateway == null) {
-                                                null
-                                            } else {
-                                                ObserverStartRequest(
-                                                    run = nextRun,
-                                                    connectionGeneration = connectionGeneration,
-                                                    sessionGeneration = sessionRequestGeneration,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            restartRequest?.let {
-                                startRunObservation(
-                                    sessionId = sessionId,
-                                    run = it.run,
-                                    expectedConnectionGeneration = it.connectionGeneration,
-                                    expectedSessionGeneration = it.sessionGeneration,
-                                )
-                            }
-                        }
+                        observeRun(
+                            sessionId = sessionId,
+                            run = run,
+                        )
                     }
                 runObservationJobs[sessionId] = observationJob
                 runObservationRunIds[sessionId] = run.id
@@ -5008,7 +4968,9 @@ class EntryStateHolder(
         observerJobToCancel?.cancel()
         if (handoffRequested) return
         val observationJob = jobToStart ?: return
-        if (!observationJob.start()) {
+        // Completion also runs when cancellation prevents entry into the coroutine body.
+        // Keep ownership until completion so a blocked open or teardown cannot overlap its replacement.
+        observationJob.invokeOnCompletion {
             val restartRequest =
                 synchronized(sessionRequestLock) {
                     if (runObservationJobs[sessionId] !== observationJob) {
@@ -5042,6 +5004,7 @@ class EntryStateHolder(
                 )
             }
         }
+        observationJob.start()
     }
 
     private suspend fun observeRun(
