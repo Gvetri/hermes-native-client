@@ -136,12 +136,18 @@ def verify_artifact(directory, certificate, evidence, code, signing_run_id=None,
     return metadata
 
 
-def gh_release(arguments):
+def gh_command(arguments, payload=None):
     """Use the native CLI for publication; retain neither token nor raw command errors."""
     environment = {name: os.environ[name] for name in ("PATH", "HOME")}
     environment.update(GH_TOKEN=os.environ["GITHUB_TOKEN"], GH_HOST="github.com")
-    result = subprocess.run(["gh", "release", *arguments, "--repo", REPOSITORY], env=environment, capture_output=True, timeout=180, check=False)
+    result = subprocess.run(["gh", *arguments], input=json.dumps(payload) if payload is not None else None,
+                            text=True, env=environment, capture_output=True, timeout=180, check=False)
     require(result.returncode == 0, "GitHub release operation failed; inspect the retained draft before retrying")
+    return result.stdout
+
+
+def gh_release(arguments):
+    return gh_command(["release", *arguments, "--repo", REPOSITORY])
 
 
 def publish(directory, certificate):
@@ -167,13 +173,9 @@ def publish(directory, certificate):
         f"(attempt {evidence['validation_run_attempt']})\n"
     )
 
-    def read_release(draft, expected_id=None):
-        if expected_id is None:
-            matches = [release for release in pages("releases") if release.get("tag_name") == tag]
-            require(len(matches) == 1, "Missing or duplicate Nightly draft")
-            expected_id = matches[0].get("id")
+    def read_release(draft, expected_id):
         require(type(expected_id) is int and expected_id > 0, "Missing release identity")
-        # The by-tag endpoint excludes drafts. Bind subsequent reads to the discovered ID.
+        # Draft listings may omit a newly created record. Use the creation response's ID.
         release = api_get(f"releases/{expected_id}")
         require(release.get("id") == expected_id, "Release identity changed")
         require(release.get("tag_name") == tag and release.get("target_commitish") == sha
@@ -182,11 +184,13 @@ def publish(directory, certificate):
         return release
 
     with tempfile.TemporaryDirectory(prefix="nightly-publication-", dir=os.environ["RUNNER_TEMP"]) as temporary:
-        notes = Path(temporary) / "notes.md"
-        notes.write_text(body)
-        gh_release(["create", tag, "--target", sha, "--title", "Nightly", "--draft", "--prerelease", "--latest=false", "--notes-file", str(notes)])
-        release = read_release(True)
-        release_id = release["id"]
+        created = json.loads(gh_command(["api", "--method", "POST", f"repos/{REPOSITORY}/releases", "--input", "-"], {
+            "tag_name": tag, "target_commitish": sha, "name": "Nightly", "body": body,
+            "draft": True, "prerelease": True, "make_latest": "false",
+        }))
+        require(type(created) is dict, "Missing release creation response")
+        release_id = created.get("id")
+        release = read_release(True, release_id)
         require(release.get("assets") == [], "New Nightly draft unexpectedly contains assets")
         gh_release(["upload", tag, *(str(directory / name) for name in ASSETS)])
         release = read_release(True, release_id)
