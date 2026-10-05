@@ -19,8 +19,8 @@ The workflow has three jobs:
 2. **Build:** check out that immutable source and build its unsigned release APK.
    This job has no signing environment, signing secrets, or provider credentials.
    Its immutable artifact ID and APK checksum pass directly to the signing job.
-3. **Sign:** use `nightly-signing` for the trusted Nightly caller without a human
-   wait; standalone signing uses the human-approved `release-signing` environment.
+3. **Sign:** use `nightly` for the trusted Nightly caller without a human
+   wait; standalone signing uses the human-approved `release` environment.
    Recheck the validation attempt, environment controls, and the applicable run
    authority. Download only the artifact produced by the preceding build, check its
    checksum, align it, sign it, and verify its certificate against the committed
@@ -56,7 +56,7 @@ caller supply an APK, arbitrary source ref, certificate, environment name, or ke
 The standalone signing and Stable Public Beta approval environment is configured
 in GitHub, outside the YAML:
 
-- Environment name: `release-signing`.
+- Environment name: `release`.
 - Required human reviewer: `Gvetri` (GitHub user ID `8773754`).
 - Administrator bypass: disabled.
 - Deployment branch policy: **selected branches**, with only the **branch**
@@ -67,10 +67,10 @@ in GitHub, outside the YAML:
   deployments** in GitHub and explicitly approve the run. Agents must not call
   the deployment-approval API or approve their own release work.
 
-The separate `nightly-signing` environment has the same main-only branch policy
+The separate `nightly` environment has the same main-only branch policy
 and disabled administrator bypass, but **no required reviewer, wait timer, or
 custom approval rule**. Nightly signing and publication run unattended after all
-exact-source checks pass. Do not remove the approval rule from `release-signing`.
+exact-source checks pass. Do not remove the approval rule from `release`.
 
 The normal `conformance` job reads both environments with `actions: read`. It
 rejects missing standalone approval controls, a Nightly approval/wait gate,

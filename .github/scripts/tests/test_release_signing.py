@@ -139,7 +139,7 @@ class ReleaseSourceTest(unittest.TestCase):
 class SigningEnvironmentTest(unittest.TestCase):
     def setUp(self):
         self.protection = {
-            "id": 9, "name": "release-signing", "can_admins_bypass": False,
+            "id": 9, "name": "release", "can_admins_bypass": False,
             "protection_rules": [{
                 "type": "required_reviewers", "prevent_self_review": False,
                 "reviewers": [{"type": "User", "reviewer": {"id": 8773754, "login": "Gvetri"}}],
@@ -149,11 +149,11 @@ class SigningEnvironmentTest(unittest.TestCase):
         self.branches = {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]}
         self.approvals = [{
             "state": "approved", "user": {"id": 8773754, "login": "Gvetri", "type": "User"},
-            "environments": [{"id": 9, "name": "release-signing"}],
+            "environments": [{"id": 9, "name": "release"}],
         }]
         self.routes = {
-            f"/repos/{REPOSITORY}/environments/release-signing": self.protection,
-            f"/repos/{REPOSITORY}/environments/release-signing/deployment-branch-policies": self.branches,
+            f"/repos/{REPOSITORY}/environments/release": self.protection,
+            f"/repos/{REPOSITORY}/environments/release/deployment-branch-policies": self.branches,
             f"/repos/{REPOSITORY}/branches/main": {"protected": True},
             f"/repos/{REPOSITORY}/actions/runs/456/approvals": self.approvals,
         }
@@ -167,12 +167,12 @@ class SigningEnvironmentTest(unittest.TestCase):
             "GITHUB_REF_PROTECTED": "true", "GITHUB_EVENT_NAME": "workflow_dispatch",
         }
         self.nightly = {
-            "id": 10, "name": "nightly-signing", "can_admins_bypass": False,
+            "id": 10, "name": "nightly", "can_admins_bypass": False,
             "protection_rules": [{"type": "branch_policy"}],
             "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
         }
-        self.routes[f"/repos/{REPOSITORY}/environments/nightly-signing"] = self.nightly
-        self.routes[f"/repos/{REPOSITORY}/environments/nightly-signing/deployment-branch-policies"] = self.branches
+        self.routes[f"/repos/{REPOSITORY}/environments/nightly"] = self.nightly
+        self.routes[f"/repos/{REPOSITORY}/environments/nightly/deployment-branch-policies"] = self.branches
 
     def nightly_context(self):
         self.environment.update(
@@ -197,12 +197,12 @@ class SigningEnvironmentTest(unittest.TestCase):
             self.environment["GITHUB_OUTPUT"] = str(output)
             result = self.check("signing-environment")
             self.assertEqual(0, result.returncode, result.stderr)
-            self.assertEqual("signing_environment=release-signing\n", output.read_text())
+            self.assertEqual("signing_environment=release\n", output.read_text())
             output.unlink()
             self.nightly_context()
             result = self.check("signing-environment")
             self.assertEqual(0, result.returncode, result.stderr)
-            self.assertEqual("signing_environment=nightly-signing\n", output.read_text())
+            self.assertEqual("signing_environment=nightly\n", output.read_text())
 
     def test_other_callers_and_stale_versions_cannot_use_unattended_authorization(self):
         self.nightly_context()
@@ -255,7 +255,7 @@ class SigningEnvironmentTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         for field, value in (
             ("state", "rejected"), ("user", {"id": 77, "login": "other", "type": "User"}),
-            ("environments", [{"id": 10, "name": "release-signing"}]),
+            ("environments", [{"id": 10, "name": "release"}]),
         ):
             with self.subTest(field=field):
                 original = self.approvals[0][field]

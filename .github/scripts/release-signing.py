@@ -130,13 +130,13 @@ def verify_source():
     return evidence
 
 
-def verify_environment(name="release-signing"):
+def verify_environment(name="release"):
     require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY, "Untrusted repository")
-    require(name in {"release-signing", "nightly-signing"}, "Unknown signing environment")
+    require(name in {"release", "nightly"}, "Unknown signing environment")
     environment = api_get(f"environments/{name}")
     require(environment.get("name") == name and type(environment.get("id")) is int, "Missing signing environment")
     require(environment.get("can_admins_bypass") is False, "Administrator bypass must be disabled")
-    if name == "release-signing":
+    if name == "release":
         rules = [rule for rule in environment.get("protection_rules", []) if rule.get("type") == "required_reviewers"]
         require(len(rules) == 1, "Required human approval is missing")
         reviewers = rules[0].get("reviewers", [])
@@ -168,7 +168,7 @@ def verify_run_approval(run_id, environment_id):
     reviews = api_get(f"actions/runs/{run_id}/approvals")
     require(isinstance(reviews, list), "Missing release approval history")
     approvals = [review for review in reviews if any(
-        environment.get("id") == environment_id and environment.get("name") == "release-signing"
+        environment.get("id") == environment_id and environment.get("name") == "release"
         for environment in review.get("environments", [])
     )]
     require(approvals and all(
@@ -191,16 +191,16 @@ def verify_nightly_authorization():
     require(os.environ.get("GITHUB_WORKFLOW_REF") ==
             f"{REPOSITORY}/.github/workflows/nightly-release.yml@refs/heads/main",
             "Only the protected Nightly workflow may use unattended signing")
-    verify_environment("nightly-signing")
+    verify_environment("nightly")
 
 
 def signing_environment():
     verify_context()
     if os.environ.get("RELEASE_VERSION_CODE"):
         verify_nightly_authorization()
-        return "nightly-signing"
+        return "nightly"
     verify_environment()
-    return "release-signing"
+    return "release"
 
 
 def verify_authorization():
@@ -220,7 +220,7 @@ def main():
         elif sys.argv[1:] == ["environment"]:
             verify_environment()
         elif sys.argv[1:] == ["nightly-environment"]:
-            verify_environment("nightly-signing")
+            verify_environment("nightly")
         elif sys.argv[1:] == ["signing-environment"]:
             name = signing_environment()
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

@@ -87,7 +87,7 @@ inspection; publication never overwrites a draft or uses `--clobber`.
 Preparation freezes the declaration/evidence byte hashes, source, selected
 Nightly release identity and asset IDs, names, sizes and digests, APK hashes,
 validation and signing identities, version, event, run and attempt. The separate publication job waits on the
-**existing** `release-signing` environment. Its one required reviewer is Gvetri
+**existing** `release` environment. Its one required reviewer is Gvetri
 (user ID 8773754); administrators cannot bypass, and only protected `main` is
 allowed. Publication rechecks that configuration, the **current promotion run's
 fresh approval** (not the unattended Nightly's success), and recomputes the
