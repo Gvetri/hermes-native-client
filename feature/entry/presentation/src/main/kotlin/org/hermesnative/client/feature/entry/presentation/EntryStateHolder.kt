@@ -412,6 +412,7 @@ data class EntryUiState(
     val sessionList: SessionListUiState? = null,
     val runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(),
     val localDiagnostics: LocalDiagnosticsUiState = LocalDiagnosticsUiState(),
+    val isGatewayConnectionConfigured: Boolean = false,
 )
 
 /**
@@ -801,6 +802,7 @@ class EntryStateHolder(
                                                         isChangingCredential = false,
                                                         isVerifying = false,
                                                         isConnected = true,
+                                                        isGatewayConnectionConfigured = true,
                                                         errorCategory = null,
                                                         sessionList =
                                                             gateway?.let {
@@ -5687,6 +5689,7 @@ private fun EntryState.toUiState(): EntryUiState =
             endpoint = configuredEndpoint.orEmpty(),
             bearerCredential = configuredCredential.orEmpty(),
             saveCredential = configuredCredential != null,
+            isGatewayConnectionConfigured = true,
         )
     } else {
         EntryUiState(

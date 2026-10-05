@@ -4,22 +4,26 @@ name: connection
 - launchApp:
     clearState: true
 - tapOn: "Add Gateway Connection"
+- assertNotVisible: "Remove Gateway Connection"
 - tapOn: "Gateway HTTPS endpoint"
 - inputText: "https://10.0.2.2:18443"
-- hideKeyboard
 - tapOn: "Bearer credential"
 - inputText: "wrong-token"
-- hideKeyboard
+- assertNotVisible: "wrong-token"
+- tapOn: "Show credential"
+- assertVisible: "wrong-token"
+- tapOn: "Hide credential"
+- assertNotVisible: "wrong-token"
+- assertVisible: "Verify Gateway Connection"
 - tapOn: "Verify Gateway Connection"
 - extendedWaitUntil:
     visible: "Authentication failed. Check the Gateway credential."
     timeout: 30000
-- tapOn:
-    text: "•+"
-    point: "90%,50%"
+- tapOn: "•+"
 - eraseText
 - inputText: "synthetic-token"
-- hideKeyboard
+- assertNotVisible: "synthetic-token"
+- assertVisible: "Verify Gateway Connection"
 - tapOn: "Verify Gateway Connection"
 - extendedWaitUntil:
     visible: "Sessions"

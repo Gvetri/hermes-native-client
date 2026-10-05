@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -25,7 +27,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -33,7 +40,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
@@ -79,33 +90,37 @@ private fun ConnectionContent(
     state: EntryUiState,
     onEvent: (EntryUiEvent) -> Unit,
 ) {
+    val showConnectionForm = state.isChangingCredential || (state.connectionSetupRequested && !state.isConnected)
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
+                .then(if (showConnectionForm) Modifier.imePadding() else Modifier)
                 .verticalScroll(rememberScrollState())
                 .padding(LocalHermesDesignTokens.current.spacing.xl),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = if (showConnectionForm) Arrangement.Top else Arrangement.Center,
+        horizontalAlignment = if (showConnectionForm) Alignment.Start else Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = "Hermes Native Client",
-            style = MaterialTheme.typography.headlineMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.semantics { heading() },
-        )
-        Spacer(modifier = Modifier.height(24.dp))
+        if (!showConnectionForm) {
+            Text(
+                text = "Hermes Native Client",
+                style = MaterialTheme.typography.headlineMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { heading() },
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+        }
         Text(
             text = state.title,
             style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center,
+            textAlign = if (showConnectionForm) TextAlign.Start else TextAlign.Center,
             modifier = Modifier.semantics { heading() },
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = state.supportingText,
             style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
+            textAlign = if (showConnectionForm) TextAlign.Start else TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(24.dp))
@@ -136,13 +151,22 @@ private fun GatewayConnectionForm(
     state: EntryUiState,
     onEvent: (EntryUiEvent) -> Unit,
 ) {
+    var credentialVisible by remember(state.isChangingCredential) { mutableStateOf(false) }
     OutlinedTextField(
         value = state.endpoint,
         onValueChange = { onEvent(EntryUiEvent.EndpointChanged(it)) },
         modifier = Modifier.fillMaxWidth(),
         enabled = !state.isVerifying && !state.isChangingCredential,
         label = { Text("Gateway HTTPS endpoint") },
+        supportingText = { Text("Example: https://gateway.example") },
         singleLine = true,
+        keyboardOptions =
+            KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                keyboardType = KeyboardType.Uri,
+                imeAction = ImeAction.Next,
+            ),
     )
     Spacer(modifier = Modifier.height(12.dp))
     OutlinedTextField(
@@ -152,7 +176,26 @@ private fun GatewayConnectionForm(
         enabled = !state.isVerifying,
         label = { Text("Bearer credential") },
         singleLine = true,
-        visualTransformation = PasswordVisualTransformation(),
+        visualTransformation = if (credentialVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            TextButton(
+                onClick = { credentialVisible = !credentialVisible },
+                enabled = !state.isVerifying,
+                modifier =
+                    Modifier.semantics {
+                        contentDescription = if (credentialVisible) "Hide credential" else "Show credential"
+                    },
+            ) {
+                Text(text = if (credentialVisible) "Hide" else "Show")
+            }
+        },
+        keyboardOptions =
+            KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+            ),
     )
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -195,12 +238,14 @@ private fun GatewayConnectionForm(
         }
         Spacer(modifier = Modifier.height(8.dp))
     }
-    OutlinedButton(
-        onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
-        enabled = !state.isVerifying,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-    ) {
-        Text(text = "Remove Gateway Connection")
+    if (state.isGatewayConnectionConfigured || state.isConnected) {
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
+            enabled = !state.isVerifying,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Remove Gateway Connection")
+        }
     }
     if (state.isVerifying) {
         Spacer(modifier = Modifier.height(16.dp))
