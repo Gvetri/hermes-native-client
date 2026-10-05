@@ -304,6 +304,25 @@ class NightlyPreparationTest(unittest.TestCase):
         self.assertEqual("false", values["publish"])
         self.assertEqual(["create", "upload", "download", "edit"], (self.provider / "operations").read_text().splitlines())
 
+    def test_draft_listing_can_omit_a_created_release_without_blocking_exact_id_readback(self):
+        self.signed_publication_fixture()
+        # Observed hosted failure: creation succeeds but the release listing has no draft.
+        self.routes[f"/repos/{self.repository}/releases"] = []
+        result = self.publish()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(json.loads(self.release_file.read_text())["draft"])
+        self.assertEqual(["create", "upload", "download", "edit"], (self.provider / "operations").read_text().splitlines())
+
+    def test_a_creation_response_with_a_mismatched_release_id_fails_closed(self):
+        self.signed_publication_fixture()
+        (self.provider / "wrong-create-id").touch()
+        self.routes[f"/repos/{self.repository}/releases/2"] = lambda: json.loads(self.release_file.read_text())
+        result = self.publish()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("Release identity changed", result.stderr)
+        self.assertEqual(["create"], (self.provider / "operations").read_text().splitlines())
+        self.assertIs(True, json.loads(self.release_file.read_text())["draft"])
+
     def test_partial_upload_leaves_a_draft_and_retry_does_not_write_again(self):
         self.signed_publication_fixture()
         (self.provider / "fail-upload").touch()

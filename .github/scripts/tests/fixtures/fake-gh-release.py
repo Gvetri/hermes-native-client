@@ -10,9 +10,17 @@ root = Path.home() / "release-fixture"
 root.mkdir(exist_ok=True)
 state = root / "release.json"
 arguments = sys.argv[1:]
-assert arguments[0] == "release"
-operation, tag = arguments[1:3]
-assert arguments[arguments.index("--repo") + 1] == "Gvetri/hermes-native-client"
+payload = None
+if arguments[0] == "api":
+    assert arguments == ["api", "--method", "POST", "repos/Gvetri/hermes-native-client/releases", "--input", "-"]
+    payload = json.load(sys.stdin)
+    assert set(payload) == {"tag_name", "target_commitish", "name", "body", "draft", "prerelease", "make_latest"}
+    assert payload["draft"] is True and payload["prerelease"] is True and payload["make_latest"] == "false"
+    operation, tag = "create", payload["tag_name"]
+else:
+    assert arguments[0] == "release"
+    operation, tag = arguments[1:3]
+    assert arguments[arguments.index("--repo") + 1] == "Gvetri/hermes-native-client"
 assert "--clobber" not in arguments
 with (root / "operations").open("a") as log:
     log.write(operation + "\n")
@@ -24,15 +32,21 @@ def value(flag):
 
 if operation == "create":
     assert not state.exists()
-    assert "--draft" in arguments and "--prerelease" in arguments and "--latest=false" in arguments
+    if payload is None:
+        assert "--draft" in arguments and "--prerelease" in arguments and "--latest=false" in arguments
     release = {
-        "id": 1, "tag_name": tag, "target_commitish": value("--target"),
-        "name": value("--title"), "body": Path(value("--notes-file")).read_text(),
+        "id": 1, "tag_name": tag, "target_commitish": payload["target_commitish"] if payload else value("--target"),
+        "name": payload["name"] if payload else value("--title"),
+        "body": payload["body"] if payload else Path(value("--notes-file")).read_text(),
         "draft": True, "prerelease": True, "assets": [],
         "html_url": f"https://github.com/Gvetri/hermes-native-client/releases/tag/{tag}",
     }
     state.write_text(json.dumps(release))
-    print(release["html_url"])
+    if payload is not None:
+        response = {**release, "id": 2} if (root / "wrong-create-id").exists() else release
+        print(json.dumps(response))
+    else:
+        print(release["html_url"])
 elif operation == "upload":
     release = json.loads(state.read_text())
     assert release["draft"] is True

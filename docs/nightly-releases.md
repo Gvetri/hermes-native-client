@@ -84,7 +84,9 @@ authoritative and refuses a second write.
 Publication proceeds in this order:
 
 1. Create a **draft prerelease** bound to the exact source SHA, with generated notes.
-2. Read the draft back by its release ID; GitHub's by-tag endpoint excludes drafts.
+2. Read the draft back by the exact release ID returned by creation. Do not
+   rediscover it through a release listing, which can omit the new draft;
+   GitHub's by-tag endpoint also excludes drafts.
 3. Upload `hermes-native-client.apk`, `SHA256SUMS`, and `signing-metadata.json`.
 4. Read the asset inventory, download the uploaded files, compare every file's
    SHA-256 with the local verified artifact, and verify the APK again.
