@@ -62,11 +62,11 @@ The daily workflow calls [the protected signer](release-signing.md), without
 `secrets: inherit`. It explicitly maps only the two declared signing-secret names;
 their values remain in the called job's environment. Its preparation and unsigned
 build have no signing secrets.
-The trusted Nightly caller uses the main-only `nightly-signing` environment with
+The trusted Nightly caller uses the main-only `nightly` environment with
 no human reviewer or approval wait. Signing and publication are unattended. A
 daily schedule is not a promise of publication when validation or signing
 material is unavailable. Standalone signing and Stable Public Beta promotion
-retain their separate human approval in `release-signing`.
+retain their separate human approval in `release`.
 
 The signing job has only the two environment-scoped Android signing secrets. It
 has no provider credentials and performs no live-provider smoke test. It verifies

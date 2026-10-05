@@ -270,12 +270,12 @@ class NightlyPreparationTest(unittest.TestCase):
             f"{prefix}/releases/1": lambda: json.loads(self.release_file.read_text()),
             f"{prefix}/git/matching-refs/tags/{self.tag}": [],
             f"{prefix}/git/ref/tags/{self.tag}": {"object": {"type": "commit", "sha": self.selected}},
-            f"{prefix}/environments/nightly-signing": {
-                "id": 10, "name": "nightly-signing", "can_admins_bypass": False,
+            f"{prefix}/environments/nightly": {
+                "id": 10, "name": "nightly", "can_admins_bypass": False,
                 "protection_rules": [{"type": "branch_policy"}],
                 "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
             },
-            f"{prefix}/environments/nightly-signing/deployment-branch-policies": {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]},
+            f"{prefix}/environments/nightly/deployment-branch-policies": {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]},
             f"{prefix}/actions/runs/456/approvals": [],
         })
 
@@ -362,7 +362,7 @@ class NightlyPreparationTest(unittest.TestCase):
         self.assertNotEqual(0, self.publish().returncode)
         self.assertFalse((self.provider / "operations").exists())
         self.jobs[0]["conclusion"] = "success"
-        self.routes[f"/repos/{self.repository}/environments/nightly-signing"]["can_admins_bypass"] = True
+        self.routes[f"/repos/{self.repository}/environments/nightly"]["can_admins_bypass"] = True
         self.assertNotEqual(0, self.publish().returncode)
         self.assertFalse((self.provider / "operations").exists())
 

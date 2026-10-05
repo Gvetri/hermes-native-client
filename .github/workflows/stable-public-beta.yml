@@ -41,7 +41,7 @@ jobs:
     if: ${{ needs.prepare.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: release-signing
+    environment: release
     permissions:
       contents: write
       actions: read

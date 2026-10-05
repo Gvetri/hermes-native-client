@@ -37,7 +37,7 @@ class StableBetaWorkflowTest(unittest.TestCase):
         self.assertIn("github.ref_protected", prepare)
         self.assertIn("python3 .github/scripts/stable-public-beta.py prepare", prepare)
         publish = job_block(workflow, "publish")
-        self.assertIn("environment: release-signing", publish)
+        self.assertIn("environment: release", publish)
         self.assertIn("contents: write", publish)
         self.assertIn("needs.prepare.outputs.publish == 'true'", publish)
         self.assertIn("STABLE_BETA_FREEZE: ${{ needs.prepare.outputs.freeze }}", publish)
@@ -120,20 +120,20 @@ class StableBetaTest(unittest.TestCase):
                 "repository": {"full_name": self.repo}, "head_repository": {"full_name": self.repo},
             },
             f"{self.prefix}/actions/runs/999/attempts/1": {"id": 999, "run_attempt": 1, "run_started_at": "2026-10-03T12:00:00Z"},
-            f"{self.prefix}/environments/release-signing": {
-                "id": 9, "name": "release-signing", "can_admins_bypass": False,
+            f"{self.prefix}/environments/release": {
+                "id": 9, "name": "release", "can_admins_bypass": False,
                 "protection_rules": [{"type": "required_reviewers", "reviewers": [{"type": "User", "reviewer": {"id": 8773754, "login": "Gvetri"}}]}],
                 "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
             },
-            f"{self.prefix}/environments/release-signing/deployment-branch-policies": {
+            f"{self.prefix}/environments/release/deployment-branch-policies": {
                 "total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}],
             },
-            f"{self.prefix}/environments/nightly-signing": {
-                "id": 10, "name": "nightly-signing", "can_admins_bypass": False,
+            f"{self.prefix}/environments/nightly": {
+                "id": 10, "name": "nightly", "can_admins_bypass": False,
                 "protection_rules": [{"type": "branch_policy"}],
                 "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
             },
-            f"{self.prefix}/environments/nightly-signing/deployment-branch-policies": {
+            f"{self.prefix}/environments/nightly/deployment-branch-policies": {
                 "total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}],
             },
             f"{self.prefix}/actions/runs/456/approvals": [],
@@ -188,7 +188,7 @@ class StableBetaTest(unittest.TestCase):
         # GitHub review history has no review timestamp or run-attempt field.
         return {"state": "approved", "comment": "Release approved",
                 "user": {"id": 8773754, "login": "Gvetri", "type": "User"},
-                "environments": [{"id": 9, "name": "release-signing"}]}
+                "environments": [{"id": 9, "name": "release"}]}
 
     def signed_candidate(self):
         fixture = make_signing_fixture(self.root / "signing", 7002, f"nightly-7002-{self.source[:12]}")
@@ -240,7 +240,7 @@ class StableBetaTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("true", values["publish"])
         self.assertFalse(any("/456/approvals" in path for path in self.api.requests))
-        self.routes[f"{self.prefix}/environments/nightly-signing"]["deployment_branch_policy"] = None
+        self.routes[f"{self.prefix}/environments/nightly"]["deployment_branch_policy"] = None
         result, values = self.prepare()
         self.assertNotEqual(0, result.returncode)
         self.assertEqual({}, values)
