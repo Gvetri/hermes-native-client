@@ -178,6 +178,46 @@ The retry is deliberately narrow and auditable:
   is logged, but no automated discrimination exists; this bounded trade-off
   is accepted deliberately.
 
+## Keyboard window contract
+
+For [issue #72](https://github.com/Gvetri/hermes-native-client/issues/72),
+`MainActivity` explicitly requests `android:windowSoftInputMode="adjustResize"`
+in the [manifest](../app/src/main/AndroidManifest.xml). The Activity still calls
+`enableEdgeToEdge()`. Resize provides the input method editor (IME) insets that
+Compose needs; it prevents the platform from choosing to pan the entire screen
+when a bottom-anchored input receives focus. This follows
+[Android's edge-to-edge setup guidance](https://developer.android.com/develop/ui/compose/system/setup-e2e).
+
+The Compose surfaces retain their existing inset ownership. The connection
+form and conversation apply `imePadding()`; the Session list applies it while
+Search has focus or an inline Rename is open and the keyboard is visible.
+Including Rename keeps its title editor in the resized list viewport instead
+of underneath the keyboard. System-bar and cutout
+padding is consumed by the shell, so nested inset modifiers account for the
+remaining inset rather than adding it twice. The pre-API-30 visible-frame
+fallback remains limited to detecting keyboard visibility; it does not select
+an Activity window policy. Do not add a second root IME padding or change the
+Gateway/state holder to compensate for a window-policy defect.
+
+The [historical A/B report on PR #71](https://github.com/Gvetri/hermes-native-client/pull/71#issuecomment-5848540026)
+found an API 24 arm64 Rename failure after adding resize to an older shell.
+That report is a regression warning, not proof that the current shell fails.
+Changing this contract requires all 16 deterministic API 24 journeys, including
+`session-lifecycle` Rename, plus real-keyboard checks on API 35. Preserve the
+existing journey flows; their keyboard-hidden streaming check is not evidence
+that the old transcript layout is fully readable with the keyboard open.
+Keyboard-open input and Send reachability must be verified separately. The
+conversation/composer redesign belongs to #112, not this window-policy change.
+`MainActivityTest` also verifies the real Activity's adjustment mode; that
+configuration assertion does not replace a keyboard journey.
+
+Preserve keyboard show/hide, focus, explicit Send and confirmation ordering in
+connection setup, Search, Create, Rename and Message. Check short windows,
+enlarged fonts and the native phone/two-pane layouts. Synthetic-inset Compose
+tests supplement these checks; they do not prove production-window behavior.
+Do not hide the keyboard or weaken a journey assertion to accept a failing
+keyboard-open layout.
+
 ## Compatibility and change rules
 
 - Changing the pinned `hermes_revision` or `image_digest` requires updating

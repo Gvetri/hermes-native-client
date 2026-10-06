@@ -103,9 +103,8 @@ internal fun SessionModeContent(
                 state = state,
                 openedSession = requireNotNull(state.openedSession),
                 onEvent = onEvent,
-                // The conversation consumes IME insets for its composer. The Session list consumes them only
-                // while Search has focus, so its pinned controls stay above the keyboard without shrinking
-                // the list during conversation input.
+                // The conversation consumes IME insets for its composer. The Session list consumes them
+                // during Search or inline Rename, so its controls and editor stay above the keyboard.
                 modifier = modifier.imePadding(),
             )
         SessionShellMode.CreateSession ->
@@ -154,7 +153,8 @@ internal fun SessionListPane(
         } else {
             rememberLegacyImeVisibility()
         }
-    val paneModifier = if (searchFocused && imeVisible) modifier.imePadding() else modifier
+    val renameInputOpen = state.sessionMutations.values.any { it.rename != null }
+    val paneModifier = if (imeVisible && (searchFocused || renameInputOpen)) modifier.imePadding() else modifier
     BoxWithConstraints(modifier = paneModifier.fillMaxSize()) {
         val density = LocalDensity.current
         // The list owns the height between the pinned header and the pinned controls. Both pinned

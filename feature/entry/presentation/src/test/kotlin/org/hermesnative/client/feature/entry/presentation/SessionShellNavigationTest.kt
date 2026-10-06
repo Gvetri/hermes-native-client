@@ -180,6 +180,36 @@ class SessionShellNavigationTest {
     }
 
     @Test
+    fun rename_ime_keeps_the_focused_title_above_the_keyboard() {
+        val id = SessionId("first")
+        setContent(
+            entryState(
+                SessionListUiState(
+                    sessions = listOf(session("first", "First Session")),
+                    sessionMutations = mapOf(id to SessionMutationUiState(rename = SessionRenameUiState("First Session"))),
+                ),
+            ),
+            {},
+        )
+        composeTestRule.onNodeWithText("New Session title").performScrollTo().performClick()
+        val imeInset = 320
+        composeTestRule.runOnUiThread {
+            val insets =
+                WindowInsetsCompat
+                    .Builder()
+                    .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imeInset))
+                    .setVisible(WindowInsetsCompat.Type.ime(), true)
+                    .build()
+            composeTestRule.activity.window.decorView.dispatchApplyWindowInsets(insets.toWindowInsets())
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("New Session title").performScrollTo().assertIsDisplayed()
+        val keyboardTop = composeTestRule.activity.window.decorView.height - imeInset + 1
+        val titleBottom = composeTestRule.onNodeWithText("New Session title").fetchSemanticsNode().boundsInWindow.bottom
+        assertTrue("The Rename input must remain above the keyboard", titleBottom <= keyboardTop)
+    }
+
+    @Test
     fun search_ime_keeps_pinned_session_controls_above_the_keyboard() {
         setContent(
             entryState(SessionListUiState(sessions = listOf(session("first", "First Session")))),
