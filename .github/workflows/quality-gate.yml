@@ -573,6 +573,23 @@ jobs:
           path: artifacts/journey-evidence
           if-no-files-found: warn
           retention-days: 14
+      - name: Redact retried journey evidence
+        id: redact_retried_journey_evidence
+        if: ${{ always() && steps.journeys.outcome == 'success' && hashFiles('artifacts/journey-evidence/*-attempt1*') != '' }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/redact-test-reports.py "$GITHUB_WORKSPACE" \
+            'artifacts/journey-evidence/*.log' 'artifacts/journey-evidence/**/*.log' \
+            'artifacts/journey-evidence/*.json' 'artifacts/journey-evidence/**/*.json' \
+            'artifacts/journey-evidence/*.txt' 'artifacts/journey-evidence/**/*.txt'
+      - name: Upload retried journey evidence
+        if: ${{ always() && steps.redact_retried_journey_evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: journey-retry-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/journey-evidence
+          if-no-files-found: warn
+          retention-days: 14
       - name: Fail when journeys fail
         if: ${{ steps.journeys.outcome != 'success' }}
         run: |

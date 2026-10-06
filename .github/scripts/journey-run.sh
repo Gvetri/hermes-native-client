@@ -156,6 +156,15 @@ journeys=(
 
 for journey in "${journeys[@]}"; do
     log "Journey: $journey"
+    journey_attempt=1
+    # Bounded retry: the API 24 emulator has a platform window-reporting race
+    # that intermittently leaves a freshly opened menu window out of the
+    # accessibility window list. The measured failure is in the
+    # session-lifecycle flow, the only journey that opens session action
+    # menus, so only that journey is retried, exactly once, always logged,
+    # with both attempts retained as evidence (see
+    # docs/deterministic-emulator-journeys.md).
+    while :; do
     gateway_log="$evidence_dir/${journey}-gateway.log"
     java -Dfixture.repositoryRoot="$workspace" \
         -cp "$classpath" \
@@ -224,11 +233,30 @@ for journey in "${journeys[@]}"; do
     maestro_status=$?
     set -e
     if [ "$maestro_status" -ne 0 ]; then
-        cp -r "$HOME/.maestro/tests" "$evidence_dir/${journey}-maestro-tests" 2>/dev/null || true
         if [ "$maestro_status" -eq 124 ] || [ "$maestro_status" -eq 137 ]; then
             log "Maestro journey timed out after 300 seconds: $journey"
         fi
-        log "Maestro journey failed: $journey"
+        if [ "$journey_attempt" -eq 1 ] && [ "$journey" = "session-lifecycle" ]; then
+            cp -r "$HOME/.maestro/tests" "$evidence_dir/${journey}-maestro-tests-attempt1" 2>/dev/null || true
+            mv "$maestro_log" "$evidence_dir/${journey}-maestro-attempt1.log"
+            log "Maestro journey failed on attempt 1: $journey"
+            log "Retrying $journey once (bounded platform-flake retry; both attempts are retained as evidence)."
+            stop_gateway
+            if [ -f "$evidence_dir/${journey}-telemetry.json" ]; then
+                mv "$evidence_dir/${journey}-telemetry.json" "$evidence_dir/${journey}-telemetry-attempt1.json"
+            fi
+            if [ -f "$gateway_log" ]; then
+                mv "$gateway_log" "$evidence_dir/${journey}-gateway-attempt1.log"
+            fi
+            journey_attempt=2
+            continue
+        fi
+        cp -r "$HOME/.maestro/tests" "$evidence_dir/${journey}-maestro-tests" 2>/dev/null || true
+        if [ "$journey_attempt" -eq 2 ]; then
+            log "Maestro journey failed on both attempts: $journey"
+        else
+            log "Maestro journey failed: $journey"
+        fi
         exit "$maestro_status"
     fi
 
@@ -244,6 +272,8 @@ for journey in "${journeys[@]}"; do
 
     stop_gateway
     sleep 1
+        break
+    done
 done
 
 log "All deterministic journeys passed."

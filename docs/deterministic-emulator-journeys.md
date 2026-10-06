@@ -140,6 +140,44 @@ repository-wide redaction script (`.github/scripts/redact-test-reports.py`)
 before it is uploaded, and the existing redaction gates continue to apply to
 the JVM and instrumentation lanes.
 
+## Bounded flake retry
+
+One failed Maestro phase is retried once by the runner, because the API 24
+emulator has a platform window-reporting race: `WindowManagerService` can
+leave a freshly opened popup window out of the accessibility window list
+until an unrelated window or focus event arrives, so a menu that is drawn
+and touchable is invisible to the test driver for the life of that open
+(documented on the nightly-failure issue with live WM, accessibility-list,
+and view dumps). The race is in the platform layer, not in the app: the
+popup window, its surface, and its content view are all healthy and visible
+at the same moment the accessibility list omits it.
+
+The retry is deliberately narrow and auditable:
+
+- exactly one retry, and only in the measured `session-lifecycle` flow — the
+  only journey that opens session action menus. Every other journey stays
+  single-shot unconditionally; a second Maestro failure in
+  `session-lifecycle` fails the suite;
+- the Gateway is restarted for the retry so attempt 1 traffic cannot leak
+  into attempt 2's telemetry verifier. The readiness and capability checks
+  then run again for the fresh Gateway and still fail the lane when they
+  fail; those checks are never themselves retried;
+- every retry is logged explicitly (`Maestro journey failed on attempt 1`)
+  and the suite still fails if the retry fails (`Maestro journey failed on
+  both attempts`);
+- both attempts are retained with an `-attempt1` suffix on attempt 1
+  evidence: `<journey>-maestro-attempt1.log`,
+  `<journey>-maestro-tests-attempt1/`,
+  `<journey>-telemetry-attempt1.json`, and
+  `<journey>-gateway-attempt1.log`. When the retry passes, the workflow
+  still redacts and uploads the journey evidence (`journey-retry-evidence`
+  artifact) because the `-attempt1` files are present;
+- limits: the retry cannot distinguish the platform race from a genuinely
+  intermittent product regression, so a flaky product failure can also pass
+  on its second attempt. Both attempts stay in the evidence and every retry
+  is logged, but no automated discrimination exists; this bounded trade-off
+  is accepted deliberately.
+
 ## Compatibility and change rules
 
 - Changing the pinned `hermes_revision` or `image_digest` requires updating

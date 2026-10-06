@@ -238,6 +238,218 @@ class TestJobs(unittest.TestCase):
                     except ProcessLookupError:
                         pass
 
+    def _prepare_journey_runner_fixture(self, workspace, fail_journey, fail_times):
+        gateway_pid_file = workspace / "gateway.pid"
+        classpath_file = workspace / "fixtures/hermes/runner/build/journey-classpath.txt"
+        classpath_file.parent.mkdir(parents=True)
+        classpath_file.write_text("fixture-classpath")
+        for relative in (
+            ".github/scripts/verify-journey-capabilities.py",
+            "fixtures/hermes/contracts/capabilities/success.json",
+        ):
+            copied = workspace / relative
+            copied.parent.mkdir(parents=True, exist_ok=True)
+            copied.write_text((ROOT / relative).read_text())
+        capabilities = json.loads((ROOT / "fixtures/hermes/contracts/capabilities/success.json").read_text())["response"]["body"]
+        count_dir = workspace / "maestro.counts"
+        count_dir.mkdir()
+
+        def add_executable(name, body):
+            executable = workspace / name
+            executable.write_text(textwrap.dedent(body))
+            executable.chmod(0o755)
+
+        add_executable("gradlew", "#!/usr/bin/env bash\nexit 0\n")
+        add_executable(
+            "adb",
+            """#!/usr/bin/env bash
+            if [[ "$*" == *"getprop sys.boot_completed"* ]]; then
+                printf '1\\n'
+            fi
+            """,
+        )
+        add_executable("openssl", "#!/usr/bin/env bash\nprintf 'fixture-hash\\n'\n")
+        add_executable(
+            "curl",
+            """#!/usr/bin/env bash
+            printf '%s\\n' "$*" >> "$CURL_CALLS_FILE"
+            if [[ "$*" == *"/v1/capabilities"* ]]; then
+                printf '%s\\n' "$CAPABILITIES_BODY"
+                exit 0
+            fi
+            if [[ "$*" == *"/__fixture/telemetry"* ]]; then
+                active_pid=""
+                while IFS= read -r candidate; do active_pid="$candidate"; done < "$GATEWAY_PID_FILE"
+                if kill -0 "$active_pid" 2>/dev/null; then
+                    printf '%s\\n' "$active_pid" >> "$TELEMETRY_PID_FILE"
+                    printf '%s\\n' "$active_pid"
+                fi
+                exit 0
+            fi
+            if [[ "$*" == *"/health"* ]]; then
+                exit 0
+            fi
+            printf 'fixture-archive\\n' > maestro.zip
+            """,
+        )
+        add_executable(
+            "unzip",
+            """\
+            #!/usr/bin/env bash
+            mkdir -p maestro-cli/maestro/bin
+            cat > maestro-cli/maestro/bin/maestro <<'STUB'
+            #!/usr/bin/env bash
+            if [[ "$1" == "--version" ]]; then
+                printf 'fixture-maestro\\n'
+                exit 0
+            fi
+            flow="${!#}"
+            journey="$(basename "$flow" .yaml)"
+            count_file="$MAESTRO_COUNT_DIR/$journey"
+            count=0
+            [[ -f "$count_file" ]] && read -r count < "$count_file"
+            count=$((count + 1))
+            printf '%s\\n' "$count" > "$count_file"
+            mkdir -p "$HOME/.maestro/tests/$journey"
+            printf 'flow %s attempt %s\\n' "$journey" "$count" > "$HOME/.maestro/tests/$journey/log.txt"
+            if [[ "$journey" == "$MAESTRO_FAIL_JOURNEY" && "$count" -le "$MAESTRO_FAIL_TIMES" ]]; then
+                printf 'Element not found: Pin Session\\n'
+                exit 1
+            fi
+            printf 'COMPLETED\\n'
+            exit 0
+            STUB
+            chmod +x maestro-cli/maestro/bin/maestro
+            exit 0
+            """,
+        )
+        add_executable(
+            "java",
+            """#!/usr/bin/env bash
+            if [[ "$*" == *"JourneyVerifierKt"* ]]; then
+                exit 0
+            fi
+            printf '%s\\n' "$$" >> "$GATEWAY_PID_FILE"
+            printf '%s\\n' 'journey-gateway-endpoint=https://127.0.0.1:18443'
+            exec sleep 300
+            """,
+        )
+        environment = {
+            "PATH": f"{workspace}{os.pathsep}{os.environ['PATH']}",
+            "GITHUB_WORKSPACE": str(workspace),
+            "GATEWAY_PID_FILE": str(gateway_pid_file),
+            "TELEMETRY_PID_FILE": str(workspace / "telemetry.pids"),
+            "CURL_CALLS_FILE": str(workspace / "curl.calls"),
+            "HOME": str(workspace),
+            "MAESTRO_CLI_VERSION": "test",
+            "CAPABILITIES_BODY": json.dumps(capabilities),
+            "MAESTRO_COUNT_DIR": str(count_dir),
+            "MAESTRO_FAIL_JOURNEY": fail_journey,
+            "MAESTRO_FAIL_TIMES": str(fail_times),
+        }
+        return environment, count_dir
+
+    def test_journey_runner_retries_a_failed_journey_once_and_keeps_both_attempts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            environment, count_dir = self._prepare_journey_runner_fixture(workspace, "session-lifecycle", 1)
+            result = subprocess.run(
+                ["bash", str(ROOT / ".github/scripts/journey-run.sh")],
+                cwd=workspace,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("Maestro journey failed on attempt 1: session-lifecycle", result.stdout)
+            self.assertEqual(1, result.stdout.count("Maestro journey failed on attempt 1:"))
+            self.assertIn("All deterministic journeys passed.", result.stdout)
+            self.assertEqual("2", (count_dir / "session-lifecycle").read_text().strip())
+            self.assertEqual("1", (count_dir / "connection").read_text().strip())
+            self.assertEqual(17, sum(int((count_dir / name).read_text().strip()) for name in sorted(p.name for p in count_dir.iterdir())))
+            curl_calls = (workspace / "curl.calls").read_text().splitlines()
+            self.assertEqual(17, len([call for call in curl_calls if "/health" in call]))
+            self.assertEqual(17, len([call for call in curl_calls if "/v1/capabilities" in call]))
+            evidence_dir = workspace / "artifacts/journey-evidence"
+            self.assertIn("Element not found: Pin Session", (evidence_dir / "session-lifecycle-maestro-attempt1.log").read_text())
+            self.assertIn("COMPLETED", (evidence_dir / "session-lifecycle-maestro.log").read_text())
+            self.assertTrue((evidence_dir / "session-lifecycle-maestro-tests-attempt1").is_dir())
+            telemetry = (evidence_dir / "session-lifecycle-telemetry-attempt1.json").read_text().strip()
+            self.assertTrue(telemetry.isdigit(), f"attempt 1 telemetry must contain the gateway pid: {telemetry!r}")
+            self.assertTrue((evidence_dir / "session-lifecycle-gateway-attempt1.log").is_file())
+
+    def test_journey_runner_fails_the_suite_after_a_second_failed_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            environment, count_dir = self._prepare_journey_runner_fixture(workspace, "session-lifecycle", 99)
+            result = subprocess.run(
+                ["bash", str(ROOT / ".github/scripts/journey-run.sh")],
+                cwd=workspace,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Maestro journey failed on attempt 1: session-lifecycle", result.stdout)
+            self.assertIn("Maestro journey failed on both attempts: session-lifecycle", result.stdout)
+            self.assertNotIn("All deterministic journeys passed.", result.stdout)
+            self.assertEqual("2", (count_dir / "session-lifecycle").read_text().strip())
+            self.assertFalse((count_dir / "pagination-search").exists())
+            curl_calls = (workspace / "curl.calls").read_text().splitlines()
+            self.assertEqual(5, len([call for call in curl_calls if "/health" in call]))
+            self.assertEqual(5, len([call for call in curl_calls if "/v1/capabilities" in call]))
+            evidence_dir = workspace / "artifacts/journey-evidence"
+            self.assertIn("Element not found: Pin Session", (evidence_dir / "session-lifecycle-maestro-attempt1.log").read_text())
+            self.assertIn("Element not found: Pin Session", (evidence_dir / "session-lifecycle-maestro.log").read_text())
+
+    def test_journey_runner_does_not_retry_journeys_beyond_the_measured_flow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            environment, count_dir = self._prepare_journey_runner_fixture(workspace, "empty-sessions", 1)
+            result = subprocess.run(
+                ["bash", str(ROOT / ".github/scripts/journey-run.sh")],
+                cwd=workspace,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Maestro journey failed: empty-sessions", result.stdout)
+            self.assertNotIn("Maestro journey failed on attempt 1:", result.stdout)
+            self.assertNotIn("Maestro journey failed on both attempts:", result.stdout)
+            self.assertEqual("1", (count_dir / "empty-sessions").read_text().strip())
+            self.assertFalse((count_dir / "session-lifecycle").exists())
+            evidence_dir = workspace / "artifacts/journey-evidence"
+            self.assertFalse((evidence_dir / "empty-sessions-maestro-attempt1.log").exists())
+
+    def test_journey_retry_evidence_uploads_for_recovered_runs(self):
+        workflow = WORKFLOW.read_text()
+        job = workflow.split("  maestro_journeys:\n", 1)[1].split("\n  create_nightly_failure_issue:", 1)[0]
+        redaction = job.split("      - name: Redact retried journey evidence\n", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("        id: redact_retried_journey_evidence", redaction)
+        self.assertIn(
+            "if: ${{ always() && steps.journeys.outcome == 'success' && hashFiles('artifacts/journey-evidence/*-attempt1*') != '' }}",
+            redaction,
+        )
+        self.assertIn("redact-test-reports.py", redaction)
+        upload = job.split("      - name: Upload retried journey evidence\n", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("if: ${{ always() && steps.redact_retried_journey_evidence.outcome == 'success' }}", upload)
+        self.assertIn("uses: actions/upload-artifact@v4", upload)
+        self.assertIn("name: journey-retry-evidence-${{ github.run_id }}-${{ github.run_attempt }}", upload)
+        self.assertLess(job.index("Redact retried journey evidence"), job.index("Upload retried journey evidence"))
+
+    def test_journey_runner_bounds_the_platform_flake_retry_to_one_extra_attempt(self):
+        runner = (ROOT / ".github/scripts/journey-run.sh").read_text()
+        self.assertIn("Maestro journey failed on attempt 1:", runner)
+        self.assertIn("Maestro journey failed on both attempts:", runner)
+        self.assertIn("-maestro-attempt1.log", runner)
+        self.assertIn("journey_attempt", runner)
+        self.assertIn('"$journey" = "session-lifecycle"', runner)
+        self.assertEqual(1, runner.count('test --no-reinstall-driver "$flow_dir/$journey.yaml"'))
+
     def test_shared_report_redaction_preserves_errors_and_rejects_binary_input(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
