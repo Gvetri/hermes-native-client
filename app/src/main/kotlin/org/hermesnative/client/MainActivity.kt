@@ -21,9 +21,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The shell consumes system-bar and display-cutout insets itself, so the
-        // window draws edge to edge; the platform keeps handling the soft
-        // keyboard, which must not collapse the shell's scrollable content.
+        // Draw edge to edge. The manifest requests adjustResize to deliver IME insets;
+        // Compose consumes system-bar and keyboard insets around its scrollable controls.
         enableEdgeToEdge()
         entryStateHolder = EntryWiring.createEntryStateHolder(applicationContext)
         setContent {
