@@ -28,7 +28,85 @@ name: session-lifecycle
 - assertVisible: "Message"
 - assertVisible: "No messages in this Session."
 - assertNotVisible: "Role: assistant"
-- tapOn: "Back to Sessions"
+
+# Conversation: Back dismisses the menu, and cancelled confirmations do not write.
+- tapOn: "Session actions for Lifecycle Session"
+- assertVisible: "Pin Session"
+- back
+- assertNotVisible: "Pin Session"
+- assertVisible: "Back to Sessions"
+- tapOn: "Session actions for Lifecycle Session"
+- tapOn: "Rename Session"
+- scrollUntilVisible:
+    element: "Cancel Rename"
+    direction: DOWN
+- tapOn: "Cancel Rename"
+- tapOn: "Session actions for Lifecycle Session"
+- tapOn: "Delete Session"
+- scrollUntilVisible:
+    element: "Cancel Delete"
+    direction: DOWN
+- tapOn: "Cancel Delete"
+# This read is a Gateway checkpoint: only Session creation may have written so far.
+- tapOn: "Refresh history"
+- tapOn: "Session actions for Lifecycle Session"
+- tapOn: "Rename Session"
+- tapOn: "New Session title"
+- longPressOn:
+    text: "Lifecycle Session"
+    below: "Current title: Lifecycle Session"
+- tapOn: "Select All"
+- inputText: "Managed Session"
+- assertVisible: "Managed Session"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Confirm Rename Session"
+    direction: DOWN
+- tapOn: "Confirm Rename Session"
+- extendedWaitUntil:
+    visible: "Session actions for Managed Session"
+    timeout: 30000
+- tapOn: "Session actions for Managed Session"
+- tapOn: "Pin Session"
+- tapOn: "Session actions for Managed Session"
+- assertVisible: "Unpin Session"
+- tapOn: "Unpin Session"
+- tapOn: "Session actions for Managed Session"
+- assertVisible: "Pin Session"
+- tapOn: "Delete Session"
+- assertVisible: 'Delete "Managed Session"?'
+- scrollUntilVisible:
+    element: "Remote deletion cannot be undone by this client."
+    direction: DOWN
+- scrollUntilVisible:
+    element: "Confirm Delete Session"
+    direction: DOWN
+- tapOn: "Confirm Delete Session"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- assertVisible: "Alpha Session"
+
+# List: opening or cancelling management must not open a conversation.
+- tapOn: "Session actions for Alpha Session"
+- back
+- assertNotVisible: "Pin Session"
+- assertNotVisible: "Back to Sessions"
+- tapOn: "Session actions for Alpha Session"
+- tapOn: "Rename Session"
+- scrollUntilVisible:
+    element: "Cancel Rename"
+    direction: DOWN
+- tapOn: "Cancel Rename"
+- tapOn: "Session actions for Alpha Session"
+- tapOn: "Delete Session"
+- scrollUntilVisible:
+    element: "Cancel Delete"
+    direction: DOWN
+- tapOn: "Cancel Delete"
+# This read is a Gateway checkpoint: no list-menu cancellation may add a write.
+- tapOn: "Refresh"
+- tapOn: "Session actions for Alpha Session"
 - tapOn: "Rename Session"
 - tapOn: "New Session title"
 - longPressOn:
@@ -38,61 +116,34 @@ name: session-lifecycle
 - inputText: "Renamed Session"
 - assertVisible: "Renamed Session"
 - hideKeyboard
-- swipe:
-    start: "93%, 50%"
-    end: "93%, 35%"
-    duration: 600
-- assertVisible: "Confirm Rename Session"
+- scrollUntilVisible:
+    element: "Confirm Rename Session"
+    direction: DOWN
 - tapOn: "Confirm Rename Session"
 - extendedWaitUntil:
-    notVisible: "Confirm Rename Session"
+    visible: "Session actions for Renamed Session"
     timeout: 30000
-- tapOn: "Search Sessions"
-- hideKeyboard
-- scrollUntilVisible:
-    element:
-      text: "Renamed Session"
-    direction: UP
-    timeout: 30000
-- assertVisible: "Renamed Session"
-- assertVisible:
-    text: "Pin Session"
-    below: "Renamed Session"
-- tapOn:
-    text: "Pin Session"
-    below: "Renamed Session"
+- tapOn: "Session actions for Renamed Session"
+- tapOn: "Pin Session"
 - extendedWaitUntil:
     visible: "Pinned"
     timeout: 30000
-- assertVisible:
-    text: "Pinned"
-    below: "Renamed Session"
-- tapOn:
-    text: "Unpin Session"
-    below: "Renamed Session"
-# The compact Session action row keeps Delete on the same row right below its
-# Session card, so the renamed Session's own Delete is the first match below
-# its card and no extra swipe is needed to reveal it.
-- assertVisible:
-    text: "Delete Session"
-    below: "Renamed Session"
-- tapOn:
-    text: "Delete Session"
-    below: "Renamed Session"
-# The inline delete confirmation sits below the Session card. Bring its
-# Confirm action into the list viewport with small bounded swipes instead of
-# a fixed gesture distance or a single coarse scroll.
-- repeat:
-    times: 6
-    while:
-      notVisible:
-        text: "Confirm Delete Session"
-    commands:
-      - swipe:
-          start: "50%, 68%"
-          end: "50%, 56%"
-          duration: 500
+- tapOn: "Session actions for Renamed Session"
+- assertVisible: "Unpin Session"
+- tapOn: "Unpin Session"
+- tapOn: "Session actions for Renamed Session"
+- assertVisible: "Pin Session"
+- tapOn: "Delete Session"
+- assertVisible: 'Delete "Renamed Session"?'
+- scrollUntilVisible:
+    element: "Remote deletion cannot be undone by this client."
+    direction: DOWN
+- scrollUntilVisible:
+    element: "Confirm Delete Session"
+    direction: DOWN
 - tapOn: "Confirm Delete Session"
 - extendedWaitUntil:
-    notVisible: "Renamed Session"
+    visible: "No Sessions on this Gateway"
     timeout: 30000
+- assertNotVisible: "Renamed Session"
+- assertNotVisible: "Managed Session"

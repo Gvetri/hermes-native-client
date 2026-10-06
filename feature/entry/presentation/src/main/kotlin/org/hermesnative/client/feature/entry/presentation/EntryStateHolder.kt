@@ -2561,6 +2561,7 @@ class EntryStateHolder(
                                         current.sessions,
                                         page.sessions.map { it.toSessionItemUiState() },
                                     ),
+                                openedSession = current.openedSession?.withSessionMetadata(page.sessions),
                                 nextOffset = page.nextOffset,
                                 isLoadingMore = false,
                                 isStale = false,
@@ -2655,13 +2656,17 @@ class EntryStateHolder(
             )
     }
 
+    private fun SessionListUiState.sessionForMutation(sessionId: SessionId): SessionItemUiState? =
+        sessions.firstOrNull { it.id == sessionId }
+            ?: openedSession?.session?.takeIf { it.id == sessionId }
+
     private fun showRenameSession(sessionId: SessionId) {
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
             if (!current.allowsSessionMutation()) return
             val mutation = current.sessionMutations[sessionId]
             if (mutation?.pendingAction != null || mutation?.delete != null) return
-            val session = current.sessions.firstOrNull { it.id == sessionId } ?: return
+            val session = current.sessionForMutation(sessionId) ?: return
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2938,7 +2943,7 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             if (!isCurrentSessionMutation(request)) return
             val current = _uiState.value.sessionList ?: return
-            if (current.sessions.none { it.id == session.id }) return
+            if (current.sessionForMutation(session.id) == null) return
             val updated = session.toSessionItemUiState()
             _uiState.value =
                 _uiState.value.copy(
@@ -2979,7 +2984,7 @@ class EntryStateHolder(
                 val current = _uiState.value.sessionList ?: return
                 if (!current.allowsSessionMutation()) return
                 if (sessionGateway !== gateway) return
-                if (current.sessions.none { it.id == sessionId }) return
+                if (current.sessionForMutation(sessionId) == null) return
                 val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
                 if (mutation.pendingAction != null || mutation.rename != null || mutation.delete != null) return
                 _uiState.value =
@@ -3028,7 +3033,7 @@ class EntryStateHolder(
             synchronized(sessionRequestLock) {
                 if (!isCurrentSessionMutation(request)) return@synchronized null
                 val current = _uiState.value.sessionList ?: return@synchronized null
-                if (current.sessions.none { it.id == sessionId }) return@synchronized null
+                if (current.sessionForMutation(sessionId) == null) return@synchronized null
                 val mutation = current.sessionMutations[sessionId] ?: return@synchronized null
                 val updatedSessions =
                     current.sessions
@@ -3102,7 +3107,7 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
             if (!current.allowsSessionMutation()) return
-            if (current.sessions.none { it.id == sessionId }) return
+            if (current.sessionForMutation(sessionId) == null) return
             val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
             if (mutation.pendingAction != null || mutation.rename != null) return
             _uiState.value =
@@ -3419,6 +3424,11 @@ class EntryStateHolder(
         session: Session,
     ): List<SessionItemUiState> = mergeSessions(sessions, listOf(session.toSessionItemUiState()))
 
+    private fun OpenSessionUiState.withSessionMetadata(sessions: List<Session>): OpenSessionUiState =
+        sessions.firstOrNull { it.id == session.id }
+            ?.let { copy(session = it.toSessionItemUiState()) }
+            ?: this
+
     private fun mergeSessions(
         existing: List<SessionItemUiState>,
         incoming: List<SessionItemUiState>,
@@ -3477,11 +3487,12 @@ class EntryStateHolder(
                             emptyList(),
                             page.sessions.map { it.toSessionItemUiState() },
                         ),
+                    openedSession = latest.openedSession?.withSessionMetadata(page.sessions),
                     sessionMutations =
                         restoreUnresolvedSessionMutations(
                             retainRenameDrafts(
                                 latest.sessionMutations,
-                                page.sessions.map { it.id },
+                                page.sessions.map { it.id } + listOfNotNull(latest.openedSession?.session?.id),
                             ),
                         ),
                     nextOffset = page.nextOffset,
@@ -3778,10 +3789,17 @@ class EntryStateHolder(
                 observationToClose = released.observation
             }
             beginSessionRequest()
+            // Keep the last confirmed Session row reachable when its management context
+            // would otherwise disappear after returning from an off-page conversation.
+            val retainedSession =
+                current.openedSession?.session?.takeIf { session ->
+                    current.sessionMutations.containsKey(session.id) && current.sessions.none { it.id == session.id }
+                }
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
                         current.copy(
+                            sessions = retainedSession?.let { mergeSessions(current.sessions, listOf(it)) } ?: current.sessions,
                             openedSession = null,
                             openingSessionId = null,
                             errorCategory = null,
