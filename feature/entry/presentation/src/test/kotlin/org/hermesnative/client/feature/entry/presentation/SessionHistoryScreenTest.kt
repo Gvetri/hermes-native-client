@@ -573,10 +573,10 @@ class SessionHistoryScreenTest {
             }
         }
 
-        // The transcript opens at its newest content, so an explicit scroll to the start pins
-        // the first pane: the header and the oldest messages fill it, and two timestamps are composed.
+        // Pin the starting viewport before inspecting lazy nodes. With Session actions in the
+        // navigation row, the shorter transcript header composes all three timestamps here.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
-        composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(2)
+        composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(3)
         // Index 0 is the Session summary, so the message items start at 1.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
         composeTestRule.onNodeWithText("Run ID: run-failed").assertIsDisplayed()

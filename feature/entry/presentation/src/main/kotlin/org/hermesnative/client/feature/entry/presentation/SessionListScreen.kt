@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -192,6 +192,20 @@ internal fun SessionListPane(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("session-list"),
                 verticalArrangement = Arrangement.Top,
             ) {
+                items(
+                    items = state.sessions.filter { it.id in state.sessionMutations && it !in state.visibleSessions },
+                    key = { session -> "management-${session.id.value}" },
+                ) { session ->
+                    Text(text = "Session action outside current search", style = MaterialTheme.typography.labelLarge)
+                    Text(text = session.title, modifier = Modifier.semantics { heading() })
+                    SessionActionControls(
+                        session = session,
+                        mutation = state.sessionMutations[session.id],
+                        enabled = state.allowsSessionMutation(),
+                        onEvent = onEvent,
+                    )
+                    Spacer(modifier = Modifier.height(spacing.s))
+                }
                 if (state.visibleSessions.isEmpty()) {
                     item { SessionListStateContent(state = state) }
                     item { SessionListPaginationFooterIfAvailable(state = state, onEvent = onEvent) }
@@ -739,6 +753,7 @@ private fun SessionActionControls(
     mutation: SessionMutationUiState?,
     enabled: Boolean,
     onEvent: (EntryUiEvent) -> Unit,
+    showMenu: Boolean = true,
 ) {
     when {
         mutation?.rename != null ->
@@ -758,61 +773,12 @@ private fun SessionActionControls(
             )
         else -> {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                // The three actions share one compact row, so one Session's controls no longer
-                // stand taller than the rows they belong to and a short pane still shows more
-                // than a single Session.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            onEvent(
-                                when (mutation?.retryAction) {
-                                    SessionMutationAction.PIN -> EntryUiEvent.PinSessionClicked(session.id)
-                                    SessionMutationAction.UNPIN -> EntryUiEvent.UnpinSessionClicked(session.id)
-                                    else ->
-                                        if (session.pinned) {
-                                            EntryUiEvent.UnpinSessionClicked(session.id)
-                                        } else {
-                                            EntryUiEvent.PinSessionClicked(session.id)
-                                        }
-                                },
-                            )
-                        },
+                if (showMenu) {
+                    SessionActionMenu(
+                        session = session,
                         enabled = enabled && mutation?.pendingAction == null,
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(
-                            text =
-                                if (mutation?.retryAction == SessionMutationAction.PIN ||
-                                    mutation?.retryAction == SessionMutationAction.UNPIN
-                                ) {
-                                    "Try again"
-                                } else if (session.pinned) {
-                                    "Unpin Session"
-                                } else {
-                                    "Pin Session"
-                                },
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = { onEvent(EntryUiEvent.RenameSessionClicked(session.id)) },
-                        enabled = enabled && mutation?.pendingAction == null,
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(text = "Rename Session")
-                    }
-                    OutlinedButton(
-                        onClick = { onEvent(EntryUiEvent.DeleteSessionClicked(session.id)) },
-                        enabled = enabled && mutation?.pendingAction == null,
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text(text = "Delete Session")
-                    }
+                        onEvent = onEvent,
+                    )
                 }
                 mutation?.pendingAction?.let { action ->
                     Spacer(modifier = Modifier.height(8.dp))
@@ -828,6 +794,21 @@ private fun SessionActionControls(
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
                     )
+                }
+                val retryEvent =
+                    when (mutation?.retryAction) {
+                        SessionMutationAction.PIN -> EntryUiEvent.PinSessionClicked(session.id)
+                        SessionMutationAction.UNPIN -> EntryUiEvent.UnpinSessionClicked(session.id)
+                        else -> null
+                    }
+                retryEvent?.let { event ->
+                    OutlinedButton(
+                        onClick = { onEvent(event) },
+                        enabled = enabled && mutation?.pendingAction == null,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) {
+                        Text(text = "Try again")
+                    }
                 }
             }
         }
@@ -990,6 +971,7 @@ private fun SessionDetailHeader(state: OpenSessionUiState) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SessionDetailContent(
     state: OpenSessionUiState,
@@ -1048,6 +1030,10 @@ internal fun SessionDetailContent(
             transcriptListState.pinNewestItemEnd(newestMessageItemIndex)
         }
     }
+    val showMutationContext = mutation?.rename != null || mutation?.delete != null || mutation?.errorCategory != null
+    LaunchedEffect(state.session.id, showMutationContext) {
+        if (showMutationContext && displayedMessages.isNotEmpty()) transcriptListState.scrollToItem(0)
+    }
     Column(
         modifier =
             if (displayedMessages.isEmpty()) {
@@ -1057,11 +1043,22 @@ internal fun SessionDetailContent(
             },
         verticalArrangement = Arrangement.Top,
     ) {
-        OutlinedButton(
-            onClick = { onEvent(EntryUiEvent.ReturnToSessionListClicked) },
-            modifier = Modifier.heightIn(min = 48.dp),
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(text = "Back to Sessions")
+            OutlinedButton(
+                onClick = { onEvent(EntryUiEvent.ReturnToSessionListClicked) },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(text = "Back to Sessions")
+            }
+            SessionActionMenu(
+                session = state.session,
+                enabled = actionsEnabled && mutation?.pendingAction == null && mutation?.rename == null && mutation?.delete == null,
+                onEvent = onEvent,
+            )
         }
         Spacer(modifier = Modifier.height(16.dp))
         if (displayedMessages.isEmpty()) {
@@ -1308,6 +1305,7 @@ private fun SessionDetailSummary(
         mutation = mutation,
         enabled = actionsEnabled && mutation?.pendingAction == null,
         onEvent = onEvent,
+        showMenu = false,
     )
     state.latestRun?.let { run ->
         Spacer(modifier = Modifier.height(12.dp))

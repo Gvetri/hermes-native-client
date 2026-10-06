@@ -237,6 +237,7 @@ class JourneyGatewayProcess private constructor(
                         )
                     behavior.sessions.removeIf { it.id == created.id }
                     behavior.sessions += created
+                    behavior.sessionMutations += "create" to created.id
                     respond(exchange, 201, """{"object":"hermes.session","session":${sessionJson(created)}}""")
                 }
                 else -> respond(exchange, 405, """{"error":"method-not-allowed"}""")
@@ -280,6 +281,15 @@ class JourneyGatewayProcess private constructor(
                                 session.copy(title = parseTitle(body))
                             }
                         behavior.replaceSession(updated)
+                        val operation =
+                            if (pinned == null) {
+                                "rename"
+                            } else if (pinned) {
+                                "pin"
+                            } else {
+                                "unpin"
+                            }
+                        behavior.sessionMutations += operation to sessionId
                         respond(exchange, 200, """{"object":"hermes.session","session":${sessionJson(updated)}}""")
                     }
                 }
@@ -288,6 +298,7 @@ class JourneyGatewayProcess private constructor(
                         respond(exchange, 404, """{"error":"not-found"}""")
                     } else {
                         behavior.sessions.removeIf { it.id == sessionId }
+                        behavior.sessionMutations += "delete" to sessionId
                         respond(
                             exchange,
                             200,
@@ -542,6 +553,7 @@ internal class JourneyGatewayBehavior(
 ) {
     val sessions = CopyOnWriteArrayList(scenario.sessions)
     val requests = CopyOnWriteArrayList<SyntheticGatewayRequest>()
+    val sessionMutations = CopyOnWriteArrayList<Pair<String, String>>()
 
     @Volatile
     private var failNextSessionList = scenario.failNextSessionList
@@ -601,6 +613,13 @@ internal class JourneyGatewayBehavior(
             append(""","requests":[""")
             append(
                 requests.joinToString(",") { request -> """{"method":${request.method.jsonValue()},"path":${request.path.jsonValue()}}""" },
+            )
+            append(']')
+            append(""","session_mutations":[""")
+            append(
+                sessionMutations.joinToString(",") { (operation, sessionId) ->
+                    """{"operation":${operation.jsonValue()},"session_id":${sessionId.jsonValue()}}"""
+                },
             )
             append(']')
             append(""","run_status_requests":${runStatusRequests.get()}""")
