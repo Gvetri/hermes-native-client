@@ -124,6 +124,19 @@ name: session-lifecycle
     visible: "Session actions for Renamed Session"
     timeout: 30000
 - tapOn: "Session actions for Renamed Session"
+# The API 24 platform can leave a freshly opened menu window out of the
+# accessibility window list for the life of that open, so the drawn menu is
+# unreadable to the test driver until another window or focus event arrives.
+# Recover this measured interaction within a fixed bound by dismissing and
+# reopening the menu; the assertions below stay unchanged.
+- repeat:
+    times: 3
+    while:
+      notVisible:
+        text: "Pin Session"
+    commands:
+      - back
+      - tapOn: "Session actions for Renamed Session"
 - tapOn: "Pin Session"
 - extendedWaitUntil:
     visible: "Pinned"

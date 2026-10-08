@@ -178,6 +178,28 @@ The retry is deliberately narrow and auditable:
   is logged, but no automated discrimination exists; this bounded trade-off
   is accepted deliberately.
 
+### Flow-level recovery for the measured interaction
+
+The phase retry is the outer bound: if both attempts fail, the suite fails.
+The measured race hits one interaction — the first session-menu open after
+the list Rename is confirmed. A fresh phase attempt redraws that interaction
+only by replaying the whole journey, so the `session-lifecycle` flow also
+recovers that single interaction directly, within its own fixed bound:
+while the menu's items are not readable it dismisses the menu (`back`) and
+reopens it, at most three times, before the unchanged `Pin Session` step.
+
+- a healthy open evaluates the condition once and skips the recovery
+  entirely, so the steady-state journey is unchanged;
+- a menu that stays unreadable after the bound still fails the lane at the
+  unchanged `Pin Session` step, and recoveries are logged: the block records
+  as executed rather than the healthy `SKIPPED`, and the Maestro debug log
+  carries the per-run count;
+- the limit is the same as the phase retry's: a genuinely intermittent
+  product regression at this interaction could also be absorbed by a
+  reopen, while a persistent regression cannot; combined with the phase
+  retry, the lane needs every open of that one interaction in both attempts
+  to go unreadable before it fails, and both attempts stay in the evidence.
+
 ## Keyboard window contract
 
 For [issue #72](https://github.com/Gvetri/hermes-native-client/issues/72),
