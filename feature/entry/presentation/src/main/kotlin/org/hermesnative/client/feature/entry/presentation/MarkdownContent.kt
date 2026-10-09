@@ -174,7 +174,10 @@ private fun List<MarkdownSpan>.toAnnotatedString(
                 addLink(
                     LinkAnnotation.Url(
                         url = destination,
-                        styles = TextLinkStyles(style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
+                        styles =
+                            TextLinkStyles(
+                                style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+                            ),
                         linkInteractionListener = { onOpenLink(destination) },
                     ),
                     start = start,

@@ -403,7 +403,8 @@ private fun SessionListStatusTexts(state: SessionListUiState) {
         Text(
             text =
                 if (state.isUnavailable) {
-                    "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
+                    "The displayed Session data may be stale. " +
+                        "Gateway actions are unavailable until the connection recovers."
                 } else {
                     "The displayed Session data may be stale."
                 },
@@ -930,7 +931,9 @@ private fun DeleteSessionContent(
 
 private fun paneTailMaxHeight(available: Dp): Dp = (available - 120.dp).coerceAtLeast(minOf(48.dp, available))
 
-private fun panePinnedHeaderMaxHeight(available: Dp): Dp = (available - 120.dp - 48.dp).coerceAtLeast(minOf(24.dp, available))
+private fun panePinnedHeaderMaxHeight(available: Dp): Dp {
+    return (available - 120.dp - 48.dp).coerceAtLeast(minOf(24.dp, available))
+}
 
 @Composable
 private fun SessionDetailHeader(state: OpenSessionUiState) {
@@ -1015,7 +1018,11 @@ internal fun SessionDetailContent(
             }
             SessionActionMenu(
                 session = state.session,
-                enabled = actionsEnabled && mutation?.pendingAction == null && mutation?.rename == null && mutation?.delete == null,
+                enabled =
+                    actionsEnabled &&
+                        mutation?.pendingAction == null &&
+                        mutation?.rename == null &&
+                        mutation?.delete == null,
                 onEvent = onEvent,
             )
         }

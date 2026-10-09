@@ -127,7 +127,10 @@ class EntryStateHolderFixtureIntegrationTest {
             val holder = stateHolder(client(context))
             try {
                 connect(holder)
-                assertEquals(listOf(SERVER_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })
+                assertEquals(
+                    listOf(SERVER_A),
+                    requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value },
+                )
 
                 holder.onEvent(EntryUiEvent.PinSessionClicked(SessionId(SERVER_A)))
 
@@ -494,14 +497,13 @@ class EntryStateHolderFixtureIntegrationTest {
                 val unpinned = requireNotNull(holder.uiState.value.sessionList)
                 assertFalse(unpinned.sessions.single { it.id == targetId }.pinned)
 
-                holder.onEvent(EntryUiEvent.DeleteSessionClicked(targetId))
-                holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
-                val deleteFailure = requireNotNull(holder.uiState.value.sessionList)
-                assertEquals(listOf(PINNED_A, SERVER_A), deleteFailure.sessions.map { it.id.value })
-                assertEquals(SessionMutationAction.DELETE, deleteFailure.sessionMutations[targetId]?.retryAction)
+                assertDeleteRetryKeepsTheSession(holder, targetId)
 
                 holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
-                assertEquals(listOf(PINNED_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })
+                assertEquals(
+                    listOf(PINNED_A),
+                    requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value },
+                )
                 assertTrue(behavior.sessions.none { it.id == SERVER_A })
                 assertEquals(
                     listOf("PATCH", "PATCH", "PATCH", "PATCH", "PATCH", "DELETE", "DELETE"),
@@ -827,7 +829,20 @@ class EntryStateHolderFixtureIntegrationTest {
         }
     }
 
-    private fun clientManifestEndpoints(): Map<String, GatewayEndpoint> = PublicBetaGatewayCapabilityManifest.current.requiredEndpoints
+    private fun assertDeleteRetryKeepsTheSession(
+        holder: EntryStateHolder,
+        targetId: SessionId,
+    ) {
+        holder.onEvent(EntryUiEvent.DeleteSessionClicked(targetId))
+        holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
+        val deleteFailure = requireNotNull(holder.uiState.value.sessionList)
+        assertEquals(listOf(PINNED_A, SERVER_A), deleteFailure.sessions.map { it.id.value })
+        assertEquals(SessionMutationAction.DELETE, deleteFailure.sessionMutations[targetId]?.retryAction)
+    }
+
+    private fun clientManifestEndpoints(): Map<String, GatewayEndpoint> {
+        return PublicBetaGatewayCapabilityManifest.current.requiredEndpoints
+    }
 
     private fun sessionRunsTrackedBy(
         holder: EntryStateHolder,
@@ -947,9 +962,15 @@ class EntryStateHolderFixtureIntegrationTest {
     private class LoopbackFixtureTransport : GatewayTransport {
         private val delegate = OkHttpGatewayTransport()
 
-        override fun execute(request: GatewayHttpRequest): GatewayHttpResponse = delegate.execute(toLoopbackRequest(request))
+        override fun execute(request: GatewayHttpRequest): GatewayHttpResponse =
+            delegate.execute(
+                toLoopbackRequest(request),
+            )
 
-        override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream = delegate.openEventStream(toLoopbackRequest(request))
+        override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream =
+            delegate.openEventStream(
+                toLoopbackRequest(request),
+            )
 
         private fun toLoopbackRequest(request: GatewayHttpRequest): GatewayHttpRequest {
             val secureUrl = request.url.removePrefix("https://")
@@ -986,7 +1007,10 @@ class EntryStateHolderFixtureIntegrationTest {
             return response
         }
 
-        override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream = delegate.openEventStream(request)
+        override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream =
+            delegate.openEventStream(
+                request,
+            )
     }
 
     private companion object {

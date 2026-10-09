@@ -913,7 +913,11 @@ class RunObservationStateHolderTest {
             statusResults += run
         }
 
-        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(session) + additionalSessions, null)
+        override fun listSessions(request: SessionListRequest): SessionPage =
+            SessionPage(
+                listOf(session) + additionalSessions,
+                null,
+            )
 
         override fun createSession(title: String?): Session = error("not used")
 

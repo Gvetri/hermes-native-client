@@ -464,7 +464,8 @@ enum class RunStatusNotificationExplanation(
     val safeMessage: String,
 ) {
     PERMISSION_DENIED(
-        "Notifications are blocked for this app. Allow notifications in Android settings, then enable this option again.",
+        "Notifications are blocked for this app. Allow notifications in Android settings, " +
+            "then enable this option again.",
     ),
 }
 
@@ -620,7 +621,12 @@ class EntryStateHolder(
                     sessionJob = null
                     recoveryJob = null
                     val requestJobs =
-                        (mutationJobs.values + runJobs.values + runObservationJobs.values + connectionRecoveryJobs).toList()
+                        listOf(
+                            mutationJobs.values,
+                            runJobs.values,
+                            runObservationJobs.values,
+                            connectionRecoveryJobs,
+                        ).flatten()
                     observationsToClose = runObservations.values.toList()
                     mutationJobs.clear()
                     mutationOwners.clear()
@@ -797,7 +803,8 @@ class EntryStateHolder(
                                                     _uiState.value.copy(
                                                         endpoint = normalizedEndpoint,
                                                         title = "Gateway connected",
-                                                        supportingText = "The Gateway contract was verified successfully.",
+                                                        supportingText =
+                                                            "The Gateway contract was verified successfully.",
                                                         actionLabel = "Connected",
                                                         isChangingCredential = false,
                                                         isVerifying = false,
@@ -827,7 +834,10 @@ class EntryStateHolder(
                                 } catch (error: GatewayException) {
                                     showFailure(error.category.toUserFacingCategory(), requestConnectionGeneration)
                                 } catch (_: GatewayConnectionPersistenceException) {
-                                    showFailure(EntryErrorCategory.CREDENTIAL_STORAGE_FAILED, requestConnectionGeneration)
+                                    showFailure(
+                                        EntryErrorCategory.CREDENTIAL_STORAGE_FAILED,
+                                        requestConnectionGeneration,
+                                    )
                                 } catch (_: Exception) {
                                     showFailure(EntryErrorCategory.GATEWAY_REQUEST_FAILED, requestConnectionGeneration)
                                 }
@@ -1582,7 +1592,8 @@ class EntryStateHolder(
                             opened.copy(
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
-                                latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                latestRunState =
+                                    latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
                                 latestRunRetryAvailable =
                                     latestRunRetryAvailable(
                                         knownRuns,
@@ -1691,7 +1702,10 @@ class EntryStateHolder(
                 visibleSessionRuns(openedSession.session.id)
                     .latestActiveRun()
                     ?.id
-                    ?: latestObservedObservationState(openedSession.session.id, visibleSessionRuns(openedSession.session.id))?.run?.id
+                    ?: latestObservedObservationState(
+                        openedSession.session.id,
+                        visibleSessionRuns(openedSession.session.id),
+                    )?.run?.id
             val requestGeneration = beginSessionRequest()
             val requestConnectionGeneration = connectionGeneration
             val request = SessionRequestContext(requestGeneration, sessionList.searchQuery, offset = null)
@@ -1926,7 +1940,10 @@ class EntryStateHolder(
                     sessionGateway = sessionGateway,
                 )
             val reconciledRun = reconciliation?.run
-            if (reconciledRun?.isActive() == true || (reconciledRun == null && activeRunToObserve == null && run.isActive())) {
+            if (
+                reconciledRun?.isActive() == true ||
+                (reconciledRun == null && activeRunToObserve == null && run.isActive())
+            ) {
                 activeRunToObserve = reconciledRun ?: run
             }
         }
@@ -2002,7 +2019,12 @@ class EntryStateHolder(
             } ?: return null
         return try {
             val result = ReconcileRun(runGateway, sessionGateway).execute(runId, sessionId)
-            applyAuthoritativeRunReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration, result)
+            applyAuthoritativeRunReconciliation(
+                sessionId,
+                requestConnectionGeneration,
+                requestSessionGeneration,
+                result,
+            )
             result
         } catch (error: CancellationException) {
             throw error
@@ -2212,11 +2234,13 @@ class EntryStateHolder(
                                             opened.copy(
                                                 messages = reconciliation.history.toMessageUiStates(),
                                                 composerText = sessionDrafts[sessionId].orEmpty(),
-                                                sendErrorCategory = if (canClearSendState) null else opened.sendErrorCategory,
+                                                sendErrorCategory =
+                                                    if (canClearSendState) null else opened.sendErrorCategory,
                                                 hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
                                                 latestRun = latestRun,
                                                 activeRuns = knownRuns.activeRuns(),
-                                                latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                                latestRunState =
+                                                    latestObservation?.state ?: latestRun?.toRunPresentationState(),
                                                 latestRunRetryAvailable =
                                                     latestRunRetryAvailable(
                                                         knownRuns,
@@ -2246,7 +2270,8 @@ class EntryStateHolder(
                                                 activeRuns = visibleSessionRuns(sessionId).activeRuns(),
                                                 sendErrorCategory = opened.sendErrorCategory,
                                                 hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                                                latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                                latestRunState =
+                                                    latestObservation?.state ?: latestRun?.toRunPresentationState(),
                                                 latestRunRetryAvailable =
                                                     latestRunRetryAvailable(
                                                         visibleSessionRuns(sessionId),
@@ -2337,7 +2362,8 @@ class EntryStateHolder(
                                     activeRuns = knownRuns.activeRuns(),
                                     sendErrorCategory = opened.sendErrorCategory,
                                     hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                                    latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                    latestRunState =
+                                        latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
                                     latestRunRetryAvailable =
                                         latestRunRetryAvailable(
                                             knownRuns,
@@ -2425,7 +2451,8 @@ class EntryStateHolder(
                                 isSending = false,
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
-                                latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                latestRunState =
+                                    latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
                                 latestRunRetryAvailable =
                                     latestRunRetryAvailable(
                                         knownRuns,
@@ -2753,7 +2780,8 @@ class EntryStateHolder(
                                                 rename =
                                                     rename.copy(
                                                         isSubmitting = false,
-                                                        errorCategory = SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED,
+                                                        errorCategory =
+                                                            SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED,
                                                     ),
                                                 pendingAction = null,
                                                 retryAction = SessionMutationAction.RENAME,
@@ -2987,7 +3015,8 @@ class EntryStateHolder(
                                             opened
                                         }
                                     },
-                                sessionMutations = mutationMapAfter(sessionId, remainingMutation, current.sessionMutations),
+                                sessionMutations =
+                                    mutationMapAfter(sessionId, remainingMutation, current.sessionMutations),
                             ),
                     )
                 unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
@@ -3258,7 +3287,8 @@ class EntryStateHolder(
                     } catch (_: Exception) {
                         null
                     }
-                val openedSessionUiState = openedSession.toOpenSessionUiState(messages = openedSession.history.toMessageUiStates())
+                val openedSessionUiState =
+                    openedSession.toOpenSessionUiState(messages = openedSession.history.toMessageUiStates())
                 updateCurrentSessionRequest(request.context.generation) { current ->
                     current.copy(
                         sessions =
@@ -3579,7 +3609,8 @@ class EntryStateHolder(
                                             latestRun = latestRun,
                                             activeRuns = knownRuns.activeRuns(),
                                             isSending = runJobs.containsKey(sessionId),
-                                            latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                                            latestRunState =
+                                                latestObservation?.state ?: latestRun?.toRunPresentationState(),
                                             latestRunRetryAvailable =
                                                 latestRunRetryAvailable(
                                                     knownRuns,
@@ -3596,7 +3627,8 @@ class EntryStateHolder(
                             }
                         if (applied) {
                             replacedSessionId?.let { releasedSessionId ->
-                                val released = synchronized(sessionRequestLock) { releaseRunObservation(releasedSessionId) }
+                                val released =
+                                    synchronized(sessionRequestLock) { releaseRunObservation(releasedSessionId) }
                                 released.job?.cancel()
                                 released.observation?.close()
                             }
@@ -3706,7 +3738,9 @@ class EntryStateHolder(
                 _uiState.value.copy(
                     sessionList =
                         current.copy(
-                            sessions = retainedSession?.let { mergeSessions(current.sessions, listOf(it)) } ?: current.sessions,
+                            sessions =
+                                retainedSession?.let { mergeSessions(current.sessions, listOf(it)) }
+                                    ?: current.sessions,
                             openedSession = null,
                             openingSessionId = null,
                             errorCategory = null,
@@ -4263,7 +4297,9 @@ class EntryStateHolder(
             ) {
                 return@synchronized TimedOutSendReconciliationOutcome(applied = false)
             }
-            val current = _uiState.value.sessionList ?: return@synchronized TimedOutSendReconciliationOutcome(applied = false)
+            val current =
+                _uiState.value.sessionList
+                    ?: return@synchronized TimedOutSendReconciliationOutcome(applied = false)
             val opened =
                 current.openedSession?.takeIf { it.session.id == sessionId }
                     ?: return@synchronized TimedOutSendReconciliationOutcome(applied = false)
@@ -4412,11 +4448,13 @@ class EntryStateHolder(
                                         isSending = false,
                                         latestRun = knownRuns.latestRun(),
                                         activeRuns = knownRuns.activeRuns(),
-                                        latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                        latestRunState =
+                                            latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
                                         latestRunRetryAvailable =
                                             latestRunRetryAvailable(
                                                 knownRuns,
-                                                latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                                latestObservation?.state
+                                                    ?: knownRuns.latestRun()?.toRunPresentationState(),
                                             ),
                                         activeResponse = observedMessageUiState(latestObservation),
                                         sendErrorCategory = clearedSendErrorCategory,
@@ -5056,7 +5094,9 @@ class EntryStateHolder(
         observationJob: Job,
     ) {
         synchronized(sessionRequestLock) {
-            if (runObservationJobs[sessionId] !== observationJob || runObservationRunIds[sessionId] != event.runId) return
+            if (runObservationJobs[sessionId] !== observationJob || runObservationRunIds[sessionId] != event.runId) {
+                return
+            }
             val previous = observationStateFor(sessionId, event.runId) ?: return
             val next = RunEventStateTransition.apply(previous, event)
             rememberObservationState(next)
@@ -5102,8 +5142,10 @@ class EntryStateHolder(
                                     latestRun = latestRun,
                                     activeRuns = knownRuns.activeRuns(),
                                     latestRunState = latestObservation?.state ?: next.state,
-                                    latestRunRetryAvailable = latestRunRetryAvailable(knownRuns, latestObservation?.state ?: next.state),
-                                    activeResponse = observedMessageUiState(latestObservation) ?: observedMessageUiState(next),
+                                    latestRunRetryAvailable =
+                                        latestRunRetryAvailable(knownRuns, latestObservation?.state ?: next.state),
+                                    activeResponse =
+                                        observedMessageUiState(latestObservation) ?: observedMessageUiState(next),
                                     isRefreshing = opened.isRefreshing || terminal,
                                     isStale = opened.isStale || terminal,
                                     isReconciliationInProgress =
@@ -5217,7 +5259,9 @@ class EntryStateHolder(
             .filterNot { state -> state.run.id in locallyOwnedTerminalStates.mapTo(mutableSetOf()) { it.run.id } }
             .forEach { state -> forgetObservationState(sessionId, state.run.id) }
         if (locallyOwnedTerminalStates.isEmpty()) return
-        locallyOwnedTerminalStates.forEach { state -> rememberObservationState(uncertainObservationState(state.run, state)) }
+        locallyOwnedTerminalStates.forEach { state ->
+            rememberObservationState(uncertainObservationState(state.run, state))
+        }
         sessionRuns[sessionId] =
             mergeRuns(sessionRuns[sessionId].orEmpty(), locallyOwnedTerminalStates.map(RunObservationState::run))
     }
@@ -5433,7 +5477,12 @@ private fun RunObservationState.toSessionMessageUiState(retryInput: String? = nu
         runState = state,
         isStreaming = isStreaming,
         streamInterrupted = isStreamInterrupted,
-        failureSafeMessage = if (state == RunPresentationState.FAILED) RunFailureCategory.GATEWAY_REPORTED.safeMessage else null,
+        failureSafeMessage =
+            if (state == RunPresentationState.FAILED) {
+                RunFailureCategory.GATEWAY_REPORTED.safeMessage
+            } else {
+                null
+            },
         retryAvailable = isRunRetryEligible(state, retryInput),
     )
 
@@ -5551,24 +5600,30 @@ private data class CreateSessionRequest(
     val title: String?,
 )
 
-private fun List<SessionItemUiState>.orderedSessions(): List<SessionItemUiState> = filter { it.pinned } + filterNot { it.pinned }
+private typealias SessionMutationMap = Map<SessionId, SessionMutationUiState>
 
-private fun unsentRenameDrafts(mutations: Map<SessionId, SessionMutationUiState>): Map<SessionId, SessionMutationUiState> =
-    mutations.mapNotNull { (sessionId, mutation) ->
-        mutation.rename
-            ?.takeIf {
-                !it.isSubmitting &&
-                    mutation.pendingAction == null &&
-                    mutation.errorCategory == null &&
-                    mutation.retryAction == null
-            }
-            ?.let { rename ->
-                sessionId to
-                    SessionMutationUiState(
-                        rename = SessionRenameUiState(titleDraft = rename.titleDraft),
-                    )
-            }
-    }.toMap()
+private fun List<SessionItemUiState>.orderedSessions(): List<SessionItemUiState> {
+    return filter { it.pinned } + filterNot { it.pinned }
+}
+
+private fun unsentRenameDrafts(mutations: SessionMutationMap): SessionMutationMap {
+    return mutations
+        .mapNotNull { (sessionId, mutation) ->
+            mutation.rename
+                ?.takeIf {
+                    !it.isSubmitting &&
+                        mutation.pendingAction == null &&
+                        mutation.errorCategory == null &&
+                        mutation.retryAction == null
+                }
+                ?.let { rename ->
+                    sessionId to
+                        SessionMutationUiState(
+                            rename = SessionRenameUiState(titleDraft = rename.titleDraft),
+                        )
+                }
+        }.toMap()
+}
 
 private fun retainRenameDrafts(
     mutations: Map<SessionId, SessionMutationUiState>,

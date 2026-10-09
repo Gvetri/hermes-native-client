@@ -324,4 +324,6 @@ private fun isClosingFence(
     return closingFenceLength >= openingFenceLength && trimmed.drop(closingFenceLength).isEmpty()
 }
 
-private fun fenceLanguage(line: String): String? = line.trimStart().drop(fenceLength(line)).trim().substringBefore(' ').ifEmpty { null }
+private fun fenceLanguage(line: String): String? {
+    return line.trimStart().drop(fenceLength(line)).trim().substringBefore(' ').ifEmpty { null }
+}

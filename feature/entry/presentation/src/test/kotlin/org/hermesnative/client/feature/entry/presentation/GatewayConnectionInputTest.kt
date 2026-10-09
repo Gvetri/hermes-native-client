@@ -61,7 +61,11 @@ class GatewayConnectionInputTest {
         assertEquals(
             0,
             info.inputType and
-                (InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES),
+                (
+                    InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or
+                        InputType.TYPE_TEXT_FLAG_CAP_WORDS or
+                        InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                ),
         )
     }
 

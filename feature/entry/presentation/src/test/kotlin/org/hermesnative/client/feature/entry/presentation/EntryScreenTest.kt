@@ -923,7 +923,11 @@ class EntryScreenTest {
         private var firstRunHasBeenCreated = false
         private var firstObservationRequested = false
 
-        override fun listSessions(request: SessionListRequest): SessionPage = SessionPage(listOf(first, second), nextOffset = null)
+        override fun listSessions(request: SessionListRequest): SessionPage =
+            SessionPage(
+                listOf(first, second),
+                nextOffset = null,
+            )
 
         override fun createSession(title: String?): Session = error("not used")
 

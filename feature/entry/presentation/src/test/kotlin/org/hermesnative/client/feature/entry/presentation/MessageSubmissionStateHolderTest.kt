@@ -76,7 +76,9 @@ class MessageSubmissionStateHolderTest {
                         session.id to
                             SessionHistory(
                                 session.id,
-                                listOf(GatewayHistoryMessage("run-message", "user", "Run this", RunId("run-1"), "running")),
+                                listOf(
+                                    GatewayHistoryMessage("run-message", "user", "Run this", RunId("run-1"), "running"),
+                                ),
                             ),
                     ),
             )
@@ -640,7 +642,8 @@ class MessageSubmissionStateHolderTest {
     private fun holder(
         gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-        repository: GatewayConnectionRepository = DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
+        repository: GatewayConnectionRepository =
+            DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
         uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
     ): EntryStateHolder =
         EntryStateHolder(
@@ -757,7 +760,9 @@ class MessageSubmissionStateHolderTest {
             runRequests += sessionId to input
             if (blockRunCreation) {
                 runStarted.countDown()
-                check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Timed out waiting for Run release." }
+                check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    "Timed out waiting for Run release."
+                }
             }
             return runResults.removeFirst().getOrThrow()
         }

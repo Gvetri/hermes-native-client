@@ -133,7 +133,8 @@ class SessionShellTest {
             sessionList =
                 SessionListUiState(
                     sessions = listOf(session("first", "First Session"), session("second", "Second Session")),
-                    openedSession = OpenSessionUiState(session = session("first", "First Session"), messages = emptyList()),
+                    openedSession =
+                        OpenSessionUiState(session = session("first", "First Session"), messages = emptyList()),
                 ),
         )
 

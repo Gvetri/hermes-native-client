@@ -223,7 +223,10 @@ class RunReconciliationStateHolderTest {
                 statuses.add(terminalRun)
                 runs.add(run)
                 blockNextStatus = true
-                observation = ScriptedObservation(listOf(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "done")))
+                observation =
+                    ScriptedObservation(
+                        listOf(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "done")),
+                    )
             }
         val recoveryRegistry = InMemoryRunRecoveryRegistry()
         val holder = holder(gateway, Dispatchers.Default, recoveryRegistry = recoveryRegistry)
@@ -539,7 +542,13 @@ class RunReconciliationStateHolderTest {
                 listOf(
                     GatewayHistoryMessage("baseline-user", "user", "Keep this draft", baselineRun.id, "succeeded"),
                     GatewayHistoryMessage("baseline-assistant", "assistant", "Old result", baselineRun.id, "succeeded"),
-                    GatewayHistoryMessage("unrelated-assistant", "assistant", "Unrelated result", unrelatedRun.id, "succeeded"),
+                    GatewayHistoryMessage(
+                        "unrelated-assistant",
+                        "assistant",
+                        "Unrelated result",
+                        unrelatedRun.id,
+                        "succeeded",
+                    ),
                 ),
             )
         val gateway =
@@ -1049,11 +1058,22 @@ class RunReconciliationStateHolderTest {
     fun terminal_observation_after_refresh_reconciles_with_the_current_request() {
         val session = session()
         val run = Run(RunId("run-1"), session.id, "starting")
-        val observation = DelayedTerminalObservation(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded"))
+        val observation =
+            DelayedTerminalObservation(
+                RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded"),
+            )
         val authoritativeHistory =
             SessionHistory(
                 session.id,
-                listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed after refresh", run.id, "succeeded")),
+                listOf(
+                    GatewayHistoryMessage(
+                        "authoritative",
+                        "assistant",
+                        "Confirmed after refresh",
+                        run.id,
+                        "succeeded",
+                    ),
+                ),
             )
         val gateway =
             FakeGateway(session).apply {
@@ -1159,7 +1179,15 @@ class RunReconciliationStateHolderTest {
                 statuses.add(nextRun)
                 observation =
                     ScriptedObservation(
-                        listOf(RunEvent(RunEventType.MESSAGE_DELTA, nextRun.id, "running", "Replacement event", "delta")),
+                        listOf(
+                            RunEvent(
+                                RunEventType.MESSAGE_DELTA,
+                                nextRun.id,
+                                "running",
+                                "Replacement event",
+                                "delta",
+                            ),
+                        ),
                     )
             }
         val holder = holder(gateway, dispatcher)
@@ -1176,7 +1204,10 @@ class RunReconciliationStateHolderTest {
 
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             dispatcher.runLast()
-            assertEquals(RunPresentationState.SUCCEEDED, holder.uiState.value.sessionList?.openedSession?.latestRunState)
+            assertEquals(
+                RunPresentationState.SUCCEEDED,
+                holder.uiState.value.sessionList?.openedSession?.latestRunState,
+            )
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Second"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             dispatcher.runLast()
@@ -1205,10 +1236,7 @@ class RunReconciliationStateHolderTest {
                 runs.add(run)
                 statuses.add(run)
                 statuses.add(run)
-                observation =
-                    ScriptedObservation(
-                        listOf(RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Recovered observation", "delta")),
-                    )
+                observation = recoveredDeltaObservation(run)
             }
         val holder =
             holder(
@@ -1241,7 +1269,10 @@ class RunReconciliationStateHolderTest {
             dispatcher.drain()
 
             assertEquals(listOf(run.id), gateway.observedRunIds)
-            assertEquals("Recovered observation", holder.uiState.value.sessionList?.openedSession?.activeResponse?.content)
+            assertEquals(
+                "Recovered observation",
+                holder.uiState.value.sessionList?.openedSession?.activeResponse?.content,
+            )
             assertEquals(listOf(RunRecoveryEntry(session.id, run.id)), registry.load())
             assertEquals(listOf(session.id to "One submission"), gateway.runRequests)
         } finally {
@@ -1345,7 +1376,9 @@ class RunReconciliationStateHolderTest {
                     key: SessionId,
                     value: Job,
                 ): Job? {
-                    check(registrations.incrementAndGet() <= 3) { "Observer restart did not stop after parent cancellation." }
+                    check(registrations.incrementAndGet() <= 3) {
+                        "Observer restart did not stop after parent cancellation."
+                    }
                     val previous = super.put(key, value)
                     if (cancelDuringRegistration) parent.cancel()
                     return previous
@@ -1917,7 +1950,8 @@ class RunReconciliationStateHolderTest {
             awaitState(holder) {
                 it.sessionList?.openedSession?.isRefreshing == false &&
                     it.sessionList?.openedSession?.latestRunState == RunPresentationState.SUCCEEDED &&
-                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    it.sessionList?.openedSession?.sendErrorCategory ==
+                    MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
                     it.sessionList?.openedSession?.composerText == "Failed first attempt" &&
                     gateway.statusRequests.isNotEmpty()
             }
@@ -1927,7 +1961,8 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitState(holder) {
                 it.sessionList?.openedSession?.latestRun?.id == terminalRun.id &&
-                    it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
+                    it.sessionList?.openedSession?.sendErrorCategory ==
+                    MessageSendErrorCategory.GATEWAY_REQUEST_FAILED &&
                     it.sessionList?.openedSession?.composerText == "Failed first attempt"
             }
             assertEquals(1, gateway.runRequests.size)
@@ -2504,6 +2539,11 @@ class RunReconciliationStateHolderTest {
         }
     }
 
+    private fun recoveredDeltaObservation(run: Run): ScriptedObservation =
+        ScriptedObservation(
+            listOf(RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Recovered observation", "delta")),
+        )
+
     private fun joinHolder(holder: EntryStateHolder) {
         runBlocking {
             withTimeout(TEST_TIMEOUT_MILLIS) {
@@ -2642,7 +2682,9 @@ class RunReconciliationStateHolderTest {
             if (shouldBlock) {
                 statusStarted.countDown()
                 try {
-                    check(releaseStatus.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Status was not released." }
+                    check(releaseStatus.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                        "Status was not released."
+                    }
                 } catch (error: InterruptedException) {
                     Thread.currentThread().interrupt()
                     throw error
@@ -2721,7 +2763,9 @@ class RunReconciliationStateHolderTest {
                 override fun hasNext(): Boolean {
                     started.countDown()
                     try {
-                        check(release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Observation was not released." }
+                        check(release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                            "Observation was not released."
+                        }
                     } catch (error: InterruptedException) {
                         Thread.currentThread().interrupt()
                         throw error
@@ -2835,7 +2879,9 @@ class RunReconciliationStateHolderTest {
         override fun save(entry: RunRecoveryEntry) {
             if (blockSaves) {
                 saveStarted.countDown()
-                check(releaseSave.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Recovery save was not released." }
+                check(releaseSave.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    "Recovery save was not released."
+                }
             }
             synchronized(entries) {
                 if (entry !in entries) entries += entry
@@ -2845,7 +2891,9 @@ class RunReconciliationStateHolderTest {
         override fun remove(entry: RunRecoveryEntry) {
             removeRequests.incrementAndGet()
             if (blockRemovals) {
-                check(releaseRemove.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Recovery removal was not released." }
+                check(releaseRemove.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    "Recovery removal was not released."
+                }
             }
             synchronized(entries) { entries -= entry }
         }

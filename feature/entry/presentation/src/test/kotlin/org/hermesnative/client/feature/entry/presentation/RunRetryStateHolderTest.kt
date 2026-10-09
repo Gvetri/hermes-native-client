@@ -7,7 +7,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
@@ -130,7 +129,10 @@ class RunRetryStateHolderTest {
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             awaitState(
                 holder,
-            ) { it.sessionList?.openedSession?.latestRun?.id == failedRunId && !it.sessionList!!.openedSession!!.isSending }
+            ) {
+                it.sessionList?.openedSession?.latestRun?.id == failedRunId &&
+                    !it.sessionList!!.openedSession!!.isSending
+            }
 
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Edited draft"))
             val retryRun = Run(RunId("run-retried"), session.id, "succeeded")
@@ -157,7 +159,10 @@ class RunRetryStateHolderTest {
             awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == retryRun.id }
 
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-            assertEquals(listOf(session.id to "Original request", session.id to "Original request"), gateway.runRequests)
+            assertEquals(
+                listOf(session.id to "Original request", session.id to "Original request"),
+                gateway.runRequests,
+            )
             assertEquals("Edited draft", opened.composerText)
             val failedMessage = opened.messages.single { it.runId == failedRunId && it.isFailedRun }
             assertTrue(failedMessage.isFailedRun)
@@ -202,7 +207,10 @@ class RunRetryStateHolderTest {
             holder.onEvent(EntryUiEvent.RetryRunClicked(externalFailedRunId))
 
             assertTrue(gateway.runRequests.isEmpty())
-            assertEquals(externalFailedRunId, requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).latestRun?.id)
+            assertEquals(
+                externalFailedRunId,
+                requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).latestRun?.id,
+            )
         } finally {
             holder.close()
         }
@@ -302,7 +310,9 @@ class RunRetryStateHolderTest {
         try {
             open(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
-            awaitState(holder) { it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            }
 
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertEquals(listOf(session.id to "Original request"), gateway.runRequests)
@@ -440,7 +450,7 @@ class RunRetryStateHolderTest {
     }
 
     @Test
-    fun retry_after_sse_failure_with_the_persistent_submission_store_and_recovery_registry_creates_exactly_one_new_run() {
+    fun retry_after_sse_failure_with_the_persistent_submission_store_and_recovery_registry_creates_one_new_run() {
         val session = session("session-1")
         val failedRunId = RunId("run-retry-1")
         val retryRunId = RunId("run-retry-2")
@@ -465,27 +475,12 @@ class RunRetryStateHolderTest {
                 )
             }
         val registry = InMemoryRunRecoveryRegistry()
-        val holder =
-            holder(
-                gateway,
-                dispatcher = Dispatchers.Default,
-                recoveryRegistry = registry,
-                uncertaintyStore = DefaultRunSubmissionUncertaintyStore(InMemoryUncertaintyStorage()),
-                persistRunRecoveryEntry = { _, entry -> registry.save(entry) },
-                removeRunRecoveryEntry = { _, entry -> registry.remove(entry) },
-            )
+        val holder = persistentRetryHolder(gateway, registry)
 
         try {
             open(holder, gateway, session.id)
             gateway.setHistory(
-                history(
-                    session.id,
-                    GatewayHistoryMessage(
-                        id = "message-retry-failed",
-                        role = "assistant",
-                        content = "Stable retry failure",
-                    ),
-                ),
+                history(session.id, GatewayHistoryMessage("message-retry-failed", "assistant", "Stable retry failure")),
             )
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Retry this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
@@ -501,11 +496,7 @@ class RunRetryStateHolderTest {
             assertTrue(settled.latestRunRetryAvailable)
 
             holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
-            runBlocking {
-                withTimeoutOrNull(TEST_TIMEOUT_MILLIS) {
-                    holder.uiState.first { it.sessionList?.openedSession?.latestRun?.id == retryRunId }
-                }
-            }
+            awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == retryRunId }
 
             assertEquals(
                 listOf(session.id to "Retry this", session.id to "Retry this"),
@@ -562,7 +553,8 @@ class RunRetryStateHolderTest {
                 enqueueRun(Run(runId, session.id, "running"))
                 blockRunCreation = true
             }
-        val holder = holder(gateway, dispatcher = Dispatchers.Default, onRunSubmissionSettled = gateway.runFinished::countDown)
+        val holder =
+            holder(gateway, dispatcher = Dispatchers.Default, onRunSubmissionSettled = gateway.runFinished::countDown)
 
         try {
             connect(holder, gateway)
@@ -599,7 +591,9 @@ class RunRetryStateHolderTest {
                 }
             assertTrue(failedMessage.retryAvailable)
             holder.onEvent(EntryUiEvent.RetryRunClicked(runId))
-            awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == runId && gateway.runRequests.size == 2 }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.latestRun?.id == runId && gateway.runRequests.size == 2
+            }
 
             assertEquals(listOf(session.id to "OLD SECRET", session.id to "NEW MESSAGE"), gateway.runRequests)
         } finally {
@@ -629,7 +623,9 @@ class RunRetryStateHolderTest {
         try {
             open(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
-            awaitState(holder) { it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED }
+            awaitState(holder) {
+                it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            }
 
             val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertFalse(opened.isSending)
@@ -655,7 +651,9 @@ class RunRetryStateHolderTest {
         EntryStateHolder(
             initialState = EntryState(isGatewayConnectionConfigured = false),
             verifyGatewayConnection =
-                VerifyGatewayConnection(DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())) { _, _ ->
+                VerifyGatewayConnection(
+                    DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
+                ) { _, _ ->
                     GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
                 },
             scope = CoroutineScope(SupervisorJob() + dispatcher),
@@ -670,6 +668,19 @@ class RunRetryStateHolderTest {
             persistRunRecoveryEntry = persistRunRecoveryEntry,
             removeRunRecoveryEntry = removeRunRecoveryEntry,
             onRunSubmissionSettled = onRunSubmissionSettled,
+        )
+
+    private fun persistentRetryHolder(
+        gateway: FakeGateway,
+        registry: InMemoryRunRecoveryRegistry,
+    ): EntryStateHolder =
+        holder(
+            gateway,
+            dispatcher = Dispatchers.Default,
+            recoveryRegistry = registry,
+            uncertaintyStore = DefaultRunSubmissionUncertaintyStore(InMemoryUncertaintyStorage()),
+            persistRunRecoveryEntry = { _, entry -> registry.save(entry) },
+            removeRunRecoveryEntry = { _, entry -> registry.remove(entry) },
         )
 
     private fun connect(
@@ -723,7 +734,13 @@ class RunRetryStateHolderTest {
     private fun userMessage(
         content: String,
         runId: RunId,
-    ): GatewayHistoryMessage = GatewayHistoryMessage(id = "user:$runId.value", role = "user", content = content, runId = runId)
+    ): GatewayHistoryMessage =
+        GatewayHistoryMessage(
+            id = "user:$runId.value",
+            role = "user",
+            content = content,
+            runId = runId,
+        )
 
     private fun failedMessage(
         runId: RunId,
@@ -820,7 +837,9 @@ class RunRetryStateHolderTest {
             runRequests += sessionId to input
             if (blockRunCreation) {
                 runStarted.countDown()
-                check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Timed out waiting for Run release." }
+                check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    "Timed out waiting for Run release."
+                }
             }
             return runResults.removeFirst().getOrThrow()
         }

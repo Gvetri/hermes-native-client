@@ -48,7 +48,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages =
                                                 listOf(
                                                     SessionMessageUiState(
@@ -102,7 +103,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages =
                                                 listOf(
                                                     SessionMessageUiState(
@@ -193,7 +195,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages =
                                                 listOf(
                                                     SessionMessageUiState(
@@ -245,7 +248,8 @@ class SessionHistoryScreenTest {
                                     isRefreshing = true,
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages = emptyList(),
                                         ),
                                 ),
@@ -273,7 +277,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages =
                                                 listOf(
                                                     SessionMessageUiState(
@@ -323,7 +328,13 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Shared Session", null, false),
+                                            session =
+                                                SessionItemUiState(
+                                                    SessionId("session-1"),
+                                                    "Shared Session",
+                                                    null,
+                                                    false,
+                                                ),
                                             messages =
                                                 listOf(
                                                     SessionMessageUiState(
@@ -416,7 +427,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages = listOf(message),
                                         ),
                                 ),
@@ -431,7 +443,10 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Bearer secret123", substring = true).assertDoesNotExist()
         composeTestRule.onNodeWithText("Write a confidential poem", substring = true).assertDoesNotExist()
         composeTestRule.onNodeWithText("Show technical detail").assertDoesNotExist()
-        composeTestRule.onNodeWithText(RunFailureCategory.GATEWAY_REPORTED.safeMessage).performScrollTo().assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(RunFailureCategory.GATEWAY_REPORTED.safeMessage)
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test
@@ -460,7 +475,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages = listOf(message),
                                         ),
                                 ),
@@ -471,7 +487,10 @@ class SessionHistoryScreenTest {
         }
 
         composeTestRule.onNodeWithText("Show technical detail").performScrollTo().performClick()
-        composeTestRule.onNodeWithText("The client could not confirm the Run result.").performScrollTo().assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("The client could not confirm the Run result.")
+            .performScrollTo()
+            .assertIsDisplayed()
         composeTestRule.onNodeWithText("Hide technical detail").performScrollTo().performClick()
         composeTestRule.onNodeWithText("The client could not confirm the Run result.").assertDoesNotExist()
     }
@@ -504,7 +523,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages = listOf(message),
                                         ),
                                 ),
@@ -533,7 +553,8 @@ class SessionHistoryScreenTest {
                                 SessionListUiState(
                                     openedSession =
                                         OpenSessionUiState(
-                                            session = SessionItemUiState(SessionId("session-1"), "Session", null, false),
+                                            session =
+                                                SessionItemUiState(SessionId("session-1"), "Session", null, false),
                                             messages =
                                                 listOf(
                                                     SessionMessageUiState(
@@ -550,7 +571,8 @@ class SessionHistoryScreenTest {
                                                         runStatus = "failed",
                                                         runResult = "Remote failure",
                                                         timestamp = java.time.Instant.parse("2026-09-08T20:01:00Z"),
-                                                        failureSafeMessage = RunFailureCategory.GATEWAY_REPORTED.safeMessage,
+                                                        failureSafeMessage =
+                                                            RunFailureCategory.GATEWAY_REPORTED.safeMessage,
                                                         retryAvailable = true,
                                                     ),
                                                     SessionMessageUiState(
@@ -685,7 +707,8 @@ class SessionHistoryScreenTest {
                                                         content = null,
                                                         runId = RunId("run-failed"),
                                                         runStatus = "failed",
-                                                        failureSafeMessage = RunFailureCategory.GATEWAY_REPORTED.safeMessage,
+                                                        failureSafeMessage =
+                                                            RunFailureCategory.GATEWAY_REPORTED.safeMessage,
                                                         retryAvailable = true,
                                                     ),
                                                 ),
@@ -774,5 +797,10 @@ class SessionHistoryScreenTest {
             ),
         )
 
-    private fun transcriptMessage(index: Int): SessionMessageUiState = message("message-$index", "user", "Transcript message $index")
+    private fun transcriptMessage(index: Int): SessionMessageUiState =
+        message(
+            "message-$index",
+            "user",
+            "Transcript message $index",
+        )
 }

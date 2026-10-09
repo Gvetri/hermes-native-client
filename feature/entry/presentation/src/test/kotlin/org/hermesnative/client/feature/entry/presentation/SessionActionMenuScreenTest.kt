@@ -151,7 +151,8 @@ class SessionActionMenuScreenTest {
             .performScrollTo().performClick()
         composeTestRule.onNodeWithText("Pin Session").assertIsDisplayed()
         composeTestRule.runOnUiThread {
-            val popup = WindowInspector.getGlobalWindowViews().single { it !== composeTestRule.activity.window.decorView }
+            val popup =
+                WindowInspector.getGlobalWindowViews().single { it !== composeTestRule.activity.window.decorView }
             popup.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
             popup.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
         }

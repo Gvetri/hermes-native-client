@@ -67,7 +67,9 @@ data class SessionMessageUiState(
     val retryAvailable: Boolean = false,
 ) {
     val isFailedRun: Boolean
-        get() = runState == RunPresentationState.FAILED || runStatus?.toRunPresentationState() == RunPresentationState.FAILED
+        get() =
+            runState == RunPresentationState.FAILED ||
+                runStatus?.toRunPresentationState() == RunPresentationState.FAILED
 }
 
 enum class SessionHistoryErrorCategory(
