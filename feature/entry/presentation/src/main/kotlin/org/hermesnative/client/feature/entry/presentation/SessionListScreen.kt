@@ -245,6 +245,8 @@ internal fun SessionListPane(
     }
 }
 
+private const val IME_VISIBLE_HEIGHT_DIVISOR = 6
+
 @Composable
 private fun rememberLegacyImeVisibility(): Boolean {
     val view = LocalView.current
@@ -256,7 +258,9 @@ private fun rememberLegacyImeVisibility(): Boolean {
             ViewTreeObserver.OnGlobalLayoutListener {
                 view.getWindowVisibleDisplayFrame(visibleFrame)
                 val rootHeight = rootView.height
-                imeVisible = rootHeight > 0 && rootHeight - visibleFrame.height() > rootHeight / 6
+                imeVisible =
+                    rootHeight > 0 &&
+                    rootHeight - visibleFrame.height() > rootHeight / IME_VISIBLE_HEIGHT_DIVISOR
             }
         view.viewTreeObserver.addOnGlobalLayoutListener(listener)
         listener.onGlobalLayout()

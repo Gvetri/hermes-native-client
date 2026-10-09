@@ -63,6 +63,16 @@ class JourneyGatewayProcess private constructor(
     }
 
     companion object {
+        private const val HTTP_OK = 200
+        private const val HTTP_CREATED = 201
+        private const val HTTP_ACCEPTED = 202
+        private const val HTTP_BAD_REQUEST = 400
+        private const val HTTP_UNAUTHORIZED = 401
+        private const val HTTP_NOT_FOUND = 404
+        private const val HTTP_METHOD_NOT_ALLOWED = 405
+        private const val HTTP_SERVICE_UNAVAILABLE = 503
+        private const val DEFAULT_PAGE_LIMIT = 50
+
         fun start(
             scenario: JourneyScenario,
             keystoreFile: File? = null,
@@ -84,18 +94,18 @@ class JourneyGatewayProcess private constructor(
             val behavior = JourneyGatewayBehavior(scenario)
             server.createContext("/health") { exchange ->
                 record(exchange, behavior)
-                respond(exchange, 200, """{"status":"synthetic"}""")
+                respond(exchange, HTTP_OK, """{"status":"synthetic"}""")
             }
             server.createContext("/__fixture/telemetry") { exchange ->
                 record(exchange, behavior)
-                respond(exchange, 200, behavior.telemetryJson())
+                respond(exchange, HTTP_OK, behavior.telemetryJson())
             }
             server.createContext("/v1/capabilities") { exchange ->
                 record(exchange, behavior)
                 if (unauthorized(exchange, behavior)) {
-                    respond(exchange, 401, """{"error":"unauthorized"}""")
+                    respond(exchange, HTTP_UNAUTHORIZED, """{"error":"unauthorized"}""")
                 } else {
-                    respond(exchange, 200, capabilitiesJson(scenario))
+                    respond(exchange, HTTP_OK, capabilitiesJson(scenario))
                 }
             }
             server.createContext("/api/sessions") { exchange ->
@@ -109,7 +119,7 @@ class JourneyGatewayProcess private constructor(
             }
             server.createContext("/") { exchange ->
                 record(exchange, behavior)
-                respond(exchange, 404, """{"error":"not-found"}""")
+                respond(exchange, HTTP_NOT_FOUND, """{"error":"not-found"}""")
             }
             server.start()
             val scheme = if (scenario.tls) "https" else "http"
@@ -194,25 +204,25 @@ class JourneyGatewayProcess private constructor(
         ) {
             val body = record(exchange, behavior)
             if (unauthorized(exchange, behavior)) {
-                respond(exchange, 401, """{"error":"unauthorized"}""")
+                respond(exchange, HTTP_UNAUTHORIZED, """{"error":"unauthorized"}""")
                 return
             }
             when (exchange.requestMethod) {
                 "GET" -> {
                     if (behavior.consumeFailNextSessionList()) {
-                        respond(exchange, 503, """{"error":"synthetic-refresh-failure"}""")
+                        respond(exchange, HTTP_SERVICE_UNAVAILABLE, """{"error":"synthetic-refresh-failure"}""")
                         return
                     }
                     val query = GatewayHttpSupport.queryParameters(exchange.requestURI)
-                    val requestedLimit = query["limit"]?.toIntOrNull() ?: 50
+                    val requestedLimit = query["limit"]?.toIntOrNull() ?: DEFAULT_PAGE_LIMIT
                     val offset = query["offset"]?.toIntOrNull() ?: 0
                     if (requestedLimit <= 0 || offset < 0) {
-                        respond(exchange, 400, """{"error":"invalid-pagination"}""")
+                        respond(exchange, HTTP_BAD_REQUEST, """{"error":"invalid-pagination"}""")
                         return
                     }
                     val matching = behavior.sessions.toList()
                     if (offset > matching.size) {
-                        respond(exchange, 400, """{"error":"offset-out-of-range"}""")
+                        respond(exchange, HTTP_BAD_REQUEST, """{"error":"offset-out-of-range"}""")
                         return
                     }
                     val serverCap = behavior.scenario.sessionPageSize ?: requestedLimit
@@ -222,7 +232,7 @@ class JourneyGatewayProcess private constructor(
                     val sessionsJson = page.joinToString(",") { sessionJson(it) }
                     respond(
                         exchange,
-                        200,
+                        HTTP_OK,
                         """{"object":"list","data":[$sessionsJson],"limit":$effectiveLimit,"offset":$offset,"has_more":$hasMore}""",
                     )
                 }
@@ -238,9 +248,9 @@ class JourneyGatewayProcess private constructor(
                     behavior.sessions.removeIf { it.id == created.id }
                     behavior.sessions += created
                     behavior.sessionMutations += "create" to created.id
-                    respond(exchange, 201, """{"object":"hermes.session","session":${sessionJson(created)}}""")
+                    respond(exchange, HTTP_CREATED, """{"object":"hermes.session","session":${sessionJson(created)}}""")
                 }
-                else -> respond(exchange, 405, """{"error":"method-not-allowed"}""")
+                else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, """{"error":"method-not-allowed"}""")
             }
         }
 
@@ -250,7 +260,7 @@ class JourneyGatewayProcess private constructor(
         ) {
             val body = record(exchange, behavior)
             if (unauthorized(exchange, behavior)) {
-                respond(exchange, 401, """{"error":"unauthorized"}""")
+                respond(exchange, HTTP_UNAUTHORIZED, """{"error":"unauthorized"}""")
                 return
             }
             val resource = exchange.requestURI.path.removePrefix("/api/sessions/")
@@ -258,20 +268,24 @@ class JourneyGatewayProcess private constructor(
             val sessionId = segments.firstOrNull().orEmpty()
             val session = behavior.sessions.firstOrNull { it.id == sessionId }
             if (session == null || segments.size !in 1..2) {
-                respond(exchange, 404, """{"error":"session-not-found"}""")
+                respond(exchange, HTTP_NOT_FOUND, """{"error":"session-not-found"}""")
                 return
             }
             when (exchange.requestMethod) {
                 "GET" ->
                     when {
                         segments.size == 1 ->
-                            respond(exchange, 200, """{"object":"hermes.session","session":${sessionJson(session)}}""")
-                        segments[1] == "messages" -> respond(exchange, 200, historyJson(behavior, session))
-                        else -> respond(exchange, 404, """{"error":"not-found"}""")
+                            respond(
+                                exchange,
+                                HTTP_OK,
+                                """{"object":"hermes.session","session":${sessionJson(session)}}""",
+                            )
+                        segments[1] == "messages" -> respond(exchange, HTTP_OK, historyJson(behavior, session))
+                        else -> respond(exchange, HTTP_NOT_FOUND, """{"error":"not-found"}""")
                     }
                 "PATCH" -> {
                     if (segments.size != 1) {
-                        respond(exchange, 404, """{"error":"not-found"}""")
+                        respond(exchange, HTTP_NOT_FOUND, """{"error":"not-found"}""")
                     } else {
                         val pinned = parseBooleanField(body, "pinned")
                         val updated =
@@ -290,23 +304,23 @@ class JourneyGatewayProcess private constructor(
                                 "unpin"
                             }
                         behavior.sessionMutations += operation to sessionId
-                        respond(exchange, 200, """{"object":"hermes.session","session":${sessionJson(updated)}}""")
+                        respond(exchange, HTTP_OK, """{"object":"hermes.session","session":${sessionJson(updated)}}""")
                     }
                 }
                 "DELETE" -> {
                     if (segments.size != 1) {
-                        respond(exchange, 404, """{"error":"not-found"}""")
+                        respond(exchange, HTTP_NOT_FOUND, """{"error":"not-found"}""")
                     } else {
                         behavior.sessions.removeIf { it.id == sessionId }
                         behavior.sessionMutations += "delete" to sessionId
                         respond(
                             exchange,
-                            200,
+                            HTTP_OK,
                             """{"object":"hermes.session.deleted","id":${sessionId.jsonValue()},"deleted":true}""",
                         )
                     }
                 }
-                else -> respond(exchange, 405, """{"error":"method-not-allowed"}""")
+                else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, """{"error":"method-not-allowed"}""")
             }
         }
 
@@ -316,12 +330,12 @@ class JourneyGatewayProcess private constructor(
         ) {
             val body = record(exchange, behavior)
             if (unauthorized(exchange, behavior)) {
-                respond(exchange, 401, """{"error":"unauthorized"}""")
+                respond(exchange, HTTP_UNAUTHORIZED, """{"error":"unauthorized"}""")
                 return
             }
             if (exchange.requestURI.path == "/v1/runs") {
                 if (exchange.requestMethod != "POST") {
-                    respond(exchange, 405, """{"error":"method-not-allowed"}""")
+                    respond(exchange, HTTP_METHOD_NOT_ALLOWED, """{"error":"method-not-allowed"}""")
                     return
                 }
                 handleRunCreate(exchange, behavior, body)
@@ -337,22 +351,22 @@ class JourneyGatewayProcess private constructor(
         ) {
             val sessionId = parseStringField(body, "session_id")
             if (sessionId == null || parseRunInput(body) == null) {
-                respond(exchange, 400, """{"error":"invalid-run-request"}""")
+                respond(exchange, HTTP_BAD_REQUEST, """{"error":"invalid-run-request"}""")
                 return
             }
             if (behavior.sessions.none { it.id == sessionId }) {
-                respond(exchange, 404, """{"error":"session-not-found"}""")
+                respond(exchange, HTTP_NOT_FOUND, """{"error":"session-not-found"}""")
                 return
             }
             val script =
                 behavior.nextRunScript(sessionId)
                     ?: run {
-                        respond(exchange, 404, """{"error":"no-synthetic-run"}""")
+                        respond(exchange, HTTP_NOT_FOUND, """{"error":"no-synthetic-run"}""")
                         return
                     }
             respond(
                 exchange,
-                202,
+                HTTP_ACCEPTED,
                 """{"run_id":${script.runId.jsonValue()},"status":${script.createStatus.jsonValue()},"replayed":false}""",
             )
         }
@@ -365,7 +379,7 @@ class JourneyGatewayProcess private constructor(
             val segments = resource.split('/')
             val runId = segments.firstOrNull().orEmpty()
             if (runId.isEmpty() || segments.size !in 1..2 || (segments.size == 2 && segments[1] != "events")) {
-                respond(exchange, 404, """{"error":"run-not-found"}""")
+                respond(exchange, HTTP_NOT_FOUND, """{"error":"run-not-found"}""")
                 return
             }
             when (exchange.requestMethod) {
@@ -375,12 +389,12 @@ class JourneyGatewayProcess private constructor(
                     } else {
                         val status = behavior.runStatus(runId)
                         if (status == null) {
-                            respond(exchange, 404, """{"error":"run-not-found"}""")
+                            respond(exchange, HTTP_NOT_FOUND, """{"error":"run-not-found"}""")
                         } else {
                             behavior.runStatusRequests.incrementAndGet()
                             respond(
                                 exchange,
-                                200,
+                                HTTP_OK,
                                 """{"object":"hermes.run","run_id":${runId.jsonValue()},"session_id":${behavior.sessionIdOf(
                                     runId,
                                 ).jsonValue()},"status":${status.jsonValue()},"updated_at":1757325600.0}""",
@@ -388,7 +402,7 @@ class JourneyGatewayProcess private constructor(
                         }
                     }
                 }
-                else -> respond(exchange, 405, """{"error":"method-not-allowed"}""")
+                else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, """{"error":"method-not-allowed"}""")
             }
         }
 
@@ -399,13 +413,13 @@ class JourneyGatewayProcess private constructor(
         ) {
             val script =
                 behavior.scenario.runs.firstOrNull { it.runId == runId } ?: run {
-                    respond(exchange, 404, """{"error":"run-not-found"}""")
+                    respond(exchange, HTTP_NOT_FOUND, """{"error":"run-not-found"}""")
                     return
                 }
             behavior.sseOpened.computeIfAbsent(runId) { AtomicInteger() }.incrementAndGet()
             exchange.responseHeaders.add("Content-Type", "text/event-stream")
             exchange.responseHeaders.add("Cache-Control", "no-cache")
-            exchange.sendResponseHeaders(200, 0)
+            exchange.sendResponseHeaders(HTTP_OK, 0)
             try {
                 val interruptAfter = script.interruptAfterEvents
                 val events = script.observation

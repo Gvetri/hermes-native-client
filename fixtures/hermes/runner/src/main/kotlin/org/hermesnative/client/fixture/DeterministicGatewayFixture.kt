@@ -8,6 +8,10 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 
+private const val READINESS_TIMEOUT_MILLIS = 1_000
+private const val HTTP_SUCCESS_FIRST = 200
+private const val HTTP_SUCCESS_LAST = 399
+
 /** Lifecycle stages exposed to deterministic integration tests. */
 enum class FixtureLifecycleState {
     NEW,
@@ -324,11 +328,16 @@ private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
     private fun get(uri: URI): HttpResponse {
         val connection = uri.toURL().openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
-        connection.connectTimeout = 1_000
-        connection.readTimeout = 1_000
+        connection.connectTimeout = READINESS_TIMEOUT_MILLIS
+        connection.readTimeout = READINESS_TIMEOUT_MILLIS
         return try {
             val status = connection.responseCode
-            val stream = if (status in 200..399) connection.inputStream else connection.errorStream
+            val stream =
+                if (status in HTTP_SUCCESS_FIRST..HTTP_SUCCESS_LAST) {
+                    connection.inputStream
+                } else {
+                    connection.errorStream
+                }
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             HttpResponse(status, body)
         } catch (error: Exception) {

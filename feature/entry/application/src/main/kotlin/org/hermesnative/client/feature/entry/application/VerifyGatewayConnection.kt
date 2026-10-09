@@ -74,6 +74,10 @@ class VerifyGatewayConnection(
 fun normalizeGatewayEndpoint(endpoint: String): String = GatewayEndpointValidator.normalize(endpoint)
 
 private object GatewayEndpointValidator {
+    private const val MIN_PORT = 1
+    private const val MAX_PORT = 65535
+    private const val HEX_RADIX = 16
+    private const val HTTPS_PORT = 443
     private val percentEscapePattern = Regex("%([0-9a-fA-F]{2})")
     private val endpointPattern =
         Regex(
@@ -83,20 +87,21 @@ private object GatewayEndpointValidator {
     fun normalize(endpoint: String): String {
         val normalizedEndpoint = endpoint.trim()
         val match = endpointPattern.matchEntire(normalizedEndpoint) ?: throw invalidAddress()
-        val host = match.groupValues[1].lowercase(Locale.ROOT)
-        val port = match.groupValues[2].takeIf(String::isNotEmpty)?.toIntOrNull()
-        val path = match.groupValues[3].trimEnd('/')
+        val (hostMatch, portMatch, pathMatch) = match.destructured
+        val host = hostMatch.lowercase(Locale.ROOT)
+        val port = portMatch.takeIf(String::isNotEmpty)?.toIntOrNull()
+        val path = pathMatch.trimEnd('/')
 
         if (
-            host.split('.').any(::invalidHostLabel) ||
-            (port != null && port !in 1..65535) ||
+            invalidHost(host) ||
+            invalidPort(port) ||
             !hasValidPercentEncoding(normalizedEndpoint)
         ) {
             throw invalidAddress()
         }
         val canonicalPath =
             path.replace(percentEscapePattern) { escape ->
-                val character = escape.groupValues[1].toInt(16).toChar()
+                val character = escape.groupValues[1].toInt(HEX_RADIX).toChar()
                 if (character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "-._~") {
                     character.toString()
                 } else {
@@ -106,10 +111,14 @@ private object GatewayEndpointValidator {
         return buildString {
             append("https://")
             append(host)
-            port?.takeUnless { it == 443 }?.let { append(':').append(it) }
+            port?.takeUnless { it == HTTPS_PORT }?.let { append(':').append(it) }
             append(canonicalPath)
         }
     }
+
+    private fun invalidHost(host: String): Boolean = host.split('.').any(::invalidHostLabel)
+
+    private fun invalidPort(port: Int?): Boolean = port != null && port !in MIN_PORT..MAX_PORT
 
     private fun invalidHostLabel(label: String): Boolean =
         label.isEmpty() ||

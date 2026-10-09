@@ -97,7 +97,7 @@ class AndroidKeyStoreGatewayCredentialStore(
                         .Builder(
                             KEY_ALIAS,
                             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-                        ).setKeySize(256)
+                        ).setKeySize(KEY_SIZE_BITS)
                         .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                         .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                         .setRandomizedEncryptionRequired(true)
@@ -116,6 +116,7 @@ class AndroidKeyStoreGatewayCredentialStore(
         const val KEY_ALIAS = "gateway_credential_key_v1"
 
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val KEY_SIZE_BITS = 256
         private val storageLock = Any()
     }
 }

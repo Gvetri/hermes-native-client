@@ -52,22 +52,32 @@ private val HermesTypography = Typography()
 
 private val HermesShapes = Shapes()
 
+private const val LIGHT_PRIMARY_COLOR = 0xFF4E5D8C
+private const val LIGHT_SECONDARY_COLOR = 0xFF5D5F71
+private const val LIGHT_BACKGROUND_COLOR = 0xFFF9F9FF
+private const val LIGHT_SURFACE_COLOR = 0xFFF9F9FF
+private const val DARK_PRIMARY_COLOR = 0xFFB9C4FF
+private const val DARK_ON_PRIMARY_COLOR = 0xFF1F2A58
+private const val DARK_SECONDARY_COLOR = 0xFFC5C5DC
+private const val DARK_BACKGROUND_COLOR = 0xFF121318
+private const val DARK_SURFACE_COLOR = 0xFF121318
+
 private val HermesLightColorScheme =
     lightColorScheme(
-        primary = Color(0xFF4E5D8C),
+        primary = Color(LIGHT_PRIMARY_COLOR),
         onPrimary = Color.White,
-        secondary = Color(0xFF5D5F71),
-        background = Color(0xFFF9F9FF),
-        surface = Color(0xFFF9F9FF),
+        secondary = Color(LIGHT_SECONDARY_COLOR),
+        background = Color(LIGHT_BACKGROUND_COLOR),
+        surface = Color(LIGHT_SURFACE_COLOR),
     )
 
 private val HermesDarkColorScheme =
     darkColorScheme(
-        primary = Color(0xFFB9C4FF),
-        onPrimary = Color(0xFF1F2A58),
-        secondary = Color(0xFFC5C5DC),
-        background = Color(0xFF121318),
-        surface = Color(0xFF121318),
+        primary = Color(DARK_PRIMARY_COLOR),
+        onPrimary = Color(DARK_ON_PRIMARY_COLOR),
+        secondary = Color(DARK_SECONDARY_COLOR),
+        background = Color(DARK_BACKGROUND_COLOR),
+        surface = Color(DARK_SURFACE_COLOR),
     )
 
 private val HermesSpacingScale =

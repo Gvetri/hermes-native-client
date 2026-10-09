@@ -22,6 +22,9 @@ import org.hermesnative.client.feature.entry.domain.satisfies
 import java.security.GeneralSecurityException
 import javax.net.ssl.SSLException
 
+private const val HTTP_UNAUTHORIZED = 401
+private const val HTTP_FORBIDDEN = 403
+
 class DefaultGatewayClient(
     endpoint: String,
     bearerToken: String,
@@ -295,7 +298,7 @@ class DefaultGatewayClient(
             transportCall {
                 transport.execute(request(method, path, query, body))
             }
-        if (response.statusCode == 401 || response.statusCode == 403) {
+        if (response.statusCode == HTTP_UNAUTHORIZED || response.statusCode == HTTP_FORBIDDEN) {
             throw GatewayException(GatewayErrorCategory.AUTHENTICATION_FAILED)
         }
         if (response.statusCode != expectedStatus) {

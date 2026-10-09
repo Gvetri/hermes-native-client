@@ -70,11 +70,12 @@ class SharedPreferencesRunRecoveryStorage(
         return MessageDigest
             .getInstance("SHA-256")
             .digest(canonicalValue.toByteArray(StandardCharsets.UTF_8))
-            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and BYTE_MASK) }
     }
 
     private companion object {
         const val PREFERENCES_NAME = "gateway_run_recovery"
+        private const val BYTE_MASK = 0xFF
         const val ENTRIES_KEY = "entries"
         const val UNBOUND_ENDPOINT = "unbound"
     }

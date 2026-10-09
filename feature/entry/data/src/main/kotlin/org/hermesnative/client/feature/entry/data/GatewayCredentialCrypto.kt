@@ -28,6 +28,7 @@ data class EncryptedGatewayCredentialRecord(
 
     companion object {
         const val FORMAT_VERSION = 1
+        private const val BYTE_MASK = 0xFF
         private const val HEADER_SIZE = 1 + 1 + Int.SIZE_BYTES
         private const val MIN_IV_SIZE = 12
         private const val MAX_IV_SIZE = 16
@@ -35,8 +36,8 @@ data class EncryptedGatewayCredentialRecord(
         fun decode(bytes: ByteArray): EncryptedGatewayCredentialRecord {
             require(bytes.size >= HEADER_SIZE) { "Invalid Gateway credential record." }
             val buffer = ByteBuffer.wrap(bytes)
-            val version = buffer.get().toInt() and 0xff
-            val ivSize = buffer.get().toInt() and 0xff
+            val version = buffer.get().toInt() and BYTE_MASK
+            val ivSize = buffer.get().toInt() and BYTE_MASK
             val ciphertextSize = buffer.int
             require(version == FORMAT_VERSION) { "Unsupported Gateway credential record." }
             require(ivSize in MIN_IV_SIZE..MAX_IV_SIZE) { "Invalid Gateway credential record." }

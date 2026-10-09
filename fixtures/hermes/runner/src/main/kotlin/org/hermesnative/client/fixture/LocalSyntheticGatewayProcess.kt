@@ -13,6 +13,16 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
+private const val HTTP_OK = 200
+private const val HTTP_CREATED = 201
+private const val HTTP_BAD_REQUEST = 400
+private const val HTTP_NOT_FOUND = 404
+private const val HTTP_METHOD_NOT_ALLOWED = 405
+private const val HTTP_SERVICE_UNAVAILABLE = 503
+private const val DEFAULT_PAGE_LIMIT = 50
+private const val MIN_HTTP_STATUS = 100
+private const val MAX_HTTP_STATUS = 599
+
 data class SyntheticGatewayMessage(
     val id: String,
     val role: String?,
@@ -48,8 +58,8 @@ class SyntheticGatewayBehavior(
     initialSessions: List<SyntheticGatewaySession> = emptyList(),
 ) {
     init {
-        require(healthStatus in 100..599) { "healthStatus must be an HTTP status." }
-        require(capabilityStatus in 100..599) { "capabilityStatus must be an HTTP status." }
+        require(healthStatus in MIN_HTTP_STATUS..MAX_HTTP_STATUS) { "healthStatus must be an HTTP status." }
+        require(capabilityStatus in MIN_HTTP_STATUS..MAX_HTTP_STATUS) { "capabilityStatus must be an HTTP status." }
     }
 
     val sessions = CopyOnWriteArrayList(initialSessions)
@@ -163,7 +173,7 @@ class LocalSyntheticGatewayProcess private constructor(
             }
             server.createContext("/") { exchange ->
                 recordRequest(exchange, behavior)
-                respond(exchange, 404, "{\"error\":\"not-found\"}")
+                respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
             }
             server.start()
             return LocalSyntheticGatewayProcess(
@@ -196,39 +206,11 @@ class LocalSyntheticGatewayProcess private constructor(
         ) {
             val body = recordRequest(exchange, behavior)
             if (exchange.requestURI.path != "/api/sessions") {
-                respond(exchange, 404, "{\"error\":\"not-found\"}")
+                respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
                 return
             }
             when (exchange.requestMethod) {
-                "GET" -> {
-                    if (behavior.failNextSessionList) {
-                        behavior.failNextSessionList = false
-                        respond(exchange, 503, "{\"error\":\"synthetic-refresh-failure\"}")
-                        return
-                    }
-                    val query = queryParameters(exchange.requestURI)
-                    val requestedLimit = query["limit"]?.toIntOrNull() ?: 50
-                    val offset = query["offset"]?.toIntOrNull() ?: 0
-                    if (requestedLimit <= 0 || offset < 0) {
-                        respond(exchange, 400, "{\"error\":\"invalid-pagination\"}")
-                        return
-                    }
-                    val effectiveLimit = minOf(requestedLimit, behavior.sessionPageSize ?: requestedLimit)
-                    val matchingSessions = behavior.sessions.toList()
-                    if (offset > matchingSessions.size) {
-                        respond(exchange, 400, "{\"error\":\"offset-out-of-range\"}")
-                        return
-                    }
-                    val page = matchingSessions.drop(offset).take(effectiveLimit)
-                    val hasMore = offset + page.size < matchingSessions.size
-                    val sessions = page.joinToString(",") { sessionJson(it) }
-                    respond(
-                        exchange,
-                        200,
-                        "{\"object\":\"list\",\"data\":[$sessions],\"limit\":$effectiveLimit,\"offset\":$offset," +
-                            "\"has_more\":$hasMore}",
-                    )
-                }
+                "GET" -> handleSessionListRead(exchange, behavior)
                 "POST" -> {
                     val created =
                         SyntheticGatewaySession(
@@ -247,11 +229,56 @@ class LocalSyntheticGatewayProcess private constructor(
                         )
                     behavior.sessions.removeIf { it.id == created.id }
                     behavior.sessions += created
-                    respond(exchange, 201, "{\"object\":\"hermes.session\",\"session\":${sessionJson(created)}}")
+                    respond(
+                        exchange,
+                        HTTP_CREATED,
+                        "{\"object\":\"hermes.session\",\"session\":${sessionJson(created)}}",
+                    )
                 }
-                else -> respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
+                else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, "{\"error\":\"method-not-allowed\"}")
             }
         }
+
+        private fun handleSessionListRead(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+        ) {
+            if (behavior.failNextSessionList) {
+                behavior.failNextSessionList = false
+                respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-refresh-failure\"}")
+                return
+            }
+            val query = queryParameters(exchange.requestURI)
+            val requestedLimit = query["limit"]?.toIntOrNull() ?: DEFAULT_PAGE_LIMIT
+            val offset = query["offset"]?.toIntOrNull() ?: 0
+            val paginationFailure = sessionListPaginationFailure(requestedLimit, offset, behavior)
+            if (paginationFailure != null) {
+                respond(exchange, HTTP_BAD_REQUEST, paginationFailure)
+                return
+            }
+            val effectiveLimit = minOf(requestedLimit, behavior.sessionPageSize ?: requestedLimit)
+            val matchingSessions = behavior.sessions.toList()
+            val page = matchingSessions.drop(offset).take(effectiveLimit)
+            val hasMore = offset + page.size < matchingSessions.size
+            val sessions = page.joinToString(",") { sessionJson(it) }
+            respond(
+                exchange,
+                HTTP_OK,
+                "{\"object\":\"list\",\"data\":[$sessions],\"limit\":$effectiveLimit,\"offset\":$offset," +
+                    "\"has_more\":$hasMore}",
+            )
+        }
+
+        private fun sessionListPaginationFailure(
+            requestedLimit: Int,
+            offset: Int,
+            behavior: SyntheticGatewayBehavior,
+        ): String? =
+            when {
+                requestedLimit <= 0 || offset < 0 -> "{\"error\":\"invalid-pagination\"}"
+                offset > behavior.sessions.size -> "{\"error\":\"offset-out-of-range\"}"
+                else -> null
+            }
 
         private fun handleSessionResourceRequest(
             exchange: HttpExchange,
@@ -263,7 +290,7 @@ class LocalSyntheticGatewayProcess private constructor(
             val sessionId = segments.firstOrNull().orEmpty()
             val session = behavior.sessions.firstOrNull { it.id == sessionId }
             if (session == null || segments.size !in 1..2) {
-                respond(exchange, 404, "{\"error\":\"session-not-found\"}")
+                respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"session-not-found\"}")
                 return
             }
 
@@ -271,64 +298,84 @@ class LocalSyntheticGatewayProcess private constructor(
                 "GET" ->
                     when {
                         segments.size == 1 ->
-                            respond(exchange, 200, "{\"object\":\"hermes.session\",\"session\":${sessionJson(session)}}")
-                        segments[1] == "messages" -> respond(exchange, 200, historyJson(session))
-                        else -> respond(exchange, 404, "{\"error\":\"not-found\"}")
+                            respond(
+                                exchange,
+                                HTTP_OK,
+                                "{\"object\":\"hermes.session\",\"session\":${sessionJson(session)}}",
+                            )
+                        segments[1] == "messages" -> respond(exchange, HTTP_OK, historyJson(session))
+                        else -> respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
                     }
                 "PATCH" -> {
                     if (segments.size != 1) {
-                        respond(exchange, 404, "{\"error\":\"not-found\"}")
+                        respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
                     } else {
                         when {
                             bodyContainsField(body, "pinned") -> {
                                 val pinned = bodyBoolean(body, "pinned")
                                 if (pinned == null) {
-                                    respond(exchange, 400, "{\"error\":\"invalid-session-field\"}")
+                                    respond(exchange, HTTP_BAD_REQUEST, "{\"error\":\"invalid-session-field\"}")
                                     return
                                 }
                                 if (pinned && behavior.failNextSessionPin) {
                                     behavior.failNextSessionPin = false
-                                    respond(exchange, 503, "{\"error\":\"synthetic-pin-failure\"}")
+                                    respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-pin-failure\"}")
                                     return
                                 }
                                 if (!pinned && behavior.failNextSessionUnpin) {
                                     behavior.failNextSessionUnpin = false
-                                    respond(exchange, 503, "{\"error\":\"synthetic-unpin-failure\"}")
+                                    respond(
+                                        exchange,
+                                        HTTP_SERVICE_UNAVAILABLE,
+                                        "{\"error\":\"synthetic-unpin-failure\"}",
+                                    )
                                     return
                                 }
                                 val updated = session.copy(pinned = pinned)
                                 replaceSession(behavior, updated)
-                                respond(exchange, 200, "{\"object\":\"hermes.session\",\"session\":${sessionJson(updated)}}")
+                                respond(
+                                    exchange,
+                                    HTTP_OK,
+                                    "{\"object\":\"hermes.session\",\"session\":${sessionJson(updated)}}",
+                                )
                             }
                             else -> {
                                 if (behavior.failNextSessionRename) {
                                     behavior.failNextSessionRename = false
-                                    respond(exchange, 503, "{\"error\":\"synthetic-rename-failure\"}")
+                                    respond(
+                                        exchange,
+                                        HTTP_SERVICE_UNAVAILABLE,
+                                        "{\"error\":\"synthetic-rename-failure\"}",
+                                    )
                                     return
                                 }
                                 val renamed = session.copy(title = parseTitle(body))
                                 replaceSession(behavior, renamed)
-                                respond(exchange, 200, "{\"object\":\"hermes.session\",\"session\":${sessionJson(renamed)}}")
+                                respond(
+                                    exchange,
+                                    HTTP_OK,
+                                    "{\"object\":\"hermes.session\",\"session\":${sessionJson(renamed)}}",
+                                )
                             }
                         }
                     }
                 }
                 "DELETE" -> {
                     if (segments.size != 1) {
-                        respond(exchange, 404, "{\"error\":\"not-found\"}")
+                        respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
                     } else if (behavior.failNextSessionDelete) {
                         behavior.failNextSessionDelete = false
-                        respond(exchange, 503, "{\"error\":\"synthetic-delete-failure\"}")
+                        respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-delete-failure\"}")
                     } else {
                         behavior.sessions.removeIf { it.id == sessionId }
                         respond(
                             exchange,
-                            200,
+                            HTTP_OK,
                             "{\"object\":\"hermes.session.deleted\",\"id\":${quote(sessionId)},\"deleted\":true}",
                         )
                     }
                 }
-                else -> respond(exchange, 405, "{\"error\":\"method-not-allowed\"}")
+                else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, "{\"error\":\"method-not-allowed\"}")
             }
         }
 

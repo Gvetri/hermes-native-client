@@ -10,6 +10,13 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import java.io.File
 
+private const val MIN_PORT = 1
+private const val MAX_PORT = 65535
+private const val HEX_RADIX = 16
+private const val SURROGATE_RANGE_END = 0xD7FF
+private const val SURROGATE_RANGE_START = 0xE000
+private const val CODE_POINT_MAX = 0xFFFF
+
 /** The pinned `/v1/capabilities` endpoint names a journey can advertise. */
 object JourneyEndpointCatalog {
     data class Endpoint(
@@ -53,7 +60,7 @@ data class JourneyScenario(
         require(name.matches(Regex("[a-z][a-z0-9-]*"))) {
             "Journey scenario names must use lowercase kebab-case."
         }
-        require(port in 1..65535) { "Journey scenario port must be valid." }
+        require(port in MIN_PORT..MAX_PORT) { "Journey scenario port must be valid." }
         require(capabilities.isNotEmpty()) { "Journey scenarios must declare capabilities." }
     }
 }
@@ -171,8 +178,8 @@ object JourneyScenarioParser {
 
     private fun normalizeUnicodeEscapes(text: String): String =
         UNICODE_ESCAPE.replace(text) { match ->
-            val codePoint = match.groupValues[1].toInt(16)
-            if (codePoint in 0..0xD7FF || codePoint in 0xE000..0xFFFF) {
+            val codePoint = match.groupValues[1].toInt(HEX_RADIX)
+            if (codePoint in 0..SURROGATE_RANGE_END || codePoint in SURROGATE_RANGE_START..CODE_POINT_MAX) {
                 codePoint.toChar().toString()
             } else {
                 match.value

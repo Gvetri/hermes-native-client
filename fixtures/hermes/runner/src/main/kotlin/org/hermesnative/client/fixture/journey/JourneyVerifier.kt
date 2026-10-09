@@ -24,11 +24,13 @@ import javax.net.ssl.TrustManagerFactory
  * Arguments: <telemetry-url> <scenario-name> [keystore-file] [keystore-password]
  */
 fun main(args: Array<String>) {
-    require(args.size in 2..4) { "Usage: JourneyVerifier <telemetry-url> <scenario-name> [keystore-file] [keystore-password]" }
+    require(args.size in MIN_ARGUMENT_COUNT..MAX_ARGUMENT_COUNT) {
+        "Usage: JourneyVerifier <telemetry-url> <scenario-name> [keystore-file] [keystore-password]"
+    }
     val telemetryUrl = URI.create(args[0])
     val scenarioName = args[1]
     val keystoreFile = args.getOrNull(2)?.let(::File)
-    val keystorePassword = args.getOrNull(3) ?: DEFAULT_KEYSTORE_PASSWORD
+    val keystorePassword = args.getOrNull(KEYSTORE_PASSWORD_ARG_INDEX) ?: DEFAULT_KEYSTORE_PASSWORD
     val telemetry = fetchTelemetry(telemetryUrl, keystoreFile, keystorePassword)
     JourneyInvariants.verify(scenarioName, telemetry)
     if (scenarioName == "active-run-isolation") {
@@ -73,15 +75,15 @@ internal fun fetchTelemetry(
         } else {
             telemetryUrl.toURL().openConnection() as HttpURLConnection
         }
-    connection.connectTimeout = 5_000
-    connection.readTimeout = 5_000
+    connection.connectTimeout = TELEMETRY_TIMEOUT_MILLIS
+    connection.readTimeout = TELEMETRY_TIMEOUT_MILLIS
     connection.requestMethod = "GET"
     connection.setRequestProperty("X-Journey-Probe", "verifier")
     if (connection is HttpsURLConnection) {
         connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
     }
     return try {
-        check(connection.responseCode == 200) { "Telemetry endpoint returned HTTP ${connection.responseCode}." }
+        check(connection.responseCode == HTTP_OK) { "Telemetry endpoint returned HTTP ${connection.responseCode}." }
         val body = connection.inputStream.bufferedReader().use { it.readText() }
         Json.parseToJsonElement(body).jsonObject
     } finally {
@@ -229,11 +231,11 @@ internal object JourneyInvariants {
                     "history" to 1,
                     "list" to 1,
                     "history" to 1,
-                    "list" to 3,
-                    "list" to 4,
-                    "list" to 5,
-                    "list" to 7,
-                    "list" to 8,
+                    "list" to LIST_CHECKPOINT_WRITE_COUNT_3,
+                    "list" to LIST_CHECKPOINT_WRITE_COUNT_4,
+                    "list" to LIST_CHECKPOINT_WRITE_COUNT_5,
+                    "list" to LIST_CHECKPOINT_WRITE_COUNT_7,
+                    "list" to LIST_CHECKPOINT_WRITE_COUNT_8,
                 ),
         ) { "Session cancellation checkpoints recorded missing reads or premature writes: $checkpoints" }
     }
@@ -325,3 +327,13 @@ internal object JourneyInvariants {
 }
 
 private const val DEFAULT_KEYSTORE_PASSWORD = "journey-fixture"
+private const val MIN_ARGUMENT_COUNT = 2
+private const val MAX_ARGUMENT_COUNT = 4
+private const val KEYSTORE_PASSWORD_ARG_INDEX = 3
+private const val TELEMETRY_TIMEOUT_MILLIS = 5_000
+private const val HTTP_OK = 200
+private const val LIST_CHECKPOINT_WRITE_COUNT_3 = 3
+private const val LIST_CHECKPOINT_WRITE_COUNT_4 = 4
+private const val LIST_CHECKPOINT_WRITE_COUNT_5 = 5
+private const val LIST_CHECKPOINT_WRITE_COUNT_7 = 7
+private const val LIST_CHECKPOINT_WRITE_COUNT_8 = 8

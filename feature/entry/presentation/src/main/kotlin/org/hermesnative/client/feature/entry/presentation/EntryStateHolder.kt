@@ -216,6 +216,8 @@ enum class EntryErrorCategory(
 }
 
 private const val DEFAULT_SEND_TIMEOUT_MILLIS = 30_000L
+private const val RECOVERY_CLAIM_ATTEMPTS = 100
+private const val RECOVERY_CLAIM_RETRY_MILLIS = 10L
 private const val UNCERTAIN_RUN_STATUS = "uncertain"
 private const val RECOVERY_PENDING_STATUS = "recovery_pending"
 
@@ -3304,9 +3306,7 @@ class EntryStateHolder(
             }
         }
 
-    private fun showCreateSessionFailure(
-        requestGeneration: Long,
-    ) {
+    private fun showCreateSessionFailure(requestGeneration: Long) {
         updateCurrentSessionRequest(requestGeneration) { current ->
             current.createSession?.let { creation ->
                 current.copy(
@@ -4158,7 +4158,7 @@ class EntryStateHolder(
         requestEndpoint: String = _uiState.value.endpoint,
     ): Boolean {
         var beganReconciliation = false
-        repeat(100) {
+        repeat(RECOVERY_CLAIM_ATTEMPTS) {
             if (beganReconciliation) return@repeat
             val requestIsCurrent =
                 synchronized(sessionRequestLock) {
@@ -4170,7 +4170,7 @@ class EntryStateHolder(
                 beganReconciliation = true
                 return@repeat
             }
-            delay(10)
+            delay(RECOVERY_CLAIM_RETRY_MILLIS)
         }
         if (!beganReconciliation) return false
         return try {
