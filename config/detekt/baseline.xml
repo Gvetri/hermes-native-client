@@ -173,8 +173,6 @@
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileTimedOutSendNow( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, knownRunIds: Set&lt;RunId&gt;, resolveWhenNoNewRun: Boolean = false, requestEndpoint: String = _uiState.value.endpoint, ): Boolean</ID>
 <ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionList( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
 <ID>ReturnCount:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun handleSessionResourceRequest( exchange: HttpExchange, behavior: SyntheticGatewayBehavior, )</ID>
-<ID>ReturnCount:SafeMarkdown.kt$internal fun allowedExternalLinkDestination(destination: String): String?</ID>
-<ID>ReturnCount:SafeMarkdown.kt$private fun linkAt( text: String, index: Int, linkBrackets: LinkBrackets?, labelEnd: Int = linkBrackets?.labelEnds?.get(index) ?: -1, ): LinkMatch?</ID>
 <ID>TooGenericExceptionCaught:AndroidKeyStoreGatewayCredentialStore.kt$AndroidKeyStoreGatewayCredentialStore$error: Exception</ID>
 <ID>TooGenericExceptionCaught:ContractFixtureParser.kt$ContractFixtureParser$error: Exception</ID>
 <ID>TooGenericExceptionCaught:DefaultGatewayClient.kt$DefaultGatewayClient$error: Exception</ID>
