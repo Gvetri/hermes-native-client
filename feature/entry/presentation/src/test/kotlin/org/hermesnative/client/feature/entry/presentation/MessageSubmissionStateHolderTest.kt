@@ -776,7 +776,7 @@ class MessageSubmissionStateHolderTest {
             attemptId: String?,
         ): Boolean {
             addCount += 1
-            if (addCount > 1) throw IllegalStateException("test persistence failure")
+            if (addCount > 1) error("test persistence failure")
             return true
         }
 

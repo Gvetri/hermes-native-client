@@ -35,7 +35,7 @@ internal object GatewayJsonParser {
             try {
                 json.parseToJsonElement(content)
             } catch (_: Exception) {
-                throw invalid(operation, "the response is not valid JSON")
+                invalid(operation, "the response is not valid JSON")
             }
         return element as? JsonObject ?: invalid(operation, "the response must be a JSON object")
     }
@@ -155,18 +155,7 @@ internal object GatewayJsonParser {
     ): RunEvent? {
         val root = parseObject(operation, frame.data)
         val eventName = requiredNonBlankString(root, "event", operation)
-        val eventType =
-            when (eventName) {
-                "message.delta" -> RunEventType.MESSAGE_DELTA
-                "run.completed" -> RunEventType.COMPLETED
-                "run.failed" -> RunEventType.FAILED
-                "run.cancelled" -> RunEventType.CANCELLED
-                "run.stopping" -> RunEventType.COMPLETING
-                "tool.started", "tool.completed", "reasoning.available", "subagent.start",
-                "subagent.complete", "approval.request", "approval.responded", "run.steered",
-                -> RunEventType.RUNNING
-                else -> return null
-            }
+        val eventType = eventTypeFor(eventName) ?: return null
         val runId = RunId(requiredNonBlankString(root, "run_id", operation))
         val status =
             optionalString(root, "status", operation)
@@ -176,7 +165,11 @@ internal object GatewayJsonParser {
                     RunEventType.COMPLETED -> "succeeded"
                     RunEventType.FAILED -> "failed"
                     RunEventType.CANCELLED -> "cancelled"
-                    else -> ""
+                    RunEventType.STARTED,
+                    RunEventType.TEXT_DELTA,
+                    RunEventType.SUCCEEDED,
+                    RunEventType.INTERRUPTED,
+                    -> ""
                 }
         val text =
             if (eventType == RunEventType.MESSAGE_DELTA) {
@@ -192,6 +185,19 @@ internal object GatewayJsonParser {
             text = text,
         )
     }
+
+    private fun eventTypeFor(eventName: String): RunEventType? =
+        when (eventName) {
+            "message.delta" -> RunEventType.MESSAGE_DELTA
+            "run.completed" -> RunEventType.COMPLETED
+            "run.failed" -> RunEventType.FAILED
+            "run.cancelled" -> RunEventType.CANCELLED
+            "run.stopping" -> RunEventType.COMPLETING
+            "tool.started", "tool.completed", "reasoning.available", "subagent.start",
+            "subagent.complete", "approval.request", "approval.responded", "run.steered",
+            -> RunEventType.RUNNING
+            else -> null
+        }
 
     private fun parseSession(
         value: JsonElement,
@@ -237,8 +243,8 @@ internal object GatewayJsonParser {
         message: JsonObject,
         operation: String,
     ): String? {
-        val value = message["timestamp"] ?: return null
-        if (value == JsonNull) return null
+        val value = message["timestamp"]
+        if (value == null || value == JsonNull) return null
         if (value !is JsonPrimitive) invalid(operation, "invalid message timestamp")
         if (!value.isString && value.content.toDoubleOrNull()?.isFinite() != true) {
             invalid(operation, "message timestamp must be finite seconds or a string")
@@ -308,12 +314,6 @@ internal object GatewayJsonParser {
         return value
     }
 
-    private fun requiredString(
-        root: JsonObject,
-        path: String,
-        operation: String,
-    ): String = stringValue(requiredValue(root, path, operation), path, operation)
-
     private fun requiredBoolean(
         root: JsonObject,
         path: String,
@@ -331,8 +331,8 @@ internal object GatewayJsonParser {
         path: String,
         operation: String,
     ): String? {
-        val value = root[path] ?: return null
-        if (value == JsonNull) return null
+        val value = root[path]
+        if (value == null || value == JsonNull) return null
         return stringValue(value, path, operation)
     }
 

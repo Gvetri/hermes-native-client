@@ -785,7 +785,7 @@ private fun SessionActionControls(
                     when (mutation?.retryAction) {
                         SessionMutationAction.PIN -> EntryUiEvent.PinSessionClicked(session.id)
                         SessionMutationAction.UNPIN -> EntryUiEvent.UnpinSessionClicked(session.id)
-                        else -> null
+                        SessionMutationAction.RENAME, SessionMutationAction.DELETE, null -> null
                     }
                 retryEvent?.let { event ->
                     OutlinedButton(

@@ -1,6 +1,7 @@
 package org.hermesnative.client.feature.entry.wiring
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,7 +51,7 @@ object EntryWiring {
         return EntryStateHolder(
             initialState = initialState,
             verifyGatewayConnection = verifyGatewayConnection,
-            scope = coroutineScope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            scope = entryScope(coroutineScope),
             sessionGatewayFactory =
                 sessionGatewayFactory ?: { endpoint, bearerCredential ->
                     DefaultGatewayClient(endpoint, bearerCredential)
@@ -91,4 +92,9 @@ object EntryWiring {
             runStatusNotifier = SystemRunStatusNotifier(context),
         )
     }
+
+    private fun entryScope(
+        coroutineScope: CoroutineScope?,
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    ): CoroutineScope = coroutineScope ?: CoroutineScope(SupervisorJob() + ioDispatcher)
 }

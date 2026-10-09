@@ -589,8 +589,8 @@ class RunRetryStateHolderTest {
             awaitState(holder) {
                 val opened = it.sessionList?.openedSession
                 opened?.messages?.any { m -> m.runId == runId && m.isFailedRun } == true &&
-                    opened?.isRefreshing == false &&
-                    opened?.isReconciliationInProgress == false
+                    opened.isRefreshing == false &&
+                    opened.isReconciliationInProgress == false
             }
 
             val failedMessage =

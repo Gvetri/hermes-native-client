@@ -114,32 +114,32 @@ class DeterministicGatewayFixture(
             }
             requireLocalEndpoint(startedProcess.endpoint)
             lifecycleState = FixtureLifecycleState.STARTED
+        } catch (error: FixtureStartupException) {
+            failStartup(error)
         } catch (error: Throwable) {
-            val startupFailure =
-                if (error is FixtureStartupException) {
-                    error
-                } else {
-                    FixtureStartupException("Deterministic Gateway fixture startup failed.", error)
-                }
-            val startedProcess = process
-            if (startedProcess != null) {
-                var stopFailed = false
-                try {
-                    startedProcess.stop()
-                } catch (stopError: Throwable) {
-                    stopFailed = true
-                    startupFailure.addSuppressed(stopError)
-                }
-                if (!stopFailed && !startedProcess.isRunning) {
-                    process = null
-                } else if (startedProcess.isRunning) {
-                    startupFailure.addSuppressed(
-                        IllegalStateException("Deterministic Gateway process did not stop after startup failure."),
-                    )
-                }
-            }
-            throw startupFailure
+            failStartup(FixtureStartupException("Deterministic Gateway fixture startup failed.", error))
         }
+    }
+
+    private fun failStartup(startupFailure: FixtureStartupException): Nothing {
+        val startedProcess = process
+        if (startedProcess != null) {
+            var stopFailed = false
+            try {
+                startedProcess.stop()
+            } catch (stopError: Throwable) {
+                stopFailed = true
+                startupFailure.addSuppressed(stopError)
+            }
+            if (!stopFailed && !startedProcess.isRunning) {
+                process = null
+            } else if (startedProcess.isRunning) {
+                startupFailure.addSuppressed(
+                    IllegalStateException("Deterministic Gateway process did not stop after startup failure."),
+                )
+            }
+        }
+        throw startupFailure
     }
 
     fun awaitReady() {
@@ -149,10 +149,9 @@ class DeterministicGatewayFixture(
         try {
             readinessChecker.verify(requireProcess(), requireNotNull(descriptor))
             lifecycleState = FixtureLifecycleState.READY
+        } catch (error: FixtureReadinessException) {
+            throw error
         } catch (error: Throwable) {
-            if (error is FixtureReadinessException) {
-                throw error
-            }
             throw FixtureReadinessException(
                 "Deterministic Gateway fixture readiness failed: ${error.message}",
                 error,
@@ -166,55 +165,56 @@ class DeterministicGatewayFixture(
         }
         resetAndVerifySyntheticState()
         lifecycleState = FixtureLifecycleState.TESTING
-        var testFailure: Throwable? = null
-        return try {
-            val activeProcess = requireProcess()
-            block(FixtureTestContext(activeProcess.endpoint, activeProcess.provenanceValue, syntheticState))
-        } catch (error: Throwable) {
-            testFailure = error
-            throw error
-        } finally {
-            var cleanupFailure: FixtureCleanupException? = null
-            try {
-                resetAndVerifySyntheticState()
-            } catch (error: Throwable) {
-                cleanupFailure =
-                    FixtureCleanupException(
-                        "Synthetic state reset after the fixture test failed.",
-                        listOf(error),
-                    )
+        val executed =
+            runCatching {
+                val activeProcess = requireProcess()
+                block(FixtureTestContext(activeProcess.endpoint, activeProcess.provenanceValue, syntheticState))
             }
-            lifecycleState = FixtureLifecycleState.READY
-            if (cleanupFailure != null) {
-                if (testFailure != null) {
-                    testFailure.addSuppressed(cleanupFailure)
-                } else {
-                    throw cleanupFailure
-                }
+        val cleanupFailure = resetSyntheticStateAfterTest()
+        lifecycleState = FixtureLifecycleState.READY
+        return executed
+            .onSuccess { result ->
+                if (cleanupFailure != null) throw cleanupFailure
+                result
             }
-        }
+            .getOrElse { error ->
+                cleanupFailure?.let(error::addSuppressed)
+                throw error
+            }
     }
 
-    fun <T> execute(block: (FixtureTestContext) -> T): T {
-        var testFailure: Throwable? = null
-        return try {
-            setup()
-            awaitReady()
-            runTest(block)
+    private fun resetSyntheticStateAfterTest(): FixtureCleanupException? =
+        try {
+            resetAndVerifySyntheticState()
+            null
         } catch (error: Throwable) {
-            testFailure = error
-            throw error
-        } finally {
-            try {
-                teardown()
-            } catch (cleanupFailure: FixtureCleanupException) {
-                if (testFailure != null) {
-                    testFailure.addSuppressed(cleanupFailure)
-                } else {
-                    throw cleanupFailure
-                }
-            }
+            FixtureCleanupException(
+                "Synthetic state reset after the fixture test failed.",
+                listOf(error),
+            )
         }
+
+    fun <T> execute(block: (FixtureTestContext) -> T): T {
+        val executed =
+            runCatching {
+                setup()
+                awaitReady()
+                runTest(block)
+            }
+        return executed.fold(
+            onSuccess = { result ->
+                teardown()
+                result
+            },
+            onFailure = { error ->
+                try {
+                    teardown()
+                } catch (cleanupFailure: FixtureCleanupException) {
+                    error.addSuppressed(cleanupFailure)
+                }
+                throw error
+            },
+        )
     }
 
     fun teardown() {

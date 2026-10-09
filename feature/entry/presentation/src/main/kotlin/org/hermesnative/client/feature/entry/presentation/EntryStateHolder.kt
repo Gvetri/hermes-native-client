@@ -215,7 +215,6 @@ enum class EntryErrorCategory(
     CREDENTIAL_STORAGE_FAILED("Could not save the Gateway credential securely. Try again."),
 }
 
-private const val SESSION_SEARCH_DEBOUNCE_MILLIS = 300L
 private const val DEFAULT_SEND_TIMEOUT_MILLIS = 30_000L
 private const val UNCERTAIN_RUN_STATUS = "uncertain"
 private const val RECOVERY_PENDING_STATUS = "recovery_pending"
@@ -1104,7 +1103,7 @@ class EntryStateHolder(
             ?.let { ports -> runCatching { ports.store.recordCount() }.getOrNull() }
             ?: 0
 
-    private suspend fun applyLocalDiagnosticsRecordCount() {
+    private fun applyLocalDiagnosticsRecordCount() {
         val recordCount = localDiagnosticsRecordCount()
         _uiState.update { state ->
             if (!state.localDiagnostics.isOpen) {
@@ -1184,7 +1183,7 @@ class EntryStateHolder(
             synchronized(recoveryPersistenceLock) {
                 persistence.first?.invoke(endpoint, entry)
                     ?: persistence.second?.save(entry)
-                    ?: throw IllegalStateException("No endpoint-scoped recovery writer is configured.")
+                    ?: error("No endpoint-scoped recovery writer is configured.")
             }
             true
         } catch (_: Exception) {
@@ -1980,23 +1979,26 @@ class EntryStateHolder(
         }
     }
 
-    private suspend fun reconcileRun(
+    private fun reconcileRun(
         sessionId: SessionId,
         runId: RunId,
         requestConnectionGeneration: Long,
         requestSessionGeneration: Long,
         sessionGateway: SessionGatewayPort,
     ): AuthoritativeRunReconciliation? {
-        if (!beginReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)) return null
-        return try {
-            val runGateway =
+        val runGateway =
+            if (beginReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)) {
                 synchronized(sessionRequestLock) {
                     runGateway?.takeIf {
                         connectionGeneration == requestConnectionGeneration &&
                             sessionRequestGeneration == requestSessionGeneration &&
                             _uiState.value.sessionList?.openedSession?.session?.id == sessionId
                     }
-                } ?: return null
+                }
+            } else {
+                null
+            } ?: return null
+        return try {
             val result = ReconcileRun(runGateway, sessionGateway).execute(runId, sessionId)
             applyAuthoritativeRunReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration, result)
             result
@@ -3289,13 +3291,13 @@ class EntryStateHolder(
                 throw error
             } catch (_: GatewayException) {
                 if (createdSession == null) {
-                    showCreateSessionFailure(request.context.generation, request.context.query)
+                    showCreateSessionFailure(request.context.generation)
                 } else {
                     showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
                 }
             } catch (_: Exception) {
                 if (createdSession == null) {
-                    showCreateSessionFailure(request.context.generation, request.context.query)
+                    showCreateSessionFailure(request.context.generation)
                 } else {
                     showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
                 }
@@ -3304,7 +3306,6 @@ class EntryStateHolder(
 
     private fun showCreateSessionFailure(
         requestGeneration: Long,
-        query: String,
     ) {
         updateCurrentSessionRequest(requestGeneration) { current ->
             current.createSession?.let { creation ->
@@ -3398,7 +3399,7 @@ class EntryStateHolder(
             }
         }
 
-    private suspend fun loadFirstPage(
+    private fun loadFirstPage(
         gateway: SessionGatewayPort,
         request: SessionRequestContext,
         preserveSessions: Boolean,
@@ -4034,7 +4035,7 @@ class EntryStateHolder(
                         pendingSubmission.knownRunIds,
                         pendingSubmission.attemptId,
                     )
-                if (!claimed) throw IllegalStateException("A Gateway Run submission is already unresolved.")
+                if (!claimed) error("A Gateway Run submission is already unresolved.")
             } catch (_: Exception) {
                 synchronized(sessionRequestLock) {
                     if (
@@ -4913,12 +4914,12 @@ class EntryStateHolder(
                         }
                     }
                 }
-            restartRequest?.let {
+            restartRequest?.let { request ->
                 startRunObservation(
                     sessionId = sessionId,
-                    run = it.run,
-                    expectedConnectionGeneration = it.connectionGeneration,
-                    expectedSessionGeneration = it.sessionGeneration,
+                    run = request.run,
+                    expectedConnectionGeneration = request.connectionGeneration,
+                    expectedSessionGeneration = request.sessionGeneration,
                 )
             }
         }
@@ -4941,11 +4942,11 @@ class EntryStateHolder(
                         _uiState.value.sessionList?.openedSession?.session?.id == sessionId
                     }
                 } ?: return
-            observation =
+            val activeObservation =
                 runInterruptible {
                     ObserveRun(gateway).execute(run.id).also { lateObservation = it }
                 }
-            val activeObservation = observation ?: return
+            observation = activeObservation
             val shouldRegisterObservation =
                 synchronized(sessionRequestLock) {
                     if (
@@ -4987,7 +4988,7 @@ class EntryStateHolder(
             if (observation == null) {
                 lateObservation?.close()
             } else {
-                observation?.close()
+                observation.close()
             }
             synchronized(sessionRequestLock) {
                 if (runObservations[sessionId] === observation) {

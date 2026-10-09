@@ -1735,13 +1735,13 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Edited after timeout"))
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             awaitState(holder) {
-                val opened = it.sessionList?.openedSession
-                opened?.isRefreshing == false &&
-                    opened.latestRun?.id == otherRun.id &&
-                    opened.latestRunState == RunPresentationState.SUCCEEDED &&
-                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
-                    opened.hasUnresolvedSubmission &&
-                    opened.composerText == "Edited after timeout" &&
+                val refreshed = it.sessionList?.openedSession
+                refreshed?.isRefreshing == false &&
+                    refreshed.latestRun?.id == otherRun.id &&
+                    refreshed.latestRunState == RunPresentationState.SUCCEEDED &&
+                    refreshed.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
+                    refreshed.hasUnresolvedSubmission &&
+                    refreshed.composerText == "Edited after timeout" &&
                     opened.messages.map { message -> message.id } == listOf("other") &&
                     opened.messages.single().runResult == "External result" &&
                     opened.messages.single().timestamp?.toString() == "2026-09-08T21:00:00Z"
@@ -2700,7 +2700,7 @@ class RunReconciliationStateHolderTest {
                     return if (delegate.hasNext()) {
                         true
                     } else {
-                        throw IllegalStateException("stream interrupted")
+                        error("stream interrupted")
                     }
                 }
 
@@ -2936,8 +2936,7 @@ class RunReconciliationStateHolderTest {
             return object : Iterator<RunEvent> {
                 override fun hasNext(): Boolean {
                     return try {
-                        while (!release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
-                        }
+                        awaitRelease()
                         false
                     } catch (error: InterruptedException) {
                         Thread.interrupted()
@@ -2954,6 +2953,13 @@ class RunReconciliationStateHolderTest {
         override fun close() {
             if (closeCount.incrementAndGet() == 1) {
                 closed.countDown()
+            }
+        }
+
+        private fun awaitRelease() {
+            var released = release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            while (!released) {
+                released = release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
             }
         }
     }

@@ -995,7 +995,7 @@ class RunObservationStateHolderTest {
                     if (delegate.hasNext()) {
                         true
                     } else {
-                        throw IllegalStateException("stream interrupted")
+                        error("stream interrupted")
                     }
 
                 override fun next(): RunEvent = delegate.next()

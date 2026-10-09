@@ -122,7 +122,7 @@ class GatewaySseParserTest {
                             sequence {
                                 yield("data: {\"event\":\"message.delta\",\"run_id\":\"run-1\",\"delta\":\"Partial\"}")
                                 yield("")
-                                throw IllegalStateException("connection dropped")
+                                error("connection dropped")
                             },
                         closeAction = { closed = true },
                     )

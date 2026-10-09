@@ -166,7 +166,7 @@ class DeterministicGatewayFixtureTest {
 
                 override fun stop() {
                     if (stopAttempts++ == 0) {
-                        throw IllegalStateException("simulated startup cleanup failure")
+                        error("simulated startup cleanup failure")
                     }
                     isRunning = false
                 }
@@ -294,7 +294,7 @@ class DeterministicGatewayFixtureTest {
 
                         override fun stop() {
                             delegate.stop()
-                            throw IllegalStateException("simulated cleanup failure")
+                            error("simulated cleanup failure")
                         }
                     }
                 },

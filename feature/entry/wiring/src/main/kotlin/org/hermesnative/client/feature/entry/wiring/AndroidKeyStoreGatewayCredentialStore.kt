@@ -83,7 +83,7 @@ class AndroidKeyStoreGatewayCredentialStore(
 
     private fun loadKey(): SecretKey =
         loadKeyStore().getKey(KEY_ALIAS, null) as? SecretKey
-            ?: throw IllegalStateException("Gateway credential key is unavailable.")
+            ?: error("Gateway credential key is unavailable.")
 
     private fun loadOrCreateKey(): SecretKey {
         val keyStore = loadKeyStore()

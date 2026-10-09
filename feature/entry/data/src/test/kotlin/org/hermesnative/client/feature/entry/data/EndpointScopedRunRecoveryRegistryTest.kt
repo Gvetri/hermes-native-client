@@ -126,7 +126,7 @@ class EndpointScopedRunRecoveryRegistryTest {
         override fun load(): Set<RunRecoveryEntry> = entries
 
         override fun save(entries: Set<RunRecoveryEntry>) {
-            if (failWrites) throw IllegalStateException("write failed")
+            if (failWrites) error("write failed")
             this.entries = entries
         }
     }

@@ -44,29 +44,35 @@ internal class GatewayRunEventObservation(
             }
         if (!published) {
             openedStream.close()
-            throw IllegalStateException("Gateway run observation is closed.")
+            error("Gateway run observation is closed.")
         }
-        val frames = GatewaySseParser.frames(openedStream.lines, operation).iterator()
+        val seenFrames = mutableSetOf<String>()
+        val events =
+            GatewaySseParser.frames(openedStream.lines, operation)
+                .filter { frame -> seenFrames.add(frame.data) }
+                .mapNotNull { frame -> parseFrame(frame) }
+                .iterator()
         return object : Iterator<RunEvent> {
-            private var buffered: RunEvent? = null
-            private var hasBuffered = false
-
-            private val seenFrames = mutableSetOf<String>()
-
             override fun hasNext(): Boolean {
                 if (closed) return false
-                if (hasBuffered) return true
-                try {
-                    while (frames.hasNext()) {
-                        val frame = frames.next()
-                        if (!seenFrames.add(frame.data)) continue
-                        val event = parseFrame(frame) ?: continue
-                        buffered = event
-                        hasBuffered = true
-                        return true
+                val available =
+                    try {
+                        events.hasNext()
+                    } catch (error: GatewayException) {
+                        close()
+                        throw error
+                    } catch (error: Exception) {
+                        close()
+                        throw mapTransportFailure(error)
                     }
-                    close()
-                    return false
+                if (!available) close()
+                return available
+            }
+
+            override fun next(): RunEvent {
+                if (!hasNext()) throw NoSuchElementException()
+                return try {
+                    events.next()
                 } catch (error: GatewayException) {
                     close()
                     throw error
@@ -74,12 +80,6 @@ internal class GatewayRunEventObservation(
                     close()
                     throw mapTransportFailure(error)
                 }
-            }
-
-            override fun next(): RunEvent {
-                if (!hasNext()) throw NoSuchElementException()
-                hasBuffered = false
-                return requireNotNull(buffered).also { buffered = null }
             }
         }
     }

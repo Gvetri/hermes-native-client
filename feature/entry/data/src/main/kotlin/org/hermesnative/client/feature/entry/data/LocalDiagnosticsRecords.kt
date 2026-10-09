@@ -29,7 +29,7 @@ object LocalDiagnosticsRecords {
     private const val SAFE_FIELD_VALUE_PATTERN = "[a-z0-9_]{1,64}"
     private const val CLIENT_VERSION_PATTERN = "[A-Za-z0-9][A-Za-z0-9._+-]{0,31}"
 
-    private val utcInstantPattern = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z"
+    private const val utcInstantPattern = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z"
 
     private val safeFieldValue = Regex(SAFE_FIELD_VALUE_PATTERN)
     private val clientVersion = Regex(CLIENT_VERSION_PATTERN)

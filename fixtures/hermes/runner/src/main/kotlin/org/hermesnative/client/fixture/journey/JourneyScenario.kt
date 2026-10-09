@@ -103,7 +103,8 @@ data class JourneyRunEvent(
 sealed class JourneyScenarioException(message: String, cause: Throwable? = null) :
     IllegalStateException(message, cause)
 
-class JourneyScenarioFormatException(message: String) : JourneyScenarioException(message)
+class JourneyScenarioFormatException(message: String, cause: Throwable? = null) :
+    JourneyScenarioException(message, cause)
 
 object JourneyScenarioParser {
     private val supportedEventTypes =
@@ -152,50 +153,62 @@ object JourneyScenarioParser {
         scenarioFile: File,
         pinnedHermesRevision: String,
     ): JourneyScenario {
-        val text =
-            runCatching { scenarioFile.readText() }.getOrElse { error ->
-                throw JourneyScenarioFormatException("Journey scenario could not be read: ${error.message}")
+        val text = readScenarioText(scenarioFile)
+        val normalizedText = normalizeUnicodeEscapes(text)
+        requireSingleProvenanceField(normalizedText)
+        val root = requireScenarioRoot(text)
+        rejectUnknownKeys(root, allowedTopLevelKeys, "top-level")
+        val scenario = requireScenarioFields(root)
+        requireKnownEndpoints(scenario)
+        requireProvenance(scenario, pinnedHermesRevision)
+        return scenario
+    }
+
+    private fun readScenarioText(scenarioFile: File): String =
+        runCatching { scenarioFile.readText() }.getOrElse { error ->
+            throw JourneyScenarioFormatException("Journey scenario could not be read: ${error.message}")
+        }
+
+    private fun normalizeUnicodeEscapes(text: String): String =
+        UNICODE_ESCAPE.replace(text) { match ->
+            val codePoint = match.groupValues[1].toInt(16)
+            if (codePoint in 0..0xD7FF || codePoint in 0xE000..0xFFFF) {
+                codePoint.toChar().toString()
+            } else {
+                match.value
             }
-        val normalizedText =
-            UNICODE_ESCAPE.replace(text) { match ->
-                val codePoint = match.groupValues[1].toInt(16)
-                if (codePoint in 0..0xD7FF || codePoint in 0xE000..0xFFFF) {
-                    codePoint.toChar().toString()
-                } else {
-                    match.value
-                }
-            }
-        val provenanceFieldCount = Regex("\"hermes_revision\"\\s*:").findAll(normalizedText).count()
+        }
+
+    private fun requireSingleProvenanceField(text: String) {
+        val provenanceFieldCount = Regex("\"hermes_revision\"\\s*:").findAll(text).count()
         if (provenanceFieldCount != 1) {
             throw JourneyScenarioFormatException(
                 "Journey scenario must declare exactly one hermes_revision provenance field.",
             )
         }
-        val root =
-            runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
-                ?: throw JourneyScenarioFormatException("Journey scenario is not a JSON object.")
-        rejectUnknownKeys(root, allowedTopLevelKeys, "top-level")
-        val scenario =
-            try {
-                JourneyScenario(
-                    name = requiredString(root, "name"),
-                    hermesRevision = requiredString(root, "hermes_revision"),
-                    port = requiredInt(root, "port"),
-                    tls = requiredBoolean(root, "tls"),
-                    capabilities = requiredStringList(root, "capabilities"),
-                    requireBearerCredential = optionalString(root, "require_bearer_credential"),
-                    sessionPageSize = optionalInt(root, "session_page_size"),
-                    sessions = parseSessions(root),
-                    runs = parseRuns(root),
-                    failNextSessionList = optionalBoolean(root, "fail_next_session_list", default = false),
-                )
-            } catch (error: IllegalArgumentException) {
-                throw JourneyScenarioFormatException(error.message ?: "Journey scenario is invalid.")
-            }
-        requireKnownEndpoints(scenario)
-        requireProvenance(scenario, pinnedHermesRevision)
-        return scenario
     }
+
+    private fun requireScenarioRoot(text: String): JsonObject =
+        runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+            ?: throw JourneyScenarioFormatException("Journey scenario is not a JSON object.")
+
+    private fun requireScenarioFields(root: JsonObject): JourneyScenario =
+        try {
+            JourneyScenario(
+                name = requiredString(root, "name"),
+                hermesRevision = requiredString(root, "hermes_revision"),
+                port = requiredInt(root, "port"),
+                tls = requiredBoolean(root, "tls"),
+                capabilities = requiredStringList(root, "capabilities"),
+                requireBearerCredential = optionalString(root, "require_bearer_credential"),
+                sessionPageSize = optionalInt(root, "session_page_size"),
+                sessions = parseSessions(root),
+                runs = parseRuns(root),
+                failNextSessionList = optionalBoolean(root, "fail_next_session_list", default = false),
+            )
+        } catch (error: IllegalArgumentException) {
+            throw JourneyScenarioFormatException(error.message ?: "Journey scenario is invalid.", error)
+        }
 
     private fun requireKnownEndpoints(scenario: JourneyScenario) {
         val unknown = scenario.capabilities.filterNot(JourneyEndpointCatalog.endpoints::containsKey)

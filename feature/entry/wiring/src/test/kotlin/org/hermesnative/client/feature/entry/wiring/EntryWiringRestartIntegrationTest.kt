@@ -640,7 +640,7 @@ class EntryWiringRestartIntegrationTest {
             runRequests += sessionId to input
             if (failCreateAfterAcceptance) {
                 acceptedRunVisible = true
-                throw IllegalStateException("response lost after acceptance")
+                error("response lost after acceptance")
             }
             if (blockCreate) {
                 runStarted.countDown()
