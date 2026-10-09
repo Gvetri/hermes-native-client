@@ -53,12 +53,14 @@ internal data class MarkdownSpan(
  */
 internal fun allowedExternalLinkDestination(destination: String): String? {
     val candidate = destination.trim()
-    if (candidate.length > MAX_LINK_LENGTH) return null
-    if (candidate.any { it.isWhitespace() || it.isISOControl() || it == '\\' }) return null
-    if (!candidate.startsWith(HTTPS_SCHEME, ignoreCase = true)) return null
     val authority = candidate.drop(HTTPS_SCHEME.length).takeWhile { it !in "/?#" }
-    if (authority.isEmpty()) return null
-    return candidate
+    return when {
+        candidate.length > MAX_LINK_LENGTH -> null
+        candidate.any { it.isWhitespace() || it.isISOControl() || it == '\\' } -> null
+        !candidate.startsWith(HTTPS_SCHEME, ignoreCase = true) -> null
+        authority.isEmpty() -> null
+        else -> candidate
+    }
 }
 
 private const val HTTPS_SCHEME = "https://"
@@ -296,18 +298,21 @@ private fun linkAt(
     linkBrackets: LinkBrackets?,
     labelEnd: Int = linkBrackets?.labelEnds?.get(index) ?: -1,
 ): LinkMatch? {
-    if (linkBrackets == null || !text.startsWith(LINK_OPEN, index)) return null
-    if (labelEnd < 0) return null
     val destinationStart = labelEnd + 2
-    if (destinationStart >= text.length || text[labelEnd + 1] != '(') return null
-
-    val endIndex = linkBrackets.destinationEnds[labelEnd + 1]
-    if (endIndex < 0) return null
-    return LinkMatch(
-        label = text.substring(index + 1, labelEnd),
-        destination = text.substring(destinationStart, endIndex - 1),
-        endIndex = endIndex,
-    )
+    return when {
+        linkBrackets == null || !text.startsWith(LINK_OPEN, index) -> null
+        labelEnd < 0 -> null
+        destinationStart >= text.length || text[labelEnd + 1] != '(' -> null
+        linkBrackets.destinationEnds[labelEnd + 1] < 0 -> null
+        else -> {
+            val endIndex = linkBrackets.destinationEnds[labelEnd + 1]
+            LinkMatch(
+                label = text.substring(index + 1, labelEnd),
+                destination = text.substring(destinationStart, endIndex - 1),
+                endIndex = endIndex,
+            )
+        }
+    }
 }
 
 private fun fenceLength(line: String): Int = line.trimStart().takeWhile { it == '`' }.length
