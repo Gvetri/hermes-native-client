@@ -63,9 +63,8 @@ object RunEventStateTransition {
         current: RunObservationState,
         event: RunEvent,
     ): RunObservationState {
-        if (event.runId != current.run.id) return current
+        if (event.runId != current.run.id || alreadyProcessed(current, event)) return current
         val eventId = event.eventId?.takeIf(String::isNotBlank)
-        if (eventId != null && eventId in current.processedEventIds) return current
 
         val processedEventIds =
             if (eventId == null) {
@@ -96,6 +95,14 @@ object RunEventStateTransition {
             isStreamInterrupted = event.type == RunEventType.INTERRUPTED,
             processedEventIds = processedEventIds,
         )
+    }
+
+    private fun alreadyProcessed(
+        current: RunObservationState,
+        event: RunEvent,
+    ): Boolean {
+        val eventId = event.eventId?.takeIf(String::isNotBlank)
+        return eventId != null && eventId in current.processedEventIds
     }
 
     fun interrupted(current: RunObservationState): RunObservationState =

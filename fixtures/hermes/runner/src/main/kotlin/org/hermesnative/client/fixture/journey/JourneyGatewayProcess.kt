@@ -340,15 +340,12 @@ class JourneyGatewayProcess private constructor(
                 respond(exchange, HTTP_UNAUTHORIZED, """{"error":"unauthorized"}""")
                 return
             }
-            if (exchange.requestURI.path == "/v1/runs") {
-                if (exchange.requestMethod != "POST") {
+            when {
+                exchange.requestURI.path != "/v1/runs" -> handleRunResource(exchange, behavior)
+                exchange.requestMethod != "POST" ->
                     respond(exchange, HTTP_METHOD_NOT_ALLOWED, """{"error":"method-not-allowed"}""")
-                    return
-                }
-                handleRunCreate(exchange, behavior, body)
-                return
+                else -> handleRunCreate(exchange, behavior, body)
             }
-            handleRunResource(exchange, behavior)
         }
 
         private fun handleRunCreate(
@@ -365,18 +362,17 @@ class JourneyGatewayProcess private constructor(
                 respond(exchange, HTTP_NOT_FOUND, """{"error":"session-not-found"}""")
                 return
             }
-            val script =
-                behavior.nextRunScript(sessionId)
-                    ?: run {
-                        respond(exchange, HTTP_NOT_FOUND, """{"error":"no-synthetic-run"}""")
-                        return
-                    }
-            respond(
-                exchange,
-                HTTP_ACCEPTED,
-                """{"run_id":${script.runId.jsonValue()},"status":${script.createStatus.jsonValue()},""" +
-                    """"replayed":false}""",
-            )
+            val script = behavior.nextRunScript(sessionId)
+            if (script == null) {
+                respond(exchange, HTTP_NOT_FOUND, """{"error":"no-synthetic-run"}""")
+            } else {
+                respond(
+                    exchange,
+                    HTTP_ACCEPTED,
+                    """{"run_id":${script.runId.jsonValue()},"status":${script.createStatus.jsonValue()},""" +
+                        """"replayed":false}""",
+                )
+            }
         }
 
         private fun handleRunResource(
@@ -513,13 +509,13 @@ class JourneyGatewayProcess private constructor(
             body: String?,
             field: String,
         ): String? {
-            val text = body?.takeIf(String::isNotBlank) ?: return null
             val root =
-                runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
+                body?.takeIf(String::isNotBlank)
+                    ?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
                     as? kotlinx.serialization.json.JsonObject
                     ?: return null
-            val value = root[field] ?: return null
-            return if (value == kotlinx.serialization.json.JsonNull) {
+            val value = root[field]
+            return if (value == null || value == kotlinx.serialization.json.JsonNull) {
                 null
             } else {
                 (value as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
@@ -530,24 +526,25 @@ class JourneyGatewayProcess private constructor(
             body: String?,
             field: String,
         ): Boolean? {
-            val text = body?.takeIf(String::isNotBlank) ?: return null
             val root =
-                runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
+                body?.takeIf(String::isNotBlank)
+                    ?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
                     as? kotlinx.serialization.json.JsonObject
-                    ?: return null
-            val value = root[field] as? kotlinx.serialization.json.JsonPrimitive ?: return null
-            if (value.isString || value.content !in setOf("true", "false")) return null
-            return value.content == "true"
+            val value = root?.get(field) as? kotlinx.serialization.json.JsonPrimitive ?: return null
+            return if (value.isString || value.content !in setOf("true", "false")) {
+                null
+            } else {
+                value.content == "true"
+            }
         }
 
         private fun parseRunInput(body: String?): String? {
-            val text = body?.takeIf(String::isNotBlank) ?: return null
             val root =
-                runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
+                body?.takeIf(String::isNotBlank)
+                    ?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
                     as? kotlinx.serialization.json.JsonObject
                     ?: return null
-            val input = root["input"] as? kotlinx.serialization.json.JsonPrimitive ?: return null
-            return input.takeIf { it.isString }?.content
+            return (root["input"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
         }
 
         private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)
@@ -600,10 +597,11 @@ internal class JourneyGatewayBehavior(
 
     fun runStatus(runId: String): String? {
         val script = scenario.runs.firstOrNull { it.runId == runId } ?: return null
-        if (observationDelivered[runId] == true || runId in interruptedRunIds) {
-            return script.finalStatus ?: script.createStatus
+        return if (observationDelivered[runId] == true || runId in interruptedRunIds) {
+            script.finalStatus ?: script.createStatus
+        } else {
+            script.createStatus
         }
-        return script.createStatus
     }
 
     fun sessionIdOf(runId: String): String? = scenario.runs.firstOrNull { it.runId == runId }?.sessionId

@@ -430,19 +430,23 @@ class LocalSyntheticGatewayProcess private constructor(
             field: String,
         ): Boolean {
             val text = body?.takeIf(String::isNotBlank) ?: return false
-            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return false
-            return root.containsKey(field)
+            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject
+            return root?.containsKey(field) ?: false
         }
 
         private fun bodyBoolean(
             body: String?,
             field: String,
         ): Boolean? {
-            val text = body?.takeIf(String::isNotBlank) ?: return null
-            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
-            val value = root[field] as? JsonPrimitive ?: return null
-            if (value.isString || value.content !in setOf("true", "false")) return null
-            return value.content == "true"
+            val root =
+                body?.takeIf(String::isNotBlank)
+                    ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject
+            val value = root?.get(field) as? JsonPrimitive ?: return null
+            return if (value.isString || value.content !in setOf("true", "false")) {
+                null
+            } else {
+                value.content == "true"
+            }
         }
 
         private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)
@@ -452,11 +456,12 @@ class LocalSyntheticGatewayProcess private constructor(
         private fun quote(value: String): String = GatewayHttpSupport.quote(value)
 
         private fun parseTitle(body: String?): String? {
-            val text = body?.takeIf(String::isNotBlank) ?: return null
             val root =
-                runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
-            val title = root["title"] ?: return null
-            return if (title == JsonNull) null else (title as? JsonPrimitive)?.content
+                body?.takeIf(String::isNotBlank)
+                    ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject
+                    ?: return null
+            val title = root["title"]
+            return if (title == null || title == JsonNull) null else (title as? JsonPrimitive)?.content
         }
 
         private fun recordRequest(

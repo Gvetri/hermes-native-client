@@ -175,8 +175,7 @@ private fun emphasisedRange(
     if (!text.startsWith(delimiter, index)) return null
     val contentStart = index + delimiter.length
     val contentEnd = text.indexOf(delimiter, startIndex = contentStart)
-    if (contentEnd <= contentStart) return null
-    return contentStart until contentEnd
+    return if (contentEnd > contentStart) contentStart until contentEnd else null
 }
 
 private fun parseInline(text: String): List<MarkdownSpan> {

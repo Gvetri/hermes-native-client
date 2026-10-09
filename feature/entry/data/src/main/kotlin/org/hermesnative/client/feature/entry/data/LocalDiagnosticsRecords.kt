@@ -63,25 +63,28 @@ object LocalDiagnosticsRecords {
         occurredAt: Instant,
     ): String? {
         val eventType = event.eventType.value
-        if (!isSafeFieldValue(eventType)) return null
         val status = event.status?.value
-        if (status != null && !isSafeFieldValue(status)) return null
-        return buildString {
-            append("{\"schema_version\":")
-            append(SCHEMA_VERSION)
-            append(",\"record_type\":\"")
-            append(EVENT_RECORD_TYPE)
-            append("\",\"event_type\":\"")
-            append(eventType)
-            append("\",\"occurred_at\":\"")
-            append(formatUtcInstant(occurredAt))
-            append('"')
-            if (status != null) {
-                append(",\"status\":\"")
-                append(status)
-                append('"')
-            }
-            append('}')
+        return when {
+            !isSafeFieldValue(eventType) -> null
+            status != null && !isSafeFieldValue(status) -> null
+            else ->
+                buildString {
+                    append("{\"schema_version\":")
+                    append(SCHEMA_VERSION)
+                    append(",\"record_type\":\"")
+                    append(EVENT_RECORD_TYPE)
+                    append("\",\"event_type\":\"")
+                    append(eventType)
+                    append("\",\"occurred_at\":\"")
+                    append(formatUtcInstant(occurredAt))
+                    append('"')
+                    if (status != null) {
+                        append(",\"status\":\"")
+                        append(status)
+                        append('"')
+                    }
+                    append('}')
+                }
         }
     }
 

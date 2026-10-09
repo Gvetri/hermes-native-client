@@ -328,9 +328,12 @@ object JourneyScenarioParser {
         key: String,
     ): String? {
         val value = container[key] ?: return null
-        if (value == JsonNull) return null
-        return (value as? JsonPrimitive)?.content
-            ?: throw JourneyScenarioFormatException("Field '$key' must be a string or null.")
+        return if (value == JsonNull) {
+            null
+        } else {
+            (value as? JsonPrimitive)?.content
+                ?: throw JourneyScenarioFormatException("Field '$key' must be a string or null.")
+        }
     }
 
     private fun requiredInt(
@@ -345,9 +348,12 @@ object JourneyScenarioParser {
         key: String,
     ): Int? {
         val value = container[key] ?: return null
-        if (value == JsonNull) return null
-        return (value as? JsonPrimitive)?.intOrNull
-            ?: throw JourneyScenarioFormatException("Field '$key' must be an integer or null.")
+        return if (value == JsonNull) {
+            null
+        } else {
+            (value as? JsonPrimitive)?.intOrNull
+                ?: throw JourneyScenarioFormatException("Field '$key' must be an integer or null.")
+        }
     }
 
     private fun requiredBoolean(

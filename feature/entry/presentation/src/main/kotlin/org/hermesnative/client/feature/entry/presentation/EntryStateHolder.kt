@@ -243,14 +243,13 @@ object ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
     override fun remove(
         key: PendingRunSubmissionKey,
         attemptId: String?,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
             val current = keys[key] ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             keys.remove(key)
-            return true
+            true
         }
-    }
 
     override fun contains(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { key in keys }
 
@@ -283,42 +282,39 @@ object ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
         key: PendingRunSubmissionKey,
         runId: RunId,
         attemptId: String?,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
             val current = keys[key] ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             current.boundRunId = runId
-            return true
+            true
         }
-    }
 
     override fun boundRunId(key: PendingRunSubmissionKey): RunId? = synchronized(lock) { keys[key]?.boundRunId }
 
     override fun markSettled(
         key: PendingRunSubmissionKey,
         attemptId: String?,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
             val current = keys[key] ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             current.settled = true
-            return true
+            true
         }
-    }
 
     override fun isSettled(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { keys[key]?.settled == true }
 
     override fun markAmbiguous(
         key: PendingRunSubmissionKey,
         attemptId: String?,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
             val current = keys[key] ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             current.requiresRunMatch = true
-            return true
+            true
         }
-    }
 
     override fun requiresRunMatch(key: PendingRunSubmissionKey): Boolean {
         return synchronized(lock) { keys[key]?.requiresRunMatch == true }

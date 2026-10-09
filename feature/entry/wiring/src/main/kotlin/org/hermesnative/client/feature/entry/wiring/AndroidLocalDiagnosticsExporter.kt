@@ -30,26 +30,25 @@ class AndroidLocalDiagnosticsExporter(
 
     override fun export(): LocalDiagnosticsExportResult {
         val exportedAt = clock()
-        val encoded =
-            when (
-                val encoding =
-                    LocalDiagnosticsSnapshot.encode(
-                        records = buffer.records(),
-                        clientVersion = clientVersion,
-                        exportedAt = exportedAt,
-                        gatewayRevision = null,
-                    )
-            ) {
-                LocalDiagnosticsSnapshotEncoding.NoRecords -> return LocalDiagnosticsExportResult.EMPTY
-                LocalDiagnosticsSnapshotEncoding.Rejected -> return LocalDiagnosticsExportResult.FAILED
-                is LocalDiagnosticsSnapshotEncoding.Encoded -> encoding
-            }
-        return try {
-            val snapshotFile = writeSnapshot(encoded.text, exportedAt)
-            context.startActivity(shareIntent(snapshotFile))
-            LocalDiagnosticsExportResult.SHARED
-        } catch (_: Exception) {
-            LocalDiagnosticsExportResult.FAILED
+        return when (
+            val encoding =
+                LocalDiagnosticsSnapshot.encode(
+                    records = buffer.records(),
+                    clientVersion = clientVersion,
+                    exportedAt = exportedAt,
+                    gatewayRevision = null,
+                )
+        ) {
+            LocalDiagnosticsSnapshotEncoding.NoRecords -> LocalDiagnosticsExportResult.EMPTY
+            LocalDiagnosticsSnapshotEncoding.Rejected -> LocalDiagnosticsExportResult.FAILED
+            is LocalDiagnosticsSnapshotEncoding.Encoded ->
+                try {
+                    val snapshotFile = writeSnapshot(encoding.text, exportedAt)
+                    context.startActivity(shareIntent(snapshotFile))
+                    LocalDiagnosticsExportResult.SHARED
+                } catch (_: Exception) {
+                    LocalDiagnosticsExportResult.FAILED
+                }
         }
     }
 

@@ -214,15 +214,18 @@ internal fun List<SessionMessageUiState>.chronological(): List<SessionMessageUiS
     val timestamped =
         filter { it.timestamp != null }
             .sortedBy { requireNotNull(it.timestamp) }
-    if (timestamped.size == size) return timestamped
-    if (timestamped.isEmpty()) return this
-
-    var timestampedIndex = 0
-    return map { message ->
-        if (message.timestamp == null) {
-            message
-        } else {
-            timestamped[timestampedIndex++]
+    return when {
+        timestamped.size == size -> timestamped
+        timestamped.isEmpty() -> this
+        else -> {
+            var timestampedIndex = 0
+            map { message ->
+                if (message.timestamp == null) {
+                    message
+                } else {
+                    timestamped[timestampedIndex++]
+                }
+            }
         }
     }
 }

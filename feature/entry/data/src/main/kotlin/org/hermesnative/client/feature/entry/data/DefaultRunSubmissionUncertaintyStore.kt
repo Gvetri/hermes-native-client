@@ -44,14 +44,13 @@ class DefaultRunSubmissionUncertaintyStore(
     override fun remove(
         key: PendingRunSubmissionKey,
         attemptId: String?,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
             val current = storage.read(key) ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             storage.remove(key)
-            return true
+            true
         }
-    }
 
     override fun contains(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { storage.read(key) != null }
 
@@ -100,7 +99,7 @@ class DefaultRunSubmissionUncertaintyStore(
         key: PendingRunSubmissionKey,
         knownRunIds: Set<RunId>,
         attemptId: String?,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
             val current = storage.read(key) ?: return false
             if (
@@ -110,9 +109,8 @@ class DefaultRunSubmissionUncertaintyStore(
                 return false
             }
             storage.remove(key)
-            return true
+            true
         }
-    }
 
     override fun removeIfSnapshotMatches(
         key: PendingRunSubmissionKey,
@@ -129,14 +127,13 @@ class DefaultRunSubmissionUncertaintyStore(
         key: PendingRunSubmissionKey,
         attemptId: String?,
         transform: (RunSubmissionUncertaintySnapshot) -> RunSubmissionUncertaintySnapshot,
-    ): Boolean {
+    ): Boolean =
         synchronized(lock) {
             val current = storage.read(key) ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             storage.write(key, transform(current))
-            return true
+            true
         }
-    }
 
     private companion object {
         const val LEGACY_ATTEMPT_ID = "legacy"
