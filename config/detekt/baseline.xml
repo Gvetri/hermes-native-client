@@ -100,7 +100,6 @@
 <ID>LongMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun history_run_selection_is_atomic_with_unresolved_submission_state()</ID>
 <ID>LongMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun send_timeout_applies_authoritative_history_while_preserving_the_uncertain_draft()</ID>
 <ID>LongMethod:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$@Test fun retry_after_an_active_run_fails_through_sse_and_reconciles_with_pinned_history_creates_exactly_one_new_run()</ID>
-<ID>LongMethod:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$@Test fun retry_after_sse_failure_with_the_persistent_submission_store_and_recovery_registry_creates_exactly_one_new_run()</ID>
 <ID>LongMethod:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$@Test fun retry_is_not_available_for_uncertain_or_succeeded_runs()</ID>
 <ID>LongMethod:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$@Test fun retry_uses_the_recorded_original_message_and_never_overwrites_the_composer_draft()</ID>
 <ID>LongMethod:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$@Test fun retry_run_is_shown_independently_with_its_own_identity_and_the_failed_run_stays_visible()</ID>
@@ -143,40 +142,8 @@
 <ID>MaxLineLength:DeterministicGatewayFixture.kt$DeterministicGatewayFixture$if</ID>
 <ID>MaxLineLength:DeterministicGatewayFixture.kt$DeterministicGatewayFixture$private fun requireProcess(): GatewayProcess</ID>
 <ID>MaxLineLength:DeterministicGatewayFixture.kt$DeterministicGatewayFixture.Companion$fun fromDescriptor(descriptorFile: File): DeterministicGatewayFixture</ID>
-<ID>MaxLineLength:EntryScreenTest.kt$EntryScreenTest.SwitchingGateway$override fun listSessions(request: SessionListRequest): SessionPage</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$(mutationJobs.values + runJobs.values + runObservationJobs.values + connectionRecoveryJobs).toList()</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$?:</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$activeResponse = observedMessageUiState(latestObservation) ?: observedMessageUiState(next)</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$applyAuthoritativeRunReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration, result)</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$errorCategory = SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$if (runObservationJobs[sessionId] !== observationJob || runObservationRunIds[sessionId] != event.runId) return</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$if</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState()</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$latestRunRetryAvailable = latestRunRetryAvailable(knownRuns, latestObservation?.state ?: next.state)</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState()</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$latestRunState = latestObservation?.state ?: latestRun?.toRunPresentationState()</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$locallyOwnedTerminalStates.forEach { state -&gt; rememberObservationState(uncertainObservationState(state.run, state)) }</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$sendErrorCategory = if (canClearSendState) null else opened.sendErrorCategory</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$sessionMutations = mutationMapAfter(sessionId, remainingMutation, current.sessionMutations)</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$sessions = retainedSession?.let { mergeSessions(current.sessions, listOf(it)) } ?: current.sessions</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$showFailure(EntryErrorCategory.CREDENTIAL_STORAGE_FAILED, requestConnectionGeneration)</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$supportingText = "The Gateway contract was verified successfully."</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$val current = _uiState.value.sessionList ?: return@synchronized TimedOutSendReconciliationOutcome(applied = false)</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$val openedSessionUiState = openedSession.toOpenSessionUiState(messages = openedSession.history.toMessageUiStates())</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$EntryStateHolder$val released = synchronized(sessionRequestLock) { releaseRunObservation(releasedSessionId) }</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$RunStatusNotificationExplanation.PERMISSION_DENIED$"Notifications are blocked for this app. Allow notifications in Android settings, then enable this option again."</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$failureSafeMessage = if (state == RunPresentationState.FAILED) RunFailureCategory.GATEWAY_REPORTED.safeMessage else null</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$private fun List&lt;SessionItemUiState&gt;.orderedSessions(): List&lt;SessionItemUiState&gt;</ID>
-<ID>MaxLineLength:EntryStateHolder.kt$private</ID>
-<ID>MaxLineLength:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$assertEquals(listOf(PINNED_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })</ID>
-<ID>MaxLineLength:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$assertEquals(listOf(SERVER_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })</ID>
-<ID>MaxLineLength:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$private fun clientManifestEndpoints(): Map&lt;String, GatewayEndpoint&gt;</ID>
-<ID>MaxLineLength:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest.BlockingMutationResponseTransport$override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream</ID>
-<ID>MaxLineLength:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest.LoopbackFixtureTransport$override fun execute(request: GatewayHttpRequest): GatewayHttpResponse</ID>
-<ID>MaxLineLength:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest.LoopbackFixtureTransport$override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream</ID>
 <ID>MaxLineLength:EntryWiringRestartIntegrationTest.kt$EntryWiringRestartIntegrationTest$storage.save(setOf(RunRecoveryEntry(gateway.session.id, knownRun.id), RunRecoveryEntry(gateway.session.id, submittedRun.id)))</ID>
 <ID>MaxLineLength:EntryWiringRestartIntegrationTest.kt$EntryWiringRestartIntegrationTest.RestartGateway$override fun observeRun(runId: RunId): RunEventObservation</ID>
-<ID>MaxLineLength:GatewayConnectionInputTest.kt$GatewayConnectionInputTest$(InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)</ID>
 <ID>MaxLineLength:GatewayJsonParser.kt$GatewayJsonParser$val currentObject = current as? JsonObject ?: invalid(operation, "field '$path' must be nested in an object")</ID>
 <ID>MaxLineLength:GatewaySessionFixtureIntegrationTest.kt$GatewaySessionFixtureIntegrationTest$assertTrue(listRequests.none { it.query.orEmpty().contains("cursor") || it.query.orEmpty().contains("search") })</ID>
 <ID>MaxLineLength:GatewaySessionFixtureIntegrationTest.kt$GatewaySessionFixtureIntegrationTest$val secondPage = client.listSessions(SessionListRequest(limit = 20, offset = requireNotNull(firstPage.nextOffset)))</ID>
@@ -214,75 +181,12 @@
 <ID>MaxLineLength:LocalDiagnosticsWiringTest.kt$LocalDiagnosticsWiringTest$assertEquals(AndroidLocalDiagnosticsExporter.EXPORT_CHOOSER_TITLE, chooser.getCharSequenceExtra(Intent.EXTRA_TITLE))</ID>
 <ID>MaxLineLength:LocalDiagnosticsWiringTest.kt$LocalDiagnosticsWiringTest$private fun buffer(): RollingLocalDiagnosticsBuffer</ID>
 <ID>MaxLineLength:MainActivityTest.kt$MainActivityTest$composeTestRule.activity.window.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST</ID>
-<ID>MaxLineLength:MarkdownContent.kt$styles = TextLinkStyles(style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))</ID>
-<ID>MaxLineLength:MessageSubmissionStateHolderTest.kt$MessageSubmissionStateHolderTest$listOf(GatewayHistoryMessage("run-message", "user", "Run this", RunId("run-1"), "running"))</ID>
-<ID>MaxLineLength:MessageSubmissionStateHolderTest.kt$MessageSubmissionStateHolderTest$repository: GatewayConnectionRepository = DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())</ID>
-<ID>MaxLineLength:MessageSubmissionStateHolderTest.kt$MessageSubmissionStateHolderTest.FakeGateway$check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Timed out waiting for Run release." }</ID>
 <ID>MaxLineLength:ReconcileRunTest.kt$ReconcileRunTest$assertEquals("INVALID_RESPONSE", (error as? org.hermesnative.client.feature.entry.domain.GatewayException)?.category?.name)</ID>
 <ID>MaxLineLength:RollingLocalDiagnosticsBufferTest.kt$RollingLocalDiagnosticsBufferTest$"""{"schema_version":1,"record_type":"metadata","client_version":"0.1.0","exported_at":"2026-09-28T11:00:00Z"}"""</ID>
 <ID>MaxLineLength:RollingLocalDiagnosticsBufferTest.kt$RollingLocalDiagnosticsBufferTest.Companion$val EXECUTED_EVENT = LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)</ID>
 <ID>MaxLineLength:RollingLocalDiagnosticsBufferTest.kt$RollingLocalDiagnosticsBufferTest.Companion$val FAILED_EVENT = LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.FAILED)</ID>
 <ID>MaxLineLength:RunObservation.kt$RunEventStateTransition$isStreaming = if (terminal || nextState == RunPresentationState.UNCERTAIN) false else current.isStreaming || event.text != null</ID>
-<ID>MaxLineLength:RunObservationStateHolderTest.kt$RunObservationStateHolderTest.ScriptedGateway$override fun listSessions(request: SessionListRequest): SessionPage</ID>
 <ID>MaxLineLength:RunObservationStateTest.kt$RunObservationStateTest$settled.transition(RunEvent(RunEventType.MESSAGE_DELTA, run.id, status = "running", eventId = "empty-delta"))</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$GatewayHistoryMessage("unrelated-assistant", "assistant", "Unrelated result", unrelatedRun.id, "succeeded")</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$assertEquals("Recovered observation", holder.uiState.value.sessionList?.openedSession?.activeResponse?.content)</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$assertEquals(RunPresentationState.SUCCEEDED, holder.uiState.value.sessionList?.openedSession?.latestRunState)</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$listOf(GatewayHistoryMessage("authoritative", "assistant", "Confirmed after refresh", run.id, "succeeded"))</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$listOf(RunEvent(RunEventType.MESSAGE_DELTA, nextRun.id, "running", "Replacement event", "delta"))</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$listOf(RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Recovered observation", "delta"))</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$observation = ScriptedObservation(listOf(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "done")))</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$val observation = DelayedTerminalObservation(RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded"))</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.&lt;no name provided&gt;$check(registrations.incrementAndGet() &lt;= 3) { "Observer restart did not stop after parent cancellation." }</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.BlockingRecoveryRegistry$check(releaseRemove.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Recovery removal was not released." }</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.BlockingRecoveryRegistry$check(releaseSave.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Recovery save was not released." }</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.DelayedTerminalObservation.&lt;no name provided&gt;$check(release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Observation was not released." }</ID>
-<ID>MaxLineLength:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.FakeGateway$check(releaseStatus.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Status was not released." }</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$)</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$VerifyGatewayConnection</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$assertEquals(externalFailedRunId, requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession).latestRun?.id)</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$assertEquals(listOf(session.id to "Original request", session.id to "Original request"), gateway.runRequests)</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == runId &amp;&amp; gateway.runRequests.size == 2 }</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$awaitState(holder) { it.sessionList?.openedSession?.sendErrorCategory == MessageSendErrorCategory.GATEWAY_REQUEST_FAILED }</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$fun</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$val holder = holder(gateway, dispatcher = Dispatchers.Default, onRunSubmissionSettled = gateway.runFinished::countDown)</ID>
-<ID>MaxLineLength:RunRetryStateHolderTest.kt$RunRetryStateHolderTest.FakeGateway$check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Timed out waiting for Run release." }</ID>
-<ID>MaxLineLength:SafeMarkdown.kt$private fun fenceLanguage(line: String): String?</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$assertEquals("Renamed Session", holder.uiState.value.sessionList?.sessionMutations?.get(FIRST)?.rename?.titleDraft)</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$assertEquals(if (opened) "Gateway title" else null, holder.uiState.value.sessionList?.openedSession?.session?.title)</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$assertEquals(listOf(SessionMutationAction.PIN to FIRST, SessionMutationAction.PIN to FIRST), gateway.mutations)</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$assertEquals(listOf(SessionMutationAction.RENAME to FIRST, SessionMutationAction.RENAME to FIRST), gateway.mutations)</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$composeTestRule.onAllNodesWithContentDescription("Session actions for $title").onLast().performScrollTo().performClick()</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$composeTestRule.onNodeWithContentDescription("Session actions for First Session").assertIsDisplayed().performClick()</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$composeTestRule.onNodeWithText("New Session title").performScrollTo().performTextReplacement("Confirmed title")</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$composeTestRule.onNodeWithText("New Session title").performScrollTo().performTextReplacement("Renamed Session")</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$composeTestRule.onNodeWithText("New Session title").performScrollTo().performTextReplacement("Requested title")</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest$composeTestRule.onNodeWithText("Session action outside current search").performScrollTo().assertIsDisplayed()</ID>
-<ID>MaxLineLength:SessionActionMenuIntegrationTest.kt$SessionActionMenuIntegrationTest.MenuGateway$override fun loadSessionHistory(sessionId: SessionId): SessionHistory</ID>
-<ID>MaxLineLength:SessionActionMenuScreenTest.kt$SessionActionMenuScreenTest$val popup = WindowInspector.getGlobalWindowViews().single { it !== composeTestRule.activity.window.decorView }</ID>
-<ID>MaxLineLength:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$composeTestRule.onNodeWithText("The client could not confirm the Run result.").performScrollTo().assertIsDisplayed()</ID>
-<ID>MaxLineLength:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$composeTestRule.onNodeWithText(RunFailureCategory.GATEWAY_REPORTED.safeMessage).performScrollTo().assertIsDisplayed()</ID>
-<ID>MaxLineLength:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$failureSafeMessage = RunFailureCategory.GATEWAY_REPORTED.safeMessage</ID>
-<ID>MaxLineLength:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$private fun transcriptMessage(index: Int): SessionMessageUiState</ID>
-<ID>MaxLineLength:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$session = SessionItemUiState(SessionId("session-1"), "Session", null, false)</ID>
-<ID>MaxLineLength:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$session = SessionItemUiState(SessionId("session-1"), "Shared Session", null, false)</ID>
-<ID>MaxLineLength:SessionListScreen.kt$"The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."</ID>
-<ID>MaxLineLength:SessionListScreen.kt$enabled = actionsEnabled &amp;&amp; mutation?.pendingAction == null &amp;&amp; mutation?.rename == null &amp;&amp; mutation?.delete == null</ID>
-<ID>MaxLineLength:SessionListScreen.kt$private fun panePinnedHeaderMaxHeight(available: Dp): Dp</ID>
-<ID>MaxLineLength:SessionListUiState.kt$SessionMessageUiState$get() = runState == RunPresentationState.FAILED || runStatus?.toRunPresentationState() == RunPresentationState.FAILED</ID>
-<ID>MaxLineLength:SessionMutationScreenTest.kt$SessionMutationScreenTest$assertPinRetryAction(SessionMutationAction.PIN, pinned = true, EntryUiEvent.PinSessionClicked(SessionId("session-one")))</ID>
-<ID>MaxLineLength:SessionMutationScreenTest.kt$SessionMutationScreenTest$assertPinRetryAction(SessionMutationAction.UNPIN, pinned = false, EntryUiEvent.UnpinSessionClicked(SessionId("session-one")))</ID>
-<ID>MaxLineLength:SessionPinDeleteStateHolderTest.kt$SessionPinDeleteStateHolderTest$assertEquals(SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED, failed.sessionMutations[target.id]?.errorCategory)</ID>
-<ID>MaxLineLength:SessionRenameStateHolderTest.kt$SessionRenameStateHolderTest$assertEquals(SessionRenameErrorCategory.CONTROL_CHARACTER, state.sessionMutations[sessionId]?.rename?.errorCategory)</ID>
-<ID>MaxLineLength:SessionRenameStateHolderTest.kt$SessionRenameStateHolderTest$awaitState(holder) { it.sessionList?.sessionMutations?.get(sessionId)?.retryAction == SessionMutationAction.RENAME }</ID>
-<ID>MaxLineLength:SessionRenameStateHolderTest.kt$SessionRenameStateHolderTest$requireNotNull(requireNotNull(holder.uiState.value.sessionList).sessionMutations[sessionId]).rename?.titleDraft</ID>
-<ID>MaxLineLength:SessionRenameStateHolderTest.kt$SessionRenameStateHolderTest$val gateway = FakeSessionGateway(session(sessionId, "Current title", "Preview"), session(sessionId, "Confirmed", "Preview"))</ID>
-<ID>MaxLineLength:SessionShellNavigationTest.kt$SessionShellNavigationTest$sessionMutations = mapOf(id to SessionMutationUiState(rename = SessionRenameUiState("First Session")))</ID>
-<ID>MaxLineLength:SessionShellNavigationTest.kt$SessionShellNavigationTest$sessionMutations = mapOf(sessionId to SessionMutationUiState(rename = SessionRenameUiState("First Session")))</ID>
-<ID>MaxLineLength:SessionShellNavigationTest.kt$SessionShellNavigationTest$val refreshBottomAfterHidden = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom</ID>
-<ID>MaxLineLength:SessionShellNavigationTest.kt$SessionShellNavigationTest$val refreshBottomWhileVisible = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom</ID>
-<ID>MaxLineLength:SessionShellTest.kt$SessionShellTest$openedSession = OpenSessionUiState(session = session("first", "First Session"), messages = emptyList())</ID>
 <ID>MaxLineLength:SharedPreferencesRunRecoveryStorage.kt$SharedPreferencesRunRecoveryStorage$private fun decodePart(value: String): String</ID>
 <ID>MaxLineLength:SharedPreferencesRunRecoveryStorage.kt$SharedPreferencesRunRecoveryStorage$private fun encode(entry: RunRecoveryEntry): String</ID>
 <ID>MaxLineLength:SharedPreferencesRunRecoveryStorage.kt$SharedPreferencesRunRecoveryStorage$private fun encode(value: String): String</ID>
