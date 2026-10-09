@@ -135,10 +135,6 @@
 <ID>NestedBlockDepth:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.FakeGateway$override fun observeRun(runId: RunId): RunEventObservation</ID>
 <ID>NestedBlockDepth:SafeMarkdown.kt$internal fun parseSafeMarkdown(content: String): List&lt;MarkdownBlock&gt;</ID>
 <ID>RedundantSuspendModifier:EntryStateHolder.kt$EntryStateHolder$suspend</ID>
-<ID>ReturnCount:AndroidLocalDiagnosticsExporter.kt$AndroidLocalDiagnosticsExporter$override fun export(): LocalDiagnosticsExportResult</ID>
-<ID>ReturnCount:DefaultRunSubmissionUncertaintyStore.kt$DefaultRunSubmissionUncertaintyStore$override fun remove( key: PendingRunSubmissionKey, attemptId: String?, ): Boolean</ID>
-<ID>ReturnCount:DefaultRunSubmissionUncertaintyStore.kt$DefaultRunSubmissionUncertaintyStore$override fun removeIfKnownRunIdsMatch( key: PendingRunSubmissionKey, knownRunIds: Set&lt;RunId&gt;, attemptId: String?, ): Boolean</ID>
-<ID>ReturnCount:DefaultRunSubmissionUncertaintyStore.kt$DefaultRunSubmissionUncertaintyStore$private fun updateIfMatching( key: PendingRunSubmissionKey, attemptId: String?, transform: (RunSubmissionUncertaintySnapshot) -&gt; RunSubmissionUncertaintySnapshot, ): Boolean</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun applyConfirmedSession( session: Session, request: SessionMutationRequest, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun applyRunEvent( sessionId: SessionId, event: RunEvent, observationJob: Job, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun cancelDeleteSession(sessionId: SessionId)</ID>
@@ -175,31 +171,10 @@
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileOpenedRun( sessionId: SessionId, requestSessionGeneration: Long, requestConnectionGeneration: Long, sessionGateway: SessionGatewayPort, restartObservation: Boolean, runIdToReconcile: RunId? = null, clearRefreshWhenNoRun: Boolean = false, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileTimedOutSend( sessionId: SessionId, requestConnectionGeneration: Long, knownRunIds: Set&lt;RunId&gt;, attemptId: String, resolveWhenNoNewRun: Boolean = false, uncertaintyErrorCategory: MessageSendErrorCategory = MessageSendErrorCategory.UNCERTAIN, ): Boolean</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileTimedOutSendNow( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, knownRunIds: Set&lt;RunId&gt;, resolveWhenNoNewRun: Boolean = false, requestEndpoint: String = _uiState.value.endpoint, ): Boolean</ID>
-<ID>ReturnCount:EntryStateHolder.kt$ProcessRunSubmissionUncertaintyStore$override fun bindRun( key: PendingRunSubmissionKey, runId: RunId, attemptId: String?, ): Boolean</ID>
-<ID>ReturnCount:EntryStateHolder.kt$ProcessRunSubmissionUncertaintyStore$override fun markAmbiguous( key: PendingRunSubmissionKey, attemptId: String?, ): Boolean</ID>
-<ID>ReturnCount:EntryStateHolder.kt$ProcessRunSubmissionUncertaintyStore$override fun markSettled( key: PendingRunSubmissionKey, attemptId: String?, ): Boolean</ID>
-<ID>ReturnCount:EntryStateHolder.kt$ProcessRunSubmissionUncertaintyStore$override fun remove( key: PendingRunSubmissionKey, attemptId: String?, ): Boolean</ID>
-<ID>ReturnCount:GatewayConnectionInputTest.kt$GatewayConnectionInputTest$private fun View.findInputEditor(): View?</ID>
-<ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayBehavior$fun runStatus(runId: String): String?</ID>
-<ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleRunCreate( exchange: HttpExchange, behavior: JourneyGatewayBehavior, body: String?, )</ID>
-<ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleRuns( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
 <ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionList( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
-<ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun parseBooleanField( body: String?, field: String, ): Boolean?</ID>
-<ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun parseRunInput(body: String?): String?</ID>
-<ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun parseStringField( body: String?, field: String, ): String?</ID>
-<ID>ReturnCount:JourneyScenario.kt$JourneyScenarioParser$private fun optionalInt( container: JsonObject, key: String, ): Int?</ID>
-<ID>ReturnCount:JourneyScenario.kt$JourneyScenarioParser$private fun optionalString( container: JsonObject, key: String, ): String?</ID>
-<ID>ReturnCount:LocalDiagnosticsRecords.kt$LocalDiagnosticsRecords$fun encodeEventRecord( event: LocalDiagnosticEvent, occurredAt: Instant, ): String?</ID>
-<ID>ReturnCount:LocalDiagnosticsSnapshot.kt$LocalDiagnosticsSnapshot$fun encode( records: List&lt;String&gt;, clientVersion: String, exportedAt: Instant, gatewayRevision: String?, ): LocalDiagnosticsSnapshotEncoding</ID>
-<ID>ReturnCount:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun bodyBoolean( body: String?, field: String, ): Boolean?</ID>
-<ID>ReturnCount:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun bodyContainsField( body: String?, field: String, ): Boolean</ID>
 <ID>ReturnCount:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun handleSessionResourceRequest( exchange: HttpExchange, behavior: SyntheticGatewayBehavior, )</ID>
-<ID>ReturnCount:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun parseTitle(body: String?): String?</ID>
-<ID>ReturnCount:RunObservation.kt$RunEventStateTransition$fun apply( current: RunObservationState, event: RunEvent, ): RunObservationState</ID>
 <ID>ReturnCount:SafeMarkdown.kt$internal fun allowedExternalLinkDestination(destination: String): String?</ID>
-<ID>ReturnCount:SafeMarkdown.kt$private fun emphasisedRange( text: String, index: Int, delimiter: String, ): IntRange?</ID>
 <ID>ReturnCount:SafeMarkdown.kt$private fun linkAt( text: String, index: Int, linkBrackets: LinkBrackets?, labelEnd: Int = linkBrackets?.labelEnds?.get(index) ?: -1, ): LinkMatch?</ID>
-<ID>ReturnCount:SessionListUiState.kt$internal fun List&lt;SessionMessageUiState&gt;.chronological(): List&lt;SessionMessageUiState&gt;</ID>
 <ID>TooGenericExceptionCaught:AndroidKeyStoreGatewayCredentialStore.kt$AndroidKeyStoreGatewayCredentialStore$error: Exception</ID>
 <ID>TooGenericExceptionCaught:ContractFixtureParser.kt$ContractFixtureParser$error: Exception</ID>
 <ID>TooGenericExceptionCaught:DefaultGatewayClient.kt$DefaultGatewayClient$error: Exception</ID>
