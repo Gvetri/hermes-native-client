@@ -22,6 +22,7 @@ must report `skipped`, and any other outcome fails the aggregate; see
 | --- | --- | --- |
 | `formatting` | `formatCheck` | A Kotlin file is not formatted |
 | `static-analysis` | `:app:lintDebug` | Android lint reports an error |
+| `detekt` | `detekt detektVerify` | detekt reports an unbaselined finding, the committed baseline and its ledger disagree, the ledger grew against `main`, a source-set baseline shadows the committed baseline, or the analysis tasks did not execute |
 | `unit-tests` | `verifyRequiredUnitTests` | A declared unit-test scope is missing, empty, has zero executed tests, or contains a skipped test |
 | `fixture-descriptor` | `fixtureDescriptorTests verifyFixtureDescriptor` | The pinned fixture provenance or its descriptor contract changed |
 | `fixture-lifecycle` | `fixtureLifecycleTests journeyScenarioTests` | An executed fixture lifecycle or journey-scenario test fails, or the runner task did not execute |
@@ -125,6 +126,45 @@ The boundary list is declared, not discovered: adding a datasource or repository
 to `QualityPolicy.boundaryDoubles`, and the verification then fails until that boundary has a
 production declaration and a deterministic double in the repository. A port that is never declared
 keeps no double check, so a new port belongs in the same change as its declaration.
+
+### Detekt and the shrink-only baseline
+
+detekt is pinned in `gradle/libs.versions.toml` and every Kotlin module applies it. The root build
+script declares the strict policy once: `config/detekt/detekt.yml` is layered on detekt's default
+config (`buildUponDefaultConfig`), `build.maxIssues: 0` fails the analysis on any reported finding,
+and the rules the gate relies on are enabled explicitly — `ReturnCount` (guard clauses count toward
+the limit), `ElseCaseInsteadOfExhaustiveWhen`, `CommentOverPrivateFunction`, and
+`CommentOverPrivateProperty`. The exemptions are deliberate and stated in the configuration file:
+Compose functions are PascalCase by convention, and the two test-source exemptions cover idioms
+whose reason is recorded next to them.
+
+`./gradlew detekt` runs the type-resolution tasks (`detektMain` and `detektTest` for every module),
+so a rule that needs binding executes instead of silently skipping. The plain, non-type-resolving
+per-module tasks exist but stay disabled, and the aggregate never runs them.
+
+`./gradlew detektVerify` verifies the evidence. `config/detekt/baseline.xml` records every finding
+that existed when detekt was adopted, and `config/detekt/baseline-ledger.txt` records that count as
+a single integer:
+
+- the committed baseline must parse, and its entry count must equal the ledger;
+- the ledger may never grow against the base reference (`origin/main` by default; the CI job fetches
+  it into the shallow checkout, and a push to `main` compares the ledger with itself, so it is a
+  no-op pass); when the base holds no ledger yet, the adoption change may introduce it;
+- a base reference that cannot be read fails the verification instead of skipping the ratchet;
+- no source-set-specific baseline (`baseline-main.xml`, `baseline-debug.xml`, ...) may shadow the
+  committed baseline, because detekt would prefer it and silently widen the baseline.
+
+A new finding must be fixed, not baselined. The ledger shrinks as baselined findings are fixed, and
+the verification fails when the two sides disagree. To regenerate the baseline (for example while
+burning it down), delete `config/detekt/baseline.xml`, run each module's `detektBaselineMain` and
+`detektBaselineTest` one at a time — the type-resolution create-baseline tasks write
+source-set-specific files next to the configured path — merge their `<ID>` lines into the committed
+baseline, delete the source-set-specific files again, and set the ledger to the merged entry count.
+
+The detekt contracts are self-tested as well: `QualityGateConfigurationTest` pins the workflow job,
+the declaration, and the configuration, and `QualityVerificationFailClosedTest` runs the real tasks
+against a deliberate violation of each of the four rules, a clean tree, a ledger mismatch, a grown
+ratchet, a shadowing baseline, and a missing base reference.
 
 ## Changing a declared value
 
