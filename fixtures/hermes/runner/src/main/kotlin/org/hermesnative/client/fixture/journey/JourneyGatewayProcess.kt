@@ -82,7 +82,11 @@ class JourneyGatewayProcess private constructor(
             val executor = Executors.newCachedThreadPool()
             if (scenario.tls) {
                 val https = HttpsServer.create(InetSocketAddress("127.0.0.1", scenario.port), 0)
-                val keyStore = loadKeyStore(requireNotNull(keystoreFile) { "Journey TLS scenarios require a keystore." }, keystorePassword)
+                val keyStore =
+                    loadKeyStore(
+                        requireNotNull(keystoreFile) { "Journey TLS scenarios require a keystore." },
+                        keystorePassword,
+                    )
                 https.httpsConfigurator = HttpsConfigurator(serverSslContext(keyStore, keystorePassword))
                 https.executor = executor
                 server = https
@@ -143,9 +147,11 @@ class JourneyGatewayProcess private constructor(
                 append(
                     scenario.capabilities.joinToString(",") { name ->
                         val endpoint = JourneyEndpointCatalog.endpoints.getValue(name)
+                        val method = GatewayHttpSupport.quote(endpoint.method)
+                        val path = GatewayHttpSupport.quote(endpoint.path)
                         """${GatewayHttpSupport.quote(
                             name,
-                        )}:{"method":${GatewayHttpSupport.quote(endpoint.method)},"path":${GatewayHttpSupport.quote(endpoint.path)}}"""
+                        )}:{"method":$method,"path":$path}"""
                     },
                 )
                 append("}}")
@@ -233,7 +239,8 @@ class JourneyGatewayProcess private constructor(
                     respond(
                         exchange,
                         HTTP_OK,
-                        """{"object":"list","data":[$sessionsJson],"limit":$effectiveLimit,"offset":$offset,"has_more":$hasMore}""",
+                        """{"object":"list","data":[$sessionsJson],""" +
+                            """"limit":$effectiveLimit,"offset":$offset,"has_more":$hasMore}""",
                     )
                 }
                 "POST" -> {
@@ -367,7 +374,8 @@ class JourneyGatewayProcess private constructor(
             respond(
                 exchange,
                 HTTP_ACCEPTED,
-                """{"run_id":${script.runId.jsonValue()},"status":${script.createStatus.jsonValue()},"replayed":false}""",
+                """{"run_id":${script.runId.jsonValue()},"status":${script.createStatus.jsonValue()},""" +
+                    """"replayed":false}""",
             )
         }
 
@@ -491,7 +499,10 @@ class JourneyGatewayProcess private constructor(
 
         private fun messageJson(message: JourneyMessage): String =
             buildString {
-                append("""{"id":${message.id.jsonValue()},"role":${message.role.jsonValue()},"content":${message.content.jsonValue()}""")
+                append(
+                    """{"id":${message.id.jsonValue()},"role":${message.role.jsonValue()},""" +
+                        """"content":${message.content.jsonValue()}""",
+                )
                 message.timestamp?.let { append(""","timestamp":${it.jsonValue()}""") }
                 append('}')
             }
@@ -601,7 +612,8 @@ internal class JourneyGatewayBehavior(
         val terminalHistory =
             scenario.runs
                 .filter { run ->
-                    run.sessionId == session.id && (observationDelivered[run.runId] == true || run.runId in interruptedRunIds)
+                    run.sessionId == session.id &&
+                        (observationDelivered[run.runId] == true || run.runId in interruptedRunIds)
                 }
                 .flatMap(JourneyRunScript::terminalHistory)
         return (session.history + terminalHistory).toList()
@@ -612,7 +624,9 @@ internal class JourneyGatewayBehavior(
             append("""{"scenario":${scenario.name.jsonValue()},"provenance":${scenario.hermesRevision.jsonValue()}""")
             append(""","requests":[""")
             append(
-                requests.joinToString(",") { request -> """{"method":${request.method.jsonValue()},"path":${request.path.jsonValue()}}""" },
+                requests.joinToString(",") { request ->
+                    """{"method":${request.method.jsonValue()},"path":${request.path.jsonValue()}}"""
+                },
             )
             append(']')
             append(""","session_mutations":[""")

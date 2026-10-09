@@ -52,7 +52,10 @@ class ReconcileRunTest {
                     .execute(run.id, requestedSessionId)
             }.exceptionOrNull()
 
-        assertEquals("INVALID_RESPONSE", (error as? org.hermesnative.client.feature.entry.domain.GatewayException)?.category?.name)
+        assertEquals(
+            "INVALID_RESPONSE",
+            (error as? org.hermesnative.client.feature.entry.domain.GatewayException)?.category?.name,
+        )
         assertEquals(listOf("run-status:run-1"), operations)
     }
 
@@ -71,7 +74,10 @@ class ReconcileRunTest {
                 ).execute(run.id, requestedSessionId)
             }.exceptionOrNull()
 
-        assertEquals("INVALID_RESPONSE", (error as? org.hermesnative.client.feature.entry.domain.GatewayException)?.category?.name)
+        assertEquals(
+            "INVALID_RESPONSE",
+            (error as? org.hermesnative.client.feature.entry.domain.GatewayException)?.category?.name,
+        )
         assertEquals(listOf("run-status:run-1", "session-history:session-1"), operations)
     }
 

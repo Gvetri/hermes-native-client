@@ -16,7 +16,8 @@ class LocalDiagnosticsRecordsTest {
         val occurredAt = Instant.parse("2026-09-28T10:15:30Z")
 
         assertEquals(
-            """{"schema_version":1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
+            """{"schema_version":1,"record_type":"event","event_type":"session_list_load",""" +
+                """"occurred_at":"2026-09-28T10:15:30Z"}""",
             LocalDiagnosticsRecords.encodeEventRecord(
                 LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD),
                 occurredAt,
@@ -71,11 +72,13 @@ class LocalDiagnosticsRecordsTest {
     @Test
     fun metadata_record_carries_only_the_allowlisted_fields() {
         assertEquals(
-            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0","exported_at":"2026-09-28T10:15:30Z"}""",
+            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0",""" +
+                """"exported_at":"2026-09-28T10:15:30Z"}""",
             LocalDiagnosticsRecords.encodeMetadataRecord("0.1.0", FIXED_INSTANT, gatewayRevision = null),
         )
         assertEquals(
-            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0","exported_at":"2026-09-28T10:15:30Z",""" +
+            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0",""" +
+                """"exported_at":"2026-09-28T10:15:30Z",""" +
                 """"gateway_revision":"2026_09_01"}""",
             LocalDiagnosticsRecords.encodeMetadataRecord("0.1.0", FIXED_INSTANT, gatewayRevision = "2026_09_01"),
         )
@@ -141,13 +144,19 @@ class LocalDiagnosticsRecordsTest {
                 VALID_RECORD + ""","status":"succeeded","run_id":"run-1"}""",
                 """{"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
                 """{"schema_version":1,"record_type":"event","event_type":"session_list_load"}""",
-                """{"schema_version":2,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
-                """{"schema_version":1,"record_type":"event_log","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
-                """{"schema_version":1,"record_type":"event","event_type":"Session List Load","occurred_at":"2026-09-28T10:15:30Z"}""",
-                """{"schema_version":1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30+02:00"}""",
-                """{"schema_version":1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:3""",
+                """{"schema_version":2,"record_type":"event","event_type":"session_list_load",""" +
+                    """"occurred_at":"2026-09-28T10:15:30Z"}""",
+                """{"schema_version":1,"record_type":"event_log","event_type":"session_list_load",""" +
+                    """"occurred_at":"2026-09-28T10:15:30Z"}""",
+                """{"schema_version":1,"record_type":"event","event_type":"Session List Load",""" +
+                    """"occurred_at":"2026-09-28T10:15:30Z"}""",
+                """{"schema_version":1,"record_type":"event","event_type":"session_list_load",""" +
+                    """"occurred_at":"2026-09-28T10:15:30+02:00"}""",
+                """{"schema_version":1,"record_type":"event","event_type":"session_list_load",""" +
+                    """"occurred_at":"2026-09-28T10:15:3""",
                 VALID_RECORD + " trailing",
-                """{"schema_version": 1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
+                """{"schema_version": 1,"record_type":"event","event_type":"session_list_load",""" +
+                    """"occurred_at":"2026-09-28T10:15:30Z"}""",
                 """[{"schema_version":1,"record_type":"event"}]""",
                 "",
                 valid + "\n" + valid,
@@ -172,6 +181,7 @@ class LocalDiagnosticsRecordsTest {
         val FIXED_INSTANT: Instant = Instant.parse("2026-09-28T10:15:30Z")
         val VALID_EVENT = LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD)
         const val VALID_RECORD =
-            """{"schema_version":1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}"""
+            """{"schema_version":1,"record_type":"event","event_type":"session_list_load",""" +
+                """"occurred_at":"2026-09-28T10:15:30Z"}"""
     }
 }

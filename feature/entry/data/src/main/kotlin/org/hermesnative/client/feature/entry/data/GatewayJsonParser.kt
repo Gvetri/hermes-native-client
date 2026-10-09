@@ -354,7 +354,8 @@ internal object GatewayJsonParser {
     ): JsonElement {
         var current: JsonElement = root
         path.split('.').forEach { segment ->
-            val currentObject = current as? JsonObject ?: invalid(operation, "field '$path' must be nested in an object")
+            val currentObject =
+                current as? JsonObject ?: invalid(operation, "field '$path' must be nested in an object")
             current = currentObject[segment] ?: invalid(operation, "missing required field '$path'")
         }
         return current

@@ -87,7 +87,12 @@ object RunEventStateTransition {
             run = nextRun,
             state = nextState,
             responseText = nextText,
-            isStreaming = if (terminal || nextState == RunPresentationState.UNCERTAIN) false else current.isStreaming || event.text != null,
+            isStreaming =
+                if (terminal || nextState == RunPresentationState.UNCERTAIN) {
+                    false
+                } else {
+                    current.isStreaming || event.text != null
+                },
             isStreamInterrupted = event.type == RunEventType.INTERRUPTED,
             processedEventIds = processedEventIds,
         )

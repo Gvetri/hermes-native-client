@@ -152,7 +152,8 @@ class RollingLocalDiagnosticsBufferTest {
         val lines = snapshot.trimEnd('\n').split("\n")
         assertEquals(3, lines.size)
         assertEquals(
-            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0","exported_at":"2026-09-28T11:00:00Z"}""",
+            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0",""" +
+                """"exported_at":"2026-09-28T11:00:00Z"}""",
             lines.first(),
         )
         assertEquals(buffer.records(), lines.drop(1))
@@ -257,8 +258,10 @@ class RollingLocalDiagnosticsBufferTest {
         val FIRST_INSTANT: Instant = Instant.parse("2026-09-28T10:15:30Z")
         val SECOND_INSTANT: Instant = Instant.parse("2026-09-28T10:16:30Z")
         val THIRD_INSTANT: Instant = Instant.parse("2026-09-28T10:17:30Z")
-        val EXECUTED_EVENT = LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)
-        val FAILED_EVENT = LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.FAILED)
+        val EXECUTED_EVENT =
+            LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)
+        val FAILED_EVENT =
+            LocalDiagnosticEvent(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.FAILED)
         val UNCERTAIN_EVENT =
             LocalDiagnosticEvent(LocalDiagnosticEventType.RUN_SUBMISSION, LocalDiagnosticStatus.UNCERTAIN)
     }

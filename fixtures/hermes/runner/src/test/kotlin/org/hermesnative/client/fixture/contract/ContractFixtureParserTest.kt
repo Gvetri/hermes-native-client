@@ -62,7 +62,10 @@ class ContractFixtureParserTest {
             assertTrue("Missing required endpoint '$endpoint'", successEndpoints.containsKey(endpoint))
         }
         assertEquals("GET", successEndpoints.getValue("sessions").jsonObject.getValue("method").jsonPrimitive.content)
-        assertEquals("PATCH", successEndpoints.getValue("session_update").jsonObject.getValue("method").jsonPrimitive.content)
+        assertEquals(
+            "PATCH",
+            successEndpoints.getValue("session_update").jsonObject.getValue("method").jsonPrimitive.content,
+        )
         assertEquals("POST", successEndpoints.getValue("runs").jsonObject.getValue("method").jsonPrimitive.content)
         assertEquals("GET", successEndpoints.getValue("run_events").jsonObject.getValue("method").jsonPrimitive.content)
 
@@ -71,7 +74,10 @@ class ContractFixtureParserTest {
 
         val additiveEndpoints = additive.requiredObject("response.body.endpoints")
         SupportedGatewayCapabilities.required.forEach { endpoint ->
-            assertTrue("Additive fixture dropped required endpoint '$endpoint'", additiveEndpoints.containsKey(endpoint))
+            assertTrue(
+                "Additive fixture dropped required endpoint '$endpoint'",
+                additiveEndpoints.containsKey(endpoint),
+            )
         }
         assertTrue(additiveEndpoints.containsKey("gateway_future_endpoint"))
         assertEquals("additive-value", additive.requiredString("future_additive_field"))
@@ -193,7 +199,10 @@ class ContractFixtureParserTest {
         assertEquals(202, createResponse.requiredInt("response.status"))
         assertEquals(RUN_ID, createResponse.requiredString("response.body.run_id"))
         assertEquals("started", createResponse.requiredString("response.body.status"))
-        assertFalse(createResponse.root.getValue("response").jsonObject.getValue("body").jsonObject.containsKey("session_id"))
+        assertFalse(
+            createResponse.root.getValue("response").jsonObject
+                .getValue("body").jsonObject.containsKey("session_id"),
+        )
         assertRequest(statusRequest, "GET", "/v1/runs/$RUN_ID")
         assertEquals(200, statusResponse.requiredInt("response.status"))
         assertEquals("hermes.run", statusResponse.requiredString("response.body.object"))

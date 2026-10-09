@@ -100,7 +100,9 @@ class ShellIntegrationTest {
             ),
         )
 
-    private fun sessionListEntryState(): EntryUiState = entryState(SessionListUiState(sessions = listOf(session("first", "First Session"))))
+    private fun sessionListEntryState(): EntryUiState {
+        return entryState(SessionListUiState(sessions = listOf(session("first", "First Session"))))
+    }
 
     private fun entryState(sessionList: SessionListUiState): EntryUiState =
         EntryUiState(

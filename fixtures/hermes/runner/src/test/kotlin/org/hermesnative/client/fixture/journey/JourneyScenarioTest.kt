@@ -135,7 +135,8 @@ class JourneyScenarioTest {
                 """{"name":"unknown-field","hermes_revision":"$revision",""" +
                     """"port":18443,"tls":false,"capabilities":["sessions"],"mutable":"latest"}""",
             )
-        val error = runCatching { JourneyScenarioParser.parse(file, pinnedDescriptor.provenance.value) }.exceptionOrNull()
+        val error =
+            runCatching { JourneyScenarioParser.parse(file, pinnedDescriptor.provenance.value) }.exceptionOrNull()
         assertTrue(error is JourneyScenarioFormatException)
         assertTrue(error!!.message.orEmpty().contains("unsupported"))
     }
@@ -347,7 +348,8 @@ class JourneyScenarioTest {
                 assertEquals(emptyList<SseEvent>(), streamEvents(endpoint, "empty-run"))
                 val status = Json.parseToJsonElement(getBody(endpoint, "/v1/runs/empty-run")).jsonObject
                 assertEquals("completed", status.getValue("status").jsonPrimitive.content)
-                val history = Json.parseToJsonElement(getBody(endpoint, "/api/sessions/session-alpha/messages")).jsonObject
+                val history =
+                    Json.parseToJsonElement(getBody(endpoint, "/api/sessions/session-alpha/messages")).jsonObject
                 val contents =
                     history.getValue("data").jsonArray.map { message ->
                         message.jsonObject.getValue("content").jsonPrimitive.content
@@ -382,7 +384,8 @@ class JourneyScenarioTest {
         try {
             val endpoint = process.endpoint
             post(endpoint, "/v1/runs", """{"input":"Run this","session_id":"session-alpha"}""")
-            val connection = (endpoint.resolve("/v1/runs/streaming-run/events").toURL().openConnection() as HttpURLConnection)
+            val connection =
+                (endpoint.resolve("/v1/runs/streaming-run/events").toURL().openConnection() as HttpURLConnection)
             connection.connectTimeout = 2_000
             connection.readTimeout = 10_000
             connection.requestMethod = "GET"
@@ -464,7 +467,11 @@ class JourneyScenarioTest {
         val process = startGateway("session-list-first", tls = false)
         try {
             val client = HttpClient.newHttpClient()
-            listOf("""{"title":"do-not-export-title"}""", """{"pinned":true}""", """{"pinned":false}""").forEach { body ->
+            listOf(
+                """{"title":"do-not-export-title"}""",
+                """{"pinned":true}""",
+                """{"pinned":false}""",
+            ).forEach { body ->
                 val request =
                     HttpRequest.newBuilder(process.endpoint.resolve("/api/sessions/session-alpha"))
                         .method("PATCH", HttpRequest.BodyPublishers.ofString(body)).build()
@@ -474,7 +481,8 @@ class JourneyScenarioTest {
             assertFalse(telemetry.toString().contains("do-not-export-title"))
             assertEquals(
                 listOf("rename", "pin", "unpin"),
-                telemetry["session_mutations"]?.jsonArray.orEmpty().map { it.jsonObject.getValue("operation").jsonPrimitive.content },
+                telemetry["session_mutations"]?.jsonArray.orEmpty()
+                    .map { it.jsonObject.getValue("operation").jsonPrimitive.content },
             )
         } finally {
             process.stop()

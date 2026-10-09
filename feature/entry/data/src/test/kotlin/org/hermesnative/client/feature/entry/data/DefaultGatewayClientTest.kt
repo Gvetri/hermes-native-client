@@ -109,7 +109,11 @@ class DefaultGatewayClientTest {
         expectedFixtures.forEachIndexed { index, fixturePath ->
             assertFixtureRequest(transport.requests[index], fixturePath)
         }
-        assertFixtureRequest(transport.requests.last(), "runs/status-request.json", expectedPath = "/v1/runs/$RUN_ID/events")
+        assertFixtureRequest(
+            transport.requests.last(),
+            "runs/status-request.json",
+            expectedPath = "/v1/runs/$RUN_ID/events",
+        )
         assertEquals("text/event-stream", transport.requests.last().headers["Accept"])
     }
 
@@ -342,7 +346,8 @@ class DefaultGatewayClientTest {
             clientForResponse("malformed/mismatched-session-response.json").openSession(SessionId(SESSION_ID))
         }
         assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
-            clientForResponse("malformed/mismatched-session-response.json").renameSession(SessionId(SESSION_ID), "Renamed")
+            clientForResponse("malformed/mismatched-session-response.json")
+                .renameSession(SessionId(SESSION_ID), "Renamed")
         }
         assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
             clientForResponse("malformed/mismatched-history-response.json").loadSessionHistory(SessionId(SESSION_ID))
@@ -354,7 +359,8 @@ class DefaultGatewayClientTest {
             clientForResponse("malformed/mismatched-pin-response.json").unpinSession(SessionId(SESSION_ID))
         }
         assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
-            clientForResponse("malformed/incomplete-run-admission-response.json").createRun(SessionId(SESSION_ID), "input")
+            clientForResponse("malformed/incomplete-run-admission-response.json")
+                .createRun(SessionId(SESSION_ID), "input")
         }
         assertFailure(GatewayErrorCategory.INVALID_RESPONSE) {
             clientForResponse("malformed/mismatched-run-status-response.json").getRunStatus(RunId(RUN_ID))

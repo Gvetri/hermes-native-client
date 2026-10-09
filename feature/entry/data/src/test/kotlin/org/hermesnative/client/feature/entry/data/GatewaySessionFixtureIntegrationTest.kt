@@ -98,7 +98,8 @@ class GatewaySessionFixtureIntegrationTest {
             client.discoverCapabilities()
 
             val firstPage = client.listSessions(SessionListRequest(limit = 20))
-            val secondPage = client.listSessions(SessionListRequest(limit = 20, offset = requireNotNull(firstPage.nextOffset)))
+            val secondPage =
+                client.listSessions(SessionListRequest(limit = 20, offset = requireNotNull(firstPage.nextOffset)))
 
             assertEquals(listOf(SERVER_A), firstPage.sessions.map { it.id.value })
             assertEquals(1, firstPage.nextOffset)
@@ -110,7 +111,9 @@ class GatewaySessionFixtureIntegrationTest {
                 listOf("limit=20&offset=0", "limit=20&offset=1"),
                 listRequests.map { it.query },
             )
-            assertTrue(listRequests.none { it.query.orEmpty().contains("cursor") || it.query.orEmpty().contains("search") })
+            assertTrue(
+                listRequests.none { it.query.orEmpty().contains("cursor") || it.query.orEmpty().contains("search") },
+            )
             assertTrue(behavior.requests.none { it.path.endsWith("/messages") })
             assertTrue(behavior.requests.none { it.method == "POST" })
             assertNoCredentials(behavior)
@@ -395,9 +398,13 @@ class GatewaySessionFixtureIntegrationTest {
 internal class LoopbackFixtureTransport : GatewayTransport {
     private val delegate = OkHttpGatewayTransport()
 
-    override fun execute(request: GatewayHttpRequest): GatewayHttpResponse = delegate.execute(toLoopbackRequest(request))
+    override fun execute(request: GatewayHttpRequest): GatewayHttpResponse {
+        return delegate.execute(toLoopbackRequest(request))
+    }
 
-    override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream = delegate.openEventStream(toLoopbackRequest(request))
+    override fun openEventStream(request: GatewayHttpRequest): GatewayEventStream {
+        return delegate.openEventStream(toLoopbackRequest(request))
+    }
 
     private fun toLoopbackRequest(request: GatewayHttpRequest): GatewayHttpRequest {
         val secureUrl = request.url.removePrefix("https://")

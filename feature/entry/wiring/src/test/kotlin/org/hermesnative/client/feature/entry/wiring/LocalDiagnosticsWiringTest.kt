@@ -107,7 +107,8 @@ class LocalDiagnosticsWiringTest {
         val lines = snapshot.readText().trimEnd('\n').split("\n")
         assertEquals(3, lines.size)
         assertEquals(
-            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0","exported_at":"2026-09-28T11:00:00Z"}""",
+            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0",""" +
+                """"exported_at":"2026-09-28T11:00:00Z"}""",
             lines.first(),
         )
         assertEquals(buffer.records(), lines.drop(1))
@@ -118,7 +119,10 @@ class LocalDiagnosticsWiringTest {
 
         val chooser = shadowOf(context).nextStartedActivity
         assertEquals(Intent.ACTION_CHOOSER, chooser.action)
-        assertEquals(AndroidLocalDiagnosticsExporter.EXPORT_CHOOSER_TITLE, chooser.getCharSequenceExtra(Intent.EXTRA_TITLE))
+        assertEquals(
+            AndroidLocalDiagnosticsExporter.EXPORT_CHOOSER_TITLE,
+            chooser.getCharSequenceExtra(Intent.EXTRA_TITLE),
+        )
         val share = requireNotNull(chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java))
         assertEquals(Intent.ACTION_SEND, share.action)
         val uri = requireNotNull(share.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java))
@@ -244,7 +248,9 @@ class LocalDiagnosticsWiringTest {
         assertTrue(clientVersion.isNotBlank())
     }
 
-    private fun buffer(): RollingLocalDiagnosticsBuffer = RollingLocalDiagnosticsBuffer(FileLocalDiagnosticsStorage(context))
+    private fun buffer(): RollingLocalDiagnosticsBuffer {
+        return RollingLocalDiagnosticsBuffer(FileLocalDiagnosticsStorage(context))
+    }
 
     private fun storedFile(create: Boolean = false): File? {
         val file = File(context.noBackupFilesDir, "local-diagnostics.jsonl")

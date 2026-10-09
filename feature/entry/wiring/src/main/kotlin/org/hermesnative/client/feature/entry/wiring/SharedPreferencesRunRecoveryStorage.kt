@@ -45,7 +45,9 @@ class SharedPreferencesRunRecoveryStorage(
         }
     }
 
-    private fun encode(entry: RunRecoveryEntry): String = "${encode(entry.sessionId.value)}.${encode(entry.runId.value)}"
+    private fun encode(entry: RunRecoveryEntry): String {
+        return "${encode(entry.sessionId.value)}.${encode(entry.runId.value)}"
+    }
 
     private fun decode(value: String): RunRecoveryEntry? {
         val parts = value.split('.', limit = 2)
@@ -58,9 +60,13 @@ class SharedPreferencesRunRecoveryStorage(
         }.getOrNull()
     }
 
-    private fun encode(value: String): String = Base64.encodeToString(value.toByteArray(StandardCharsets.UTF_8), Base64.NO_WRAP)
+    private fun encode(value: String): String {
+        return Base64.encodeToString(value.toByteArray(StandardCharsets.UTF_8), Base64.NO_WRAP)
+    }
 
-    private fun decodePart(value: String): String = Base64.decode(value, Base64.NO_WRAP).toString(StandardCharsets.UTF_8)
+    private fun decodePart(value: String): String {
+        return Base64.decode(value, Base64.NO_WRAP).toString(StandardCharsets.UTF_8)
+    }
 
     private fun entriesKey(): String = "$ENTRIES_KEY.${endpointNamespace(endpointProvider())}"
 

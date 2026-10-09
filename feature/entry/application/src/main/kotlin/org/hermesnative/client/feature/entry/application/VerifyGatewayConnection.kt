@@ -81,7 +81,8 @@ private object GatewayEndpointValidator {
     private val percentEscapePattern = Regex("%([0-9a-fA-F]{2})")
     private val endpointPattern =
         Regex(
-            """(?i)^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]{1,5}))?((?:/[a-z0-9._~!&'()*+,;=:@%/-]*)?)\z""",
+            """(?i)^https://([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]{1,5}))?""" +
+                """((?:/[a-z0-9._~!&'()*+,;=:@%/-]*)?)\z""",
         )
 
     fun normalize(endpoint: String): String {

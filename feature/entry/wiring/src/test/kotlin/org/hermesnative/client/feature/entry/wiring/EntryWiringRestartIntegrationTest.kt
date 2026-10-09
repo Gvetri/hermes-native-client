@@ -334,7 +334,12 @@ class EntryWiringRestartIntegrationTest {
         val knownRun = gateway.externalRun
         val submittedRun = gateway.activeRun
         storage.clearForTest()
-        storage.save(setOf(RunRecoveryEntry(gateway.session.id, knownRun.id), RunRecoveryEntry(gateway.session.id, submittedRun.id)))
+        storage.save(
+            setOf(
+                RunRecoveryEntry(gateway.session.id, knownRun.id),
+                RunRecoveryEntry(gateway.session.id, submittedRun.id),
+            ),
+        )
         gateway.statusByRun[knownRun.id] = knownRun
         gateway.statusByRun[submittedRun.id] = submittedRun
         SharedPreferencesRunSubmissionUncertaintyStore(context).remove(uncertaintyKey)
@@ -666,7 +671,9 @@ class EntryWiringRestartIntegrationTest {
             return statusByRun[runId] ?: if (terminal) activeRun.copy(status = "succeeded") else activeRun
         }
 
-        override fun observeRun(runId: RunId): RunEventObservation = BlockingObservation(observationStarted).also { observations += it }
+        override fun observeRun(runId: RunId): RunEventObservation {
+            return BlockingObservation(observationStarted).also { observations += it }
+        }
     }
 
     private class BlockingObservation(

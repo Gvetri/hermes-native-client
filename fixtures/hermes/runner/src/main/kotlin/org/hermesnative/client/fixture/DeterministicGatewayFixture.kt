@@ -222,7 +222,11 @@ class DeterministicGatewayFixture(
     }
 
     fun teardown() {
-        if (lifecycleState == FixtureLifecycleState.TORN_DOWN && process == null && syntheticState.snapshot().isEmpty()) {
+        if (
+            lifecycleState == FixtureLifecycleState.TORN_DOWN &&
+            process == null &&
+            syntheticState.snapshot().isEmpty()
+        ) {
             return
         }
 
@@ -256,7 +260,9 @@ class DeterministicGatewayFixture(
         }
     }
 
-    private fun requireProcess(): GatewayProcess = requireNotNull(process) { "Deterministic Gateway fixture is not started." }
+    private fun requireProcess(): GatewayProcess {
+        return requireNotNull(process) { "Deterministic Gateway fixture is not started." }
+    }
 
     private fun resetAndVerifySyntheticState() {
         syntheticState.reset()
@@ -273,7 +279,9 @@ class DeterministicGatewayFixture(
     }
 
     companion object {
-        fun fromDescriptor(descriptorFile: File): DeterministicGatewayFixture = DeterministicGatewayFixture(descriptorFile)
+        fun fromDescriptor(descriptorFile: File): DeterministicGatewayFixture {
+            return DeterministicGatewayFixture(descriptorFile)
+        }
     }
 }
 

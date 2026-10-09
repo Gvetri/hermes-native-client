@@ -61,7 +61,8 @@ internal fun fetchTelemetry(
         if (telemetryUrl.scheme == "https") {
             val keyStore =
                 KeyStore.getInstance("PKCS12").apply {
-                    requireNotNull(keystoreFile).inputStream().use { input -> load(input, keystorePassword.toCharArray()) }
+                    requireNotNull(keystoreFile).inputStream()
+                        .use { input -> load(input, keystorePassword.toCharArray()) }
                 }
             val trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
             trustManagerFactory.init(keyStore)
@@ -137,7 +138,9 @@ internal object JourneyInvariants {
         telemetry["run_creates"]?.jsonObject?.get(sessionId)?.jsonPrimitive?.int
             ?: error("Telemetry has no run-create record for session '$sessionId'.")
 
-    private fun runStatusRequests(telemetry: JsonObject): Int = telemetry.getValue("run_status_requests").jsonPrimitive.int
+    private fun runStatusRequests(telemetry: JsonObject): Int {
+        return telemetry.getValue("run_status_requests").jsonPrimitive.int
+    }
 
     private fun interruptedRunIds(telemetry: JsonObject): Set<String> =
         telemetry["interrupted_run_ids"]?.jsonArray?.map { it.jsonPrimitive.content }?.toSet().orEmpty()
@@ -195,7 +198,8 @@ internal object JourneyInvariants {
         val operations =
             telemetry.getValue("session_mutations").jsonArray.map { entry ->
                 val fields = entry.jsonObject
-                fields.getValue("operation").jsonPrimitive.content to fields.getValue("session_id").jsonPrimitive.content
+                fields.getValue("operation").jsonPrimitive.content to
+                    fields.getValue("session_id").jsonPrimitive.content
             }
         val expectedOperations =
             listOf(
@@ -209,7 +213,9 @@ internal object JourneyInvariants {
                 "unpin" to "session-alpha",
                 "delete" to "session-alpha",
             )
-        check(operations == expectedOperations) { "The confirmed Session operation types or targets did not match the journey." }
+        check(operations == expectedOperations) {
+            "The confirmed Session operation types or targets did not match the journey."
+        }
         var writesSeen = 0
         val checkpoints =
             buildList {
@@ -249,7 +255,9 @@ internal object JourneyInvariants {
         check(sse.opened == 2) {
             "Active Run was observed ${sse.opened} times; expected 2 (initial plus re-open, no refresh duplicate)."
         }
-        check(sse.closed == 1) { "Active Run observation closed ${sse.closed} times; expected exactly 1 (Session switch)." }
+        check(sse.closed == 1) {
+            "Active Run observation closed ${sse.closed} times; expected exactly 1 (Session switch)."
+        }
         check(runStatusRequests(telemetry) >= 1) { "The client did not re-check the active Run status." }
         check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
             "The client submitted the active Run more than once."
@@ -285,7 +293,8 @@ internal object JourneyInvariants {
         check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile the terminal Run." }
         val submissions = runCreatesFor(telemetry, ACTIVE_SESSION_ID)
         check(submissions == 1) {
-            "The client submitted the terminal Run $submissions times; expected exactly 1 (no duplicate retry submissions)."
+            "The client submitted the terminal Run $submissions times; " +
+                "expected exactly 1 (no duplicate retry submissions)."
         }
     }
 
