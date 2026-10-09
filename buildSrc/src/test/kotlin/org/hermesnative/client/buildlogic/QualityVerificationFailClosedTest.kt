@@ -1,6 +1,7 @@
 package org.hermesnative.client.buildlogic
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -140,6 +141,240 @@ class QualityVerificationFailClosedTest {
         )
     }
 
+    @Test
+    fun quality_gate_rejects_a_skipped_detekt_verification() {
+        val result = runGradle(listOf("qualityGate") + excludedGateTasks + listOf("-x", "detektVerify"))
+
+        assertNotEquals("qualityGate accepted a run without its detekt verification:\n${result.output}", 0, result.exitCode)
+        assertTrue(
+            "qualityGate did not require its detekt verification to execute:\n${result.output}",
+            result.output.contains("qualityGate requires detektVerify to execute in this invocation."),
+        )
+    }
+
+    @Test
+    fun detekt_return_count_violation_fails_the_real_analysis_task() {
+        // Two of the three returns are guard clauses: the configured rule counts them toward the
+        // limit, so a function whose only non-guard return is under the limit still fails.
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektReturnCountFixture.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "internal fun detektFixtureGuardedTotal(input: Int, other: Int): Int {\n" +
+                    "    if (input < 0) return 0\n" +
+                    "    if (other < 0) return 1\n" +
+                    "    return input + other\n" +
+                    "}\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[ReturnCount]",
+        )
+    }
+
+    @Test
+    fun detekt_else_case_violation_fails_the_real_analysis_with_type_resolution() {
+        // The rule only knows that the `when` subject is an enum through type resolution, so this
+        // proof fails when the analysis runs without the compile classpath.
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektFixtureState.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "internal enum class DetektFixtureState {\n" +
+                    "    READY,\n" +
+                    "    STOPPED,\n" +
+                    "}\n\n" +
+                    "internal fun detektFixtureDescribe(state: DetektFixtureState): Int =\n" +
+                    "    when (state) {\n" +
+                    "        DetektFixtureState.READY -> 1\n" +
+                    "        else -> 2\n" +
+                    "    }\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[ElseCaseInsteadOfExhaustiveWhen]",
+        )
+    }
+
+    @Test
+    fun detekt_comment_over_private_function_fails_the_real_analysis() {
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektCommentFixture.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "/**\n" +
+                    " * The documentation over this private function must be reported.\n" +
+                    " */\n" +
+                    "private fun detektFixturePrivateHelper(input: Int): Int = input + 1\n\n" +
+                    "internal fun detektFixtureUseHelper(): Int = detektFixturePrivateHelper(1)\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[CommentOverPrivateFunction]",
+        )
+    }
+
+    @Test
+    fun detekt_comment_over_private_property_fails_the_real_analysis() {
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektFixtureCommentHolder.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "internal object DetektFixtureCommentHolder {\n" +
+                    "    /**\n" +
+                    "     * The documentation over this private property must be reported.\n" +
+                    "     */\n" +
+                    "    private val detektFixturePrivateProperty = 1\n\n" +
+                    "    fun read(): Int = detektFixturePrivateProperty\n" +
+                    "}\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[CommentOverPrivateProperty]",
+        )
+    }
+
+    @Test
+    fun detekt_verification_passes_on_a_clean_tree() {
+        withRatchetBaseRef(ledgerText()) { baseRef ->
+            val result = runGradle(listOf("detekt", "detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
+
+            assertEquals("The detekt verification rejected a clean tree:\n${result.output}", 0, result.exitCode)
+        }
+    }
+
+    @Test
+    fun detekt_verification_rejects_a_ledger_that_does_not_match_the_baseline() {
+        val ledgerFile = repositoryRoot.resolve("config/detekt/baseline-ledger.txt")
+        val original = ledgerFile.readText()
+        try {
+            ledgerFile.writeText((original.trim().toInt() + 1).toString() + "\n")
+            withRatchetBaseRef(original) { baseRef ->
+                val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
+
+                assertNotEquals(
+                    "The detekt verification accepted a ledger that disagrees with the baseline:\n${result.output}",
+                    0,
+                    result.exitCode,
+                )
+                assertTrue(
+                    "The detekt verification did not report the ledger mismatch:\n${result.output}",
+                    result.output.contains("Detekt baseline ledger mismatch:"),
+                )
+            }
+        } finally {
+            ledgerFile.writeText(original)
+        }
+    }
+
+    @Test
+    fun detekt_verification_rejects_a_baseline_ratchet_that_grows_against_the_base() {
+        val ledger = ledgerText().trim().toInt()
+        withRatchetBaseRef((ledger - 1).toString() + "\n") { baseRef ->
+            val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
+
+            assertNotEquals(
+                "The detekt verification accepted a ledger that grew against the base:\n${result.output}",
+                0,
+                result.exitCode,
+            )
+            assertTrue(
+                "The detekt verification did not report the grown ratchet:\n${result.output}",
+                result.output.contains("Detekt baseline ratchet grew against"),
+            )
+        }
+    }
+
+    @Test
+    fun detekt_verification_rejects_a_source_set_baseline_that_shadows_the_committed_baseline() {
+        val shadowingBaseline = repositoryRoot.resolve("config/detekt/baseline-main.xml")
+        check(!shadowingBaseline.exists()) { "config/detekt/baseline-main.xml must not exist before the fixture is written." }
+        try {
+            // The fixture carries the committed entries, so the analysis itself still passes and the
+            // verification's own guard against a shadowing baseline is what fails the run.
+            shadowingBaseline.writeText(repositoryRoot.resolve("config/detekt/baseline.xml").readText())
+            withRatchetBaseRef(ledgerText()) { baseRef ->
+                val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
+
+                assertNotEquals(
+                    "The detekt verification accepted a shadowing source-set baseline:\n${result.output}",
+                    0,
+                    result.exitCode,
+                )
+                assertTrue(
+                    "The detekt verification did not report the shadowing baseline:\n${result.output}",
+                    result.output.contains("would shadow the committed baseline"),
+                )
+            }
+        } finally {
+            shadowingBaseline.delete()
+        }
+    }
+
+    @Test
+    fun detekt_verification_fails_closed_when_the_base_reference_is_unavailable() {
+        val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=refs/hermes-verification/unavailable-base"))
+
+        assertNotEquals(
+            "The detekt verification accepted an unverifiable ratchet base:\n${result.output}",
+            0,
+            result.exitCode,
+        )
+        assertTrue(
+            "The detekt verification did not fail closed on the missing base:\n${result.output}",
+            result.output.contains("is not available in this checkout"),
+        )
+    }
+
+    private fun ledgerText(): String = repositoryRoot.resolve("config/detekt/baseline-ledger.txt").readText()
+
+    /**
+     * Creates a synthetic base ref whose committed ledger holds [ledgerContent], runs the block
+     * with the ref name, and deletes the ref again. The fixture exercises the real ratchet against
+     * a real git reference without touching the repository's own `main` reference.
+     */
+    private fun withRatchetBaseRef(
+        ledgerContent: String,
+        block: (String) -> Unit,
+    ) {
+        val baseRef = "refs/hermes-verification/ratchet-base"
+        val blob = git(listOf("hash-object", "-w", "--stdin"), stdin = ledgerContent)
+        val detektTree = git(listOf("mktree"), stdin = "100644 blob $blob\tbaseline-ledger.txt\n")
+        val configTree = git(listOf("mktree"), stdin = "040000 tree $detektTree\tdetekt\n")
+        val rootTree = git(listOf("mktree"), stdin = "040000 tree $configTree\tconfig\n")
+        val commit = git(listOf("commit-tree", rootTree, "-m", "synthetic ratchet base for detekt verification"))
+        git(listOf("update-ref", baseRef, commit))
+        try {
+            block(baseRef)
+        } finally {
+            ProcessBuilder("git", "update-ref", "-d", baseRef)
+                .directory(repositoryRoot)
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        }
+    }
+
+    private fun git(
+        arguments: List<String>,
+        stdin: String? = null,
+    ): String {
+        val process =
+            ProcessBuilder(listOf("git") + arguments)
+                .directory(repositoryRoot)
+                .redirectErrorStream(true)
+                .apply {
+                    environment()["GIT_AUTHOR_NAME"] = "detekt-verification-fixture"
+                    environment()["GIT_AUTHOR_EMAIL"] = "detekt-verification-fixture@localhost"
+                    environment()["GIT_COMMITTER_NAME"] = "detekt-verification-fixture"
+                    environment()["GIT_COMMITTER_EMAIL"] = "detekt-verification-fixture@localhost"
+                }
+                .start()
+        if (stdin != null) {
+            process.outputStream.use { stream -> stream.write(stdin.toByteArray()) }
+        } else {
+            process.outputStream.close()
+        }
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val exitCode = process.waitFor()
+        check(exitCode == 0) {
+            "git ${arguments.joinToString(" ")} failed with $exitCode:\n$output"
+        }
+        return output.trim()
+    }
+
     private fun assertInjectedFixturesFail(
         fixtures: List<InjectedFixture>,
         tasks: List<String>,
@@ -241,6 +476,10 @@ class QualityVerificationFailClosedTest {
         /** The gate tasks that cost minutes; the verification contracts are what these tests exercise. */
         val excludedGateTasks =
             listOf(
+                "-x",
+                "detekt",
+                "-x",
+                "detektVerify",
                 "-x",
                 "formatCheck",
                 "-x",
