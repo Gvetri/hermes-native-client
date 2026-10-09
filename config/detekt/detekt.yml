@@ -1,0 +1,45 @@
+# The strict detekt configuration.
+#
+# The root build script layers this file on detekt's default config (`buildUponDefaultConfig`),
+# and `build.maxIssues: 0` fails the analysis on any reported finding, so a new finding must be
+# fixed instead of ignored. The rules the quality gate relies on are enabled explicitly, so a
+# detekt upgrade cannot quietly turn one of them off. The exemptions are deliberate, each with
+# its reason stated here.
+build:
+  maxIssues: 0
+
+naming:
+  FunctionNaming:
+    active: true
+    # Compose functions are PascalCase by convention, and the pinned rule cannot exempt annotated
+    # functions, so the pattern admits both casings: the rule still reports a name that does not
+    # start with a letter or that contains a non-alphanumeric character.
+    functionPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+style:
+  ReturnCount:
+    active: true
+    # Guard clauses count toward the limit: an early `return` on a guard is still an early return.
+    excludeGuardClauses: false
+
+potential-bugs:
+  ElseCaseInsteadOfExhaustiveWhen:
+    active: true
+  IteratorNotThrowingNoSuchElementException:
+    active: true
+    # A blocking test double deliberately never exhausts its stream, so its `next` is unreachable
+    # after `hasNext` returns false; the iterator contract is enforced in production sources only.
+    excludes: ['**/test/**', '**/androidTest/**']
+
+coroutines:
+  InjectDispatcher:
+    active: true
+    # A test chooses the dispatcher it drives the subject with; dispatcher injection is a
+    # production-wiring concern, so the rule is enforced in production sources only.
+    excludes: ['**/test/**', '**/androidTest/**']
+
+comments:
+  CommentOverPrivateFunction:
+    active: true
+  CommentOverPrivateProperty:
+    active: true
