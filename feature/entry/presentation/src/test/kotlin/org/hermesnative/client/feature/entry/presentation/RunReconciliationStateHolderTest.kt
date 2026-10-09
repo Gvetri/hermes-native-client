@@ -261,7 +261,6 @@ class RunReconciliationStateHolderTest {
         val run = Run(RunId("run-list-race"), session.id, "succeeded")
         val gateway =
             FakeGateway(session).apply {
-                // The opened history already carries a Run: that is what starts the reconcile.
                 histories.add(
                     SessionHistory(
                         session.id,
@@ -281,8 +280,6 @@ class RunReconciliationStateHolderTest {
 
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
 
-            // Opening a Session whose history already carries a Run reconciles before it settles,
-            // so the conversation is reconciling while the list pane's refresh is still allowed.
             assertTrue(registry.entered.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             awaitState(holder) { state ->
                 val opened = state.sessionList?.openedSession
@@ -317,7 +314,6 @@ class RunReconciliationStateHolderTest {
         val run = Run(RunId("run-create-race"), session.id, "succeeded")
         val gateway =
             FakeGateway(session).apply {
-                // The opened history already carries a Run: that is what starts the reconcile.
                 histories.add(
                     SessionHistory(
                         session.id,
@@ -345,8 +341,6 @@ class RunReconciliationStateHolderTest {
             assertNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             registry.release.countDown()
 
-            // The abandoned request records its outcome inside its own job, so waiting for that job
-            // to finish is what makes the absence below a fact instead of a guess.
             runBlocking { replacedRequest?.join() }
 
             assertFalse(
@@ -1180,7 +1174,6 @@ class RunReconciliationStateHolderTest {
             assertEquals(1, dispatcher.queuedCount)
             assertTrue(gateway.observedRunIds.isEmpty())
 
-            // Complete the refresh ahead of the successfully started, but still queued, observer.
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
             dispatcher.runLast()
             assertEquals(RunPresentationState.SUCCEEDED, holder.uiState.value.sessionList?.openedSession?.latestRunState)
@@ -1236,7 +1229,6 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             assertTrue(registry.saveStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
-            // Open can reconcile the bound Run while submission persistence is still blocked.
             dispatcher.paused = true
             registry.releaseLoad.countDown()
             awaitCondition { dispatcher.queuedCount == 1 }
@@ -1353,7 +1345,6 @@ class RunReconciliationStateHolderTest {
                     key: SessionId,
                     value: Job,
                 ): Job? {
-                    // Bound a broken synchronous restart chain before it can exhaust the test worker's stack.
                     check(registrations.incrementAndGet() <= 3) { "Observer restart did not stop after parent cancellation." }
                     val previous = super.put(key, value)
                     if (cancelDuringRegistration) parent.cancel()
@@ -1373,7 +1364,6 @@ class RunReconciliationStateHolderTest {
                 assertTrue(observerJobs.values.single().isActive)
             }
 
-            // Do not call holder.close(): gateways and visible Run state must still be present.
             scope.cancel()
             dispatcher.drain()
             runBlocking { withTimeout(TEST_TIMEOUT_MILLIS) { parent.join() } }
@@ -1655,10 +1645,6 @@ class RunReconciliationStateHolderTest {
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
             awaitState(holder) { it.sessionList?.openedSession == null }
 
-            // Re-arm the status barrier so the reopened outcome stays unconfirmed
-            // until the test releases it. The unconfirmed window is the state under
-            // test, and without the barrier the reconciliation can resolve before
-            // the assertion ever observes it.
             gateway.blockNextStatus = true
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitState(holder) {
@@ -2089,7 +2075,6 @@ class RunReconciliationStateHolderTest {
             awaitCondition { registry.removeRequests.get() == 1 }
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
             awaitCondition { gateway.statusRequests.size == 2 }
-            // The holder serializes writes; Open's removal waits behind startup's removal.
             assertEquals(1, registry.removeRequests.get())
             assertEquals(listOf(entry), registry.load())
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not duplicate"))
@@ -2403,10 +2388,6 @@ class RunReconciliationStateHolderTest {
         awaitState(holder) { it.sessionList?.sessions == listOf(gateway.session.toSessionItemUiState()) }
     }
 
-    /**
-     * Waits up to [SETTLE_MILLIS] for [predicate]. Behaviour that must *not* happen can only be
-     * checked by giving the stray request a bounded chance to appear first.
-     */
     private fun settles(predicate: () -> Boolean): Boolean {
         val appeared =
             runBlocking {
@@ -2426,7 +2407,6 @@ class RunReconciliationStateHolderTest {
     private fun recoveryUnavailableSessions(holder: EntryStateHolder): Set<SessionId> =
         privateField(holder, "recoveryUnavailableSessions") as Set<SessionId>
 
-    /** Holds [load] open once [armed], so a request can be caught between its state and its work. */
     private class ArmingRunRecoveryRegistry(
         private val failAfterRelease: Boolean = false,
     ) : RunRecoveryRegistry {
@@ -2689,7 +2669,6 @@ class RunReconciliationStateHolderTest {
                         try {
                             if (releaseObservationOpen.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) break
                         } catch (_: InterruptedException) {
-                            // The opening barrier deliberately unwinds only after the test releases it.
                         }
                     }
                 } finally {
@@ -2958,7 +2937,6 @@ class RunReconciliationStateHolderTest {
                 override fun hasNext(): Boolean {
                     return try {
                         while (!release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
-                            // The test releases the iterator to complete the cancelled observer's unwind.
                         }
                         false
                     } catch (error: InterruptedException) {

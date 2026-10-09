@@ -239,7 +239,7 @@ class RunStatusNotificationStateHolderTest {
         try {
             connectAndOpenSession(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.RunStatusNotificationsToggleClicked)
-            store.enabled = true // stale persisted preference must not survive denial
+            store.enabled = true
             holder.onEvent(EntryUiEvent.RunStatusNotificationPermissionResult(granted = false))
 
             val notifications = holder.uiState.value.runStatusNotifications

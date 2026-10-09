@@ -81,7 +81,6 @@ class EntryWiringRestartIntegrationTest {
                 firstHolder.onEvent(EntryUiEvent.SendMessageClicked)
                 awaitState(firstHolder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
                 assertTrue(gateway.observationStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-                // Open reconciliation can display the bound Run before submission finishes saving it.
                 awaitRecoveryEntries(storage, setOf(RunRecoveryEntry(gateway.session.id, gateway.activeRun.id)))
                 assertEquals(1, storage.load().size)
                 assertTrue(otherEndpointStorage.load().isEmpty())
@@ -195,10 +194,6 @@ class EntryWiringRestartIntegrationTest {
                     it.sessionList?.openedSession?.let { opened -> !opened.isReconciliationInProgress } == true
                 }
                 assertTrue(gateway.statusRequests.contains(gateway.activeRun.id))
-                // The pinned Gateway's history carries no Run linkage, so the terminal Run
-                // resource itself settles the recovery entry and it is removed. The
-                // reconciliation flag can drop before that removal lands, so wait for the
-                // settled storage and assert the settled state instead of racing it.
                 awaitCondition { storage.load().isEmpty() }
                 assertTrue(storage.load().isEmpty())
             } finally {
@@ -224,7 +219,6 @@ class EntryWiringRestartIntegrationTest {
             holder.onEvent(EntryUiEvent.SendMessageClicked)
             awaitState(holder) { it.sessionList?.openedSession?.latestRun?.id == gateway.activeRun.id }
 
-            // No storage or observer barrier precedes close. This is holder shutdown, not process death.
             holder.close()
             joinHolder(holder)
 

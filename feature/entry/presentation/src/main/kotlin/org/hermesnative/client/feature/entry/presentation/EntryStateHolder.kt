@@ -534,7 +534,6 @@ class EntryStateHolder(
     private val pendingCreateSessions = mutableMapOf<RecoverySessionKey, PendingCreateState>()
     private val pendingCreateStarted = mutableSetOf<RecoverySessionKey>()
 
-    /** Runs returned by a local createRun response; history-only Runs never enter this map. */
     private val sessionRuns = mutableMapOf<SessionId, List<Run>>()
     private val submittedRunInputs = mutableMapOf<RunId, String>()
     private val unresolvedLocalRunIds = mutableMapOf<RecoverySessionKey, MutableSet<RunId>>()
@@ -937,8 +936,6 @@ class EntryStateHolder(
                         removeGatewayConnectionUseCase?.execute()
                         updateRunRecoveryEndpoint?.invoke(null)
                     }
-                // The notification preference is app-level, not Gateway-level:
-                // resetting the connection UI must not reset the setting.
                 _uiState.value =
                     EntryState()
                         .toUiState()
@@ -961,9 +958,6 @@ class EntryStateHolder(
         if (runStatusNotificationPermission?.canPost() == true) {
             return RunStatusNotificationsUiState(enabled = true)
         }
-        // The persisted preference is stale: the platform permission was
-        // revoked. Clear it so a later permission grant cannot silently
-        // re-enable notifications without an explicit user selection.
         store.saveEnabled(false)
         return deniedRunStatusNotificationsUiState()
     }
@@ -1014,12 +1008,6 @@ class EntryStateHolder(
         }
     }
 
-    /**
-     * Opens the surface, then reads the buffered record count off the caller's thread.
-     *
-     * The buffer may hold a full megabyte, so the surface opens immediately and reports the
-     * count when the read is done instead of blocking the caller on file I/O.
-     */
     private fun openLocalDiagnostics() {
         _uiState.update { state ->
             state.copy(
@@ -1033,12 +1021,6 @@ class EntryStateHolder(
         _uiState.update { state -> state.copy(localDiagnostics = LocalDiagnosticsUiState()) }
     }
 
-    /**
-     * Exports the buffered diagnostics through the platform Sharesheet.
-     *
-     * An empty buffer never reaches the exporter, so an export cannot produce an
-     * empty snapshot, and a failed export leaves the buffer for another attempt.
-     */
     private fun exportLocalDiagnostics() {
         val exporter = localDiagnostics?.exporter ?: return
         val current = _uiState.value.localDiagnostics
@@ -1089,14 +1071,6 @@ class EntryStateHolder(
         }
     }
 
-    /**
-     * Clears only the local diagnostic records, off the caller's thread.
-     *
-     * One clear runs at a time, so a second confirmation cannot remove a record the first
-     * clear never saw. The confirmation stays open when the clear fails, so a failed clear
-     * is never reported as done, and a completion that lands after the surface closed
-     * leaves the closed state alone.
-     */
     private fun confirmClearLocalDiagnostics() {
         val store = localDiagnostics?.store ?: return
         val current = _uiState.value.localDiagnostics
@@ -1130,10 +1104,6 @@ class EntryStateHolder(
             ?.let { ports -> runCatching { ports.store.recordCount() }.getOrNull() }
             ?: 0
 
-    /**
-     * Applies the count the buffer currently reports, off the caller's thread: the
-     * buffer may hold a full megabyte, so no surface path reads it inline.
-     */
     private suspend fun applyLocalDiagnosticsRecordCount() {
         val recordCount = localDiagnosticsRecordCount()
         _uiState.update { state ->
@@ -1148,11 +1118,6 @@ class EntryStateHolder(
         }
     }
 
-    /**
-     * Records one approved operational diagnostic event best-effort. Diagnostics
-     * never change the behavior they observe, so a failed write is ignored, and
-     * the visible record count follows the buffer while its surface is open.
-     */
     private fun recordDiagnostic(
         eventType: LocalDiagnosticEventType,
         status: LocalDiagnosticStatus? = null,
@@ -1164,11 +1129,6 @@ class EntryStateHolder(
         scope.launch { applyLocalDiagnosticsRecordCount() }
     }
 
-    /**
-     * Posts at most one best-effort notification per Run for a terminal
-     * success or failure, deduplicated across observation and authoritative
-     * reconciliation paths.
-     */
     private fun postTerminalRunStatusNotificationOnce(
         run: Run,
         state: RunPresentationState,
@@ -1643,18 +1603,12 @@ class EntryStateHolder(
             if (sessionList.createSession?.isSubmitting == true) return
             if (sessionList.sessionMutations.isNotEmpty()) return
 
-            // A search replaces the visible conversation with the result list, so the
-            // Session that leaves the pane is released like every other exit path; a later
-            // switch cannot do it, because by then the selection is already null.
             sessionList.openedSession?.session?.id?.let { openedSessionId ->
                 val released = releaseRunObservation(openedSessionId)
                 observationJobToCancel = released.job
                 observationToClose = released.observation
             }
 
-            // The pinned Gateway has no general Session search, so the query filters the
-            // server-provided Sessions already loaded in this pane. No request is issued:
-            // transcripts are never fetched and titles/previews are not re-queried.
             _uiState.value =
                 state.copy(
                     sessionList =
@@ -1690,10 +1644,6 @@ class EntryStateHolder(
         job?.start()
     }
 
-    /**
-     * Refreshes the Session list from the list pane itself. [refreshSessions] still serves the
-     * conversation's history refresh, so the list pane's button never acts on another pane.
-     */
     private fun refreshSessionList() {
         val gateway = sessionGateway ?: return
         val job =
@@ -1704,10 +1654,6 @@ class EntryStateHolder(
         job?.start()
     }
 
-    /**
-     * Starts a first-page list load for [sessionList], or returns null when work is already in
-     * flight for the list or for the opened conversation's history refresh.
-     */
     private fun startFirstPageListLoad(
         gateway: SessionGatewayPort,
         sessionList: SessionListUiState,
@@ -1724,12 +1670,6 @@ class EntryStateHolder(
             )
         }
 
-    /**
-     * True when a first-page list load would interrupt work that is already in flight, so the load
-     * must leave the state alone. This covers the list's own work and the opened conversation's
-     * history refresh and reconciliation, which cancel with [beginSessionRequest] and would
-     * otherwise stay refreshing or reconciling forever when a list load replaces them.
-     */
     private fun SessionListUiState.blocksFirstPageLoad(): Boolean =
         (isLoading && !isSearching) ||
             isRefreshing ||
@@ -2179,11 +2119,6 @@ class EntryStateHolder(
                     (authoritativeSessionHistoryGenerations[sessionId] ?: 0L) == requestHistoryGeneration
 
             if (shouldApplyReconciliationState) {
-                // A notification is allowed only for the Run the client is
-                // actively observing through a live observation job. Recovery
-                // entries re-loaded after a process restart remember
-                // observation state without any live observation, and must
-                // not notify.
                 val wasActivelyObserved = runObservationRunIds[sessionId] == run.id
                 forgetConfirmedObservationStates(sessionId, terminalRunIds)
                 val incomingAuthoritativeRuns = authoritativeRuns + run
@@ -2604,8 +2539,6 @@ class EntryStateHolder(
                 val released = releaseRunObservation(sessionId)
                 observationJobToCancel = released.job
                 observationToClose = released.observation
-                // Replacing the conversation abandons its in-flight request, exactly like
-                // returning to the list or searching again does.
                 beginSessionRequest()
             }
             _uiState.value =
@@ -2613,10 +2546,6 @@ class EntryStateHolder(
                     sessionList =
                         current.copy(
                             createSession = SessionCreationUiState(),
-                            // Starting a creation from a visible conversation replaces it: the
-                            // two-pane layout shows the list next to the open Session, so the
-                            // creation form must become the visible pane. The conversation's run
-                            // observation is released exactly like any other way of leaving it.
                             openedSession = null,
                             errorCategory = null,
                         ),
@@ -2844,10 +2773,6 @@ class EntryStateHolder(
                 .orEmpty()
                 .filter { it.id !in incomingRunIds } + incomingRuns
         val localRunIds = sessionRuns[sessionId].orEmpty().mapTo(mutableSetOf()) { it.id }
-        // The pinned Gateway's history carries no Run linkage, so a locally created or
-        // recovered Run cannot be re-derived from a later history response. Every locally
-        // tracked Run is retained (not only active ones) so a terminal local Run keeps
-        // settling the visible conversation state across refreshes.
         val retainedLocalRuns =
             sessionRuns[sessionId].orEmpty() +
                 allObservationStates(sessionId)
@@ -3541,13 +3466,6 @@ class EntryStateHolder(
             scope.launch(start = CoroutineStart.LAZY, block = block).also { sessionJob = it }
         }
 
-    /**
-     * Applies a Session request result while its generation still owns the pane.
-     *
-     * The local Session search filters already-loaded rows and never issues a Gateway
-     * request, so a query change must not invalidate an in-flight result: request
-     * identity is the generation (and, for pagination, the offset).
-     */
     private fun updateCurrentSessionRequest(
         requestGeneration: Long,
         offset: Int? = null,
@@ -3611,9 +3529,6 @@ class EntryStateHolder(
                 ) {
                     return
                 }
-                // A Session that leaves the conversation pane is released exactly like any other
-                // way of leaving a conversation. The release waits for the Open to succeed, so a
-                // failed switch leaves the still-visible Session with its observation running.
                 replacedSessionId = sessionList.openedSession?.session?.id?.takeIf { it != sessionId }
 
                 val query = sessionList.searchQuery
@@ -3679,9 +3594,6 @@ class EntryStateHolder(
                                 )
                             }
                         if (applied) {
-                            // The replacement succeeded, so the Session that just left the pane is
-                            // released here and not earlier: a failed Open leaves it on screen, and
-                            // its observation then has to keep running.
                             replacedSessionId?.let { releasedSessionId ->
                                 val released = synchronized(sessionRequestLock) { releaseRunObservation(releasedSessionId) }
                                 released.job?.cancel()
@@ -3748,10 +3660,6 @@ class EntryStateHolder(
         }
     }
 
-    /**
-     * Releases the run observation of a Session that leaves the conversation pane, so every
-     * path that closes a conversation cleans up the same way.
-     */
     private fun releaseRunObservation(sessionId: SessionId): RunObservationRelease {
         retainUnconfirmedTerminalRuns(sessionId)
         val job = runObservationJobs.remove(sessionId)
@@ -3789,8 +3697,6 @@ class EntryStateHolder(
                 observationToClose = released.observation
             }
             beginSessionRequest()
-            // Keep the last confirmed Session row reachable when its management context
-            // would otherwise disappear after returning from an off-page conversation.
             val retainedSession =
                 current.openedSession?.session?.takeIf { session ->
                     current.sessionMutations.containsKey(session.id) && current.sessions.none { it.id == session.id }
@@ -3908,13 +3814,6 @@ class EntryStateHolder(
         launchRunSubmission(input = originalMessage, recordDraft = false, rejectRunId = runId)
     }
 
-    /**
-     * The pinned Gateway's history carries no Run linkage, so a settled failed Run stays
-     * retryable only through the client's own record: the Session summary exposes the
-     * explicit retry for the latest Run while its original input is still recoverable in
-     * process memory. A Run recovered after a restart — or any Run whose input this
-     * process never recorded — has no original message and is never offered for retry.
-     */
     private fun latestRunRetryAvailable(
         runs: List<Run>,
         latestRunState: RunPresentationState?,
@@ -4989,8 +4888,6 @@ class EntryStateHolder(
         observerJobToCancel?.cancel()
         if (handoffRequested) return
         val observationJob = jobToStart ?: return
-        // Completion also runs when cancellation prevents entry into the coroutine body.
-        // Keep ownership until completion so a blocked open or teardown cannot overlap its replacement.
         observationJob.invokeOnCompletion {
             val restartRequest =
                 synchronized(sessionRequestLock) {
@@ -5349,12 +5246,6 @@ class EntryStateHolder(
             uncertainSubmissionRunIds[sessionId] == runId ||
             unresolvedLocalRunIds[recoverySessionKey(sessionId)]?.contains(runId) == true
 
-    /**
-     * The Run to reconcile after opening a Session. The pinned Gateway's history carries no
-     * Run linkage, so when the history exposes no Run the client reconciles the latest Run it
-     * tracks locally (created here or recovered after a restart) through the Run resource,
-     * which is the contract's only authoritative Run source.
-     */
     private fun historyRunIdToReconcile(
         sessionId: SessionId,
         openedSession: OpenedSession,

@@ -154,9 +154,6 @@ class DefaultGatewayClientTest {
 
         assertEquals("completed", result.run.status)
         assertEquals("Authoritative result", result.history.messages.last().content)
-        // The pinned Session message projection carries no run_id/run_status/run_result metadata,
-        // so the authoritative terminal Run resource is the confirmation source; the history
-        // fetched alongside it is applied for display only.
         assertEquals(RunReconciliationDecision.CONFIRMED, result.decision)
         assertEquals(
             listOf(

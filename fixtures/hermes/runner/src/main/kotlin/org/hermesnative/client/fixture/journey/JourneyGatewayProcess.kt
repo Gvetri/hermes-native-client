@@ -411,24 +411,17 @@ class JourneyGatewayProcess private constructor(
                 val events = script.observation
                 events.forEachIndexed { index, event ->
                     if (!script.holdOpen && script.finalStatus != null && index == events.lastIndex) {
-                        // Mark the Run terminal before the terminal event
-                        // reaches the client, so a status or history request
-                        // issued right after the event observes the terminal
-                        // state.
                         behavior.observationDelivered[runId] = true
                     }
                     exchange.responseBody.write(renderEvent(script, event))
                     exchange.responseBody.flush()
                     if (interruptAfter != null && index + 1 >= interruptAfter) {
                         behavior.interruptedRunIds += runId
-                        // Abrupt close without a terminal event.
                         exchange.close()
                         return
                     }
                 }
                 if (script.holdOpen) {
-                    // Keep the stream open with SSE comments until the client
-                    // disconnects. A client-side close never cancels the Run.
                     try {
                         while (true) {
                             exchange.responseBody.write(keepAliveComment)
@@ -436,16 +429,11 @@ class JourneyGatewayProcess private constructor(
                             Thread.sleep(HOLD_OPEN_KEEPALIVE_MILLIS)
                         }
                     } catch (_: Exception) {
-                        // The client closed the observation.
                     }
                 } else if (script.finalStatus != null && events.isEmpty()) {
-                    // An empty observation still completes; the Run is terminal
-                    // as soon as the client has consumed the (empty) stream.
                     behavior.observationDelivered[runId] = true
                 }
             } catch (_: Exception) {
-                // The client closed the observation; a closed stream never
-                // cancels the remote Run.
             } finally {
                 behavior.sseClosed.computeIfAbsent(runId) { AtomicInteger() }.incrementAndGet()
                 exchange.close()
@@ -533,8 +521,6 @@ class JourneyGatewayProcess private constructor(
                 runCatching { kotlinx.serialization.json.Json.parseToJsonElement(text) }.getOrNull()
                     as? kotlinx.serialization.json.JsonObject
                     ?: return null
-            // The pinned contract requires an input field; its value may be
-            // an empty string (see fixtures/hermes/contracts/runs/create-request.json).
             val input = root["input"] as? kotlinx.serialization.json.JsonPrimitive ?: return null
             return input.takeIf { it.isString }?.content
         }

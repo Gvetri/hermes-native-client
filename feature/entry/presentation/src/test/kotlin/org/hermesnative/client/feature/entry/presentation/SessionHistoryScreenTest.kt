@@ -79,13 +79,11 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Run result: Done").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Completed").performScrollTo().assertIsDisplayed()
         composeTestRule.onNode(hasText("Timestamp:", substring = true)).performScrollTo().assertIsDisplayed()
-        // Index 0 is the Session summary, so the message items start at 1.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
         composeTestRule.onNodeWithText("Answer").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Role: assistant").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Message").assertIsDisplayed().assertIsEnabled()
         composeTestRule.onNodeWithText("Send").assertIsNotEnabled()
-        // The summary scrolls with the transcript, so the control is reached by scrolling.
         composeTestRule.onNodeWithText("Refresh history").performScrollTo().assertIsDisplayed().assertIsEnabled()
     }
 
@@ -573,11 +571,8 @@ class SessionHistoryScreenTest {
             }
         }
 
-        // Pin the starting viewport before inspecting lazy nodes. With Session actions in the
-        // navigation row, the shorter transcript header composes all three timestamps here.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
         composeTestRule.onAllNodesWithText("Timestamp:", substring = true).assertCountEquals(3)
-        // Index 0 is the Session summary, so the message items start at 1.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
         composeTestRule.onNodeWithText("Run ID: run-failed").assertIsDisplayed()
         composeTestRule.onNodeWithText("Run status: Failed").assertIsDisplayed()
@@ -750,7 +745,6 @@ class SessionHistoryScreenTest {
         }
         composeTestRule.waitForIdle()
 
-        // The reader deliberately scrolls away from the newest content.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
         composeTestRule.waitForIdle()
 
@@ -760,7 +754,6 @@ class SessionHistoryScreenTest {
         composeTestRule.onNodeWithText("Transcript message 1").assertIsDisplayed()
         composeTestRule.onNodeWithText("Transcript message 11").assertDoesNotExist()
 
-        // Settling back at the newest content restores the follow for the next arrival.
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToIndex(11)
         composeTestRule.waitForIdle()
 

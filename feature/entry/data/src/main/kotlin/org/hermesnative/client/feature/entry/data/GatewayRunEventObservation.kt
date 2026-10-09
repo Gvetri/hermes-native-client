@@ -51,9 +51,6 @@ internal class GatewayRunEventObservation(
             private var buffered: RunEvent? = null
             private var hasBuffered = false
 
-            // The pinned Run stream carries no SSE `id:` values, so byte-identical payloads are
-            // the only observable repeated deliveries; distinct lifecycle events carry distinct
-            // timestamps and are never collapsed.
             private val seenFrames = mutableSetOf<String>()
 
             override fun hasNext(): Boolean {

@@ -43,10 +43,6 @@ internal object KotlinSourceScanner {
     private fun endOfDeclaration(source: String, from: Int): Int =
         source.indexOf('\n', from).let { if (it < 0) source.length else it }
 
-    /**
-     * The body of a declaration opens at the first `{` outside parentheses, so a default constructor
-     * argument such as `supplier: () -> Unit = { }` does not hide the class body.
-     */
     private fun bodyStart(source: String, from: Int): Int? {
         var parenDepth = 0
         var index = from

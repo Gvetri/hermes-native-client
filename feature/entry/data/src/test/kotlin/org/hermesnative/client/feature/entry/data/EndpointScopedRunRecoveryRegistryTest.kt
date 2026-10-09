@@ -54,7 +54,6 @@ class EndpointScopedRunRecoveryRegistryTest {
             firstRegistry.save(entry)
             fail("Expected the storage failure")
         } catch (_: IllegalStateException) {
-            // The process-local fallback must retain the identifier-only entry.
         }
 
         val recreatedRegistry =

@@ -393,7 +393,6 @@ class EntryStateHolderTest {
         assertEquals("matching", searched.searchQuery)
         assertEquals(listOf("initial", "matching", "other"), searched.sessions.map { it.id.value })
         assertEquals(listOf("matching"), searched.visibleSessions.map { it.id.value })
-        // The pinned Session list has no general search parameter: no request is issued.
         assertEquals(listOf(SessionListRequest()), gateway.listRequests)
 
         holder.onEvent(EntryUiEvent.ClearSessionSearchClicked)
@@ -592,9 +591,6 @@ class EntryStateHolderTest {
         }
         gateway.complete(SessionListRequest(), SessionPage(listOf(session("old-refresh")), null), occurrence = 1)
 
-        // Search filters loaded rows locally and never issues a Gateway request, so a query
-        // change cannot invalidate the in-flight refresh: the server page still replaces the
-        // loaded rows and the query then filters them.
         awaitState(holder, "the refresh result after the local query change") {
             val list = it.sessionList
             list?.searchQuery == "final" &&

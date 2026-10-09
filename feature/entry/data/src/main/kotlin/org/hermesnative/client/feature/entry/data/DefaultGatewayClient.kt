@@ -228,8 +228,6 @@ class DefaultGatewayClient(
                 operation = "run create",
                 root = GatewayJsonParser.parseObject("run create", response.body),
             )
-        // The pinned admission response carries no session_id. The Run is correlated with the
-        // Session declared in the request body, which the pinned handler binds server-side.
         return Run(id = admitted.runId, sessionId = sessionId, status = admitted.status)
     }
 

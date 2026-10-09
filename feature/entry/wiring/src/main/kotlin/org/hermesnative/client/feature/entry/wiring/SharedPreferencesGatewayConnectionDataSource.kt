@@ -15,8 +15,6 @@ class SharedPreferencesGatewayConnectionDataSource(
     override fun loadEndpoint(): String? = preferences.getString(ENDPOINT_KEY, null)
 
     override fun saveEndpoint(endpoint: String) {
-        // Commit synchronously so a failed write is reported to the caller and
-        // the repository can restore the previously working credential.
         check(preferences.edit().putString(ENDPOINT_KEY, endpoint).commit()) {
             "Could not persist the Gateway endpoint."
         }

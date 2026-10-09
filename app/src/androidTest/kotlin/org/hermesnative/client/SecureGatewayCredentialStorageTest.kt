@@ -98,11 +98,6 @@ class SecureGatewayCredentialStorageTest {
         assertTrue(exclusions.contains("device-transfer:root:no_backup/"))
     }
 
-    /**
-     * The record lives in [Context.getNoBackupFilesDir], which the Android
-     * backup domains call `no_backup/`. Every declared exclusion therefore has
-     * to name that path in the section that governs one transfer mechanism.
-     */
     private fun declaredExclusions(
         @XmlRes resourceId: Int,
     ): List<String> {
@@ -113,9 +108,6 @@ class SecureGatewayCredentialStorageTest {
         while (event != XmlPullParser.END_DOCUMENT) {
             if (event == XmlPullParser.START_TAG) {
                 when (parser.name) {
-                    // `full-backup-content` is the sole section of the
-                    // pre-Android 12 rules; the extraction rules nest their
-                    // exclusions one level deeper.
                     "full-backup-content", "cloud-backup", "device-transfer" -> section = parser.name
                     "exclude" -> {
                         val domain = parser.getAttributeValue(null, "domain")

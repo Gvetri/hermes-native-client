@@ -64,11 +64,6 @@ internal fun SessionShell(
     }
 }
 
-/**
- * System Back follows the same path as the visible controls: an open rename or delete
- * confirmation is dismissed first, then an open conversation returns to the Session list
- * and an open creation is cancelled, in both layouts.
- */
 @Composable
 private fun SessionShellBackHandling(
     state: SessionListUiState,
@@ -161,8 +156,6 @@ private fun ConversationPaneHost(
 @Composable
 private fun SessionPlaceholderPane(modifier: Modifier = Modifier) {
     val spacing = LocalHermesDesignTokens.current.spacing
-    // Centered while the guidance fits, scrollable as soon as the pane or the font scale
-    // grows, so the guidance can never be clipped without a way to reveal it.
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Column(
             modifier =
@@ -186,10 +179,6 @@ private fun SessionPlaceholderPane(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Registers the shell back action when a back dispatcher owner exists. Plain
- * composition tests have no owner, so previews and state tests stay hermetic.
- */
 @Composable
 private fun ShellBackHandler(onBack: () -> Unit) {
     if (LocalOnBackPressedDispatcherOwner.current != null) {

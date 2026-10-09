@@ -48,9 +48,6 @@ data class HermesDesignTokens(
     val elevation: HermesElevation,
 )
 
-// The shell starts from the Material defaults for type and shape, so the extracted
-// Session surfaces keep their existing contracts; deliberate overrides land here as
-// those surfaces migrate onto the token scale.
 private val HermesTypography = Typography()
 
 private val HermesShapes = Shapes()

@@ -439,9 +439,6 @@ class RunObservationStateHolderTest {
             holder.onEvent(EntryUiEvent.SessionClicked(second.id))
             awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
 
-            // The fake's stream ends by itself after the test timeout, so an observer that is
-            // not released on the switch would still close, only far too late. A real Gateway
-            // stream does not end on its own, which is why the release has to be prompt.
             assertTrue(
                 "the previous Session's screen observer closes when another Session replaces it",
                 firstObservation.closed.await(1_000, TimeUnit.MILLISECONDS),
@@ -472,8 +469,6 @@ class RunObservationStateHolderTest {
             holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("filter"))
             awaitState(holder) { it.sessionList?.openedSession == null }
 
-            // The stub stream ends by itself after the test timeout, so an observer that is
-            // not released by the search would still close, only far too late.
             assertTrue(
                 "the open conversation's screen observer closes when a search replaces it",
                 observer.closed.await(1_000, TimeUnit.MILLISECONDS),
@@ -515,8 +510,6 @@ class RunObservationStateHolderTest {
 
             holder.onEvent(EntryUiEvent.SessionClicked(second.id))
             assertTrue(gateway.openStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            // While the second Open is still in flight the pane still shows the first Session,
-            // which is exactly the window in which the replaced observer could start itself again.
             Thread.sleep(300)
             gateway.openRelease.countDown()
             awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
@@ -565,8 +558,6 @@ class RunObservationStateHolderTest {
             holder.onEvent(EntryUiEvent.SessionClicked(second.id))
             awaitState(holder) { it.sessionList?.openingSessionId == null && it.sessionList?.isStale == true }
 
-            // The pane never left the first Session, so its observation has to keep running; the
-            // failed Open only marks the list stale, and a later retry must find it still alive.
             assertFalse(
                 "the still-visible Session keeps its observer when the switch fails",
                 firstObservation.closed.await(400, TimeUnit.MILLISECONDS),

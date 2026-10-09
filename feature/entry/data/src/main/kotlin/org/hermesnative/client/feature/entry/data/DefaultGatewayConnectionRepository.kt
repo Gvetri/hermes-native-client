@@ -18,9 +18,6 @@ class DefaultGatewayConnectionRepository(
         val credential = connection.bearerCredential
         when {
             credential != null -> credentialStore.save(credential)
-            // Only discard stored material when a credential was actually
-            // persisted, so an endpoint-only save does not churn the
-            // AndroidKeyStore key that protects the record.
             previousCredential != null -> credentialStore.clear()
         }
         try {

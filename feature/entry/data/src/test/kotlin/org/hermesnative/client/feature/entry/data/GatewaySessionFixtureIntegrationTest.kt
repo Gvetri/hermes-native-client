@@ -110,7 +110,6 @@ class GatewaySessionFixtureIntegrationTest {
                 listOf("limit=20&offset=0", "limit=20&offset=1"),
                 listRequests.map { it.query },
             )
-            // The pinned Session list has no cursor or search parameters.
             assertTrue(listRequests.none { it.query.orEmpty().contains("cursor") || it.query.orEmpty().contains("search") })
             assertTrue(behavior.requests.none { it.path.endsWith("/messages") })
             assertTrue(behavior.requests.none { it.method == "POST" })

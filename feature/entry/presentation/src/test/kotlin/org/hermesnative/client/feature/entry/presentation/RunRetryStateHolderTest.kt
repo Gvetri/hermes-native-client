@@ -334,9 +334,6 @@ class RunRetryStateHolderTest {
 
         try {
             open(holder, gateway, session.id)
-            // Pin-faithful history: no message carries Run linkage, so only the
-            // client's own record of the Run and its original input can expose
-            // the retry.
             gateway.setHistory(
                 history(
                     session.id,
@@ -365,7 +362,6 @@ class RunRetryStateHolderTest {
             val retried = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
             assertFalse(retried.latestRunRetryAvailable)
 
-            // A duplicate tap while the retry Run is active must not create another Run.
             holder.onEvent(EntryUiEvent.RetryRunClicked(failedRunId))
             assertEquals(2, gateway.runRequests.size)
         } finally {
@@ -387,12 +383,7 @@ class RunRetryStateHolderTest {
                         retryRunId to Run(retryRunId, session.id, "completed"),
                     ),
             ).apply {
-                // The admission starts the Run active; the pinned Run stream then reports
-                // the failure with no status field (`run.failed` carries only the event
-                // type and the Run identity), and the authoritative status read settles it.
                 enqueueRun(Run(failedRunId, session.id, "started"))
-                // The pinned frame carries no status field; the wire parser supplies the
-                // terminal default (`run.failed` -> "failed", `run.completed` -> "succeeded").
                 enqueueObservation(
                     failedRunId,
                     RunEvent(type = RunEventType.FAILED, runId = failedRunId, status = "failed"),
@@ -407,8 +398,6 @@ class RunRetryStateHolderTest {
 
         try {
             open(holder, gateway, session.id)
-            // Pin-faithful terminal history: the message carries no Run linkage, so the
-            // retry must come from the client's own record of the Run and its input.
             gateway.setHistory(
                 history(
                     session.id,
@@ -465,8 +454,6 @@ class RunRetryStateHolderTest {
                     ),
             ).apply {
                 enqueueRun(Run(failedRunId, session.id, "started"))
-                // The pinned frame carries no status field; the wire parser supplies the
-                // terminal default (`run.failed` -> "failed", `run.completed` -> "succeeded").
                 enqueueObservation(
                     failedRunId,
                     RunEvent(type = RunEventType.FAILED, runId = failedRunId, status = "failed"),

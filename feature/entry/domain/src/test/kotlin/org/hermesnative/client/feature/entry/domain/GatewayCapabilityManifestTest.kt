@@ -45,7 +45,6 @@ class GatewayCapabilityManifestTest {
             ),
             manifest.requirements.map { it.method },
         )
-        // The pinned `_CAPABILITY_ENDPOINTS` paths the client hardcodes its requests to.
         assertEquals(
             listOf(
                 "/api/sessions",

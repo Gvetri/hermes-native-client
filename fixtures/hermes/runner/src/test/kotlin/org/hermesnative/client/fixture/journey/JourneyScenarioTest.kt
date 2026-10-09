@@ -729,8 +729,6 @@ class JourneyScenarioTest {
             val line = lines.next()
             lineCount++
             if (line.startsWith("data:")) {
-                // The pinned writer carries the event type inside the JSON payload and never
-                // writes a named `event:` line.
                 val data = Json.parseToJsonElement(line.removePrefix("data:").trim()).jsonObject
                 events += SseEvent(data.getValue("event").jsonPrimitive.content, data.toString())
             }

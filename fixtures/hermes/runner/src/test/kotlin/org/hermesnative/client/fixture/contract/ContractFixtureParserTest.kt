@@ -152,7 +152,6 @@ class ContractFixtureParserTest {
         assertEquals("Run this", firstMessage["content"]!!.jsonPrimitive.content)
         assertEquals("1788897540.0", firstMessage["timestamp"]!!.jsonPrimitive.content)
         assertFalse(firstMessage["timestamp"]!!.jsonPrimitive.isString)
-        // The pinned message projection never carries run identity metadata.
         assertFalse(firstMessage.containsKey("run_id"))
         assertFalse(firstMessage.containsKey("run_status"))
         assertFalse(firstMessage.containsKey("run_result"))

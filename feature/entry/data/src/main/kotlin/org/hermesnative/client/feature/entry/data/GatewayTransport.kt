@@ -84,10 +84,6 @@ class OkHttpGatewayTransport(
                     response.close()
                 }
             }
-        // Closing must never read the socket: draining the open body from the
-        // closing thread races the reader and corrupts okio timeout accounting
-        // (IllegalStateException "Unbalanced enter/exit"). cancel() aborts any
-        // in-flight read; the reader thread owns the response close in `finally`.
         return GatewayEventStream(response.code, lines) { call.cancel() }
     }
 

@@ -82,7 +82,6 @@ object DetektBaselineEvidence {
             "Detekt verification could not read '$baseRef' for the shrink-only baseline ratchet."
         }
         if (listed.output.isBlank()) {
-            // The base reference holds no ledger yet, so the adoption change introduces it.
             return null
         }
         val content = runGit(repositoryRoot, listOf("show", objectPath))

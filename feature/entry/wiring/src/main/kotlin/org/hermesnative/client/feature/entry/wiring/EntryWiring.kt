@@ -71,7 +71,6 @@ object EntryWiring {
                 RemoveGatewayConnection(repository) { endpoint ->
                     runRecoveryRegistry.clearForEndpoint(endpoint)
                     endpoint?.let(runSubmissionUncertaintyStore::clearEndpoint)
-                    // Diagnostics belong to the Gateway connection they were collected for.
                     localDiagnosticsBuffer.clear()
                 },
             localDiagnostics =

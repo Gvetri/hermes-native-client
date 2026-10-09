@@ -503,8 +503,6 @@ class EntryStateHolderFixtureIntegrationTest {
                 holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(targetId))
                 assertEquals(listOf(PINNED_A), requireNotNull(holder.uiState.value.sessionList).sessions.map { it.id.value })
                 assertTrue(behavior.sessions.none { it.id == SERVER_A })
-                // The pinned Gateway has no pin/unpin routes: both are PATCH on the Session
-                // resource with a `pinned` field, so every mutation except delete is a PATCH.
                 assertEquals(
                     listOf("PATCH", "PATCH", "PATCH", "PATCH", "PATCH", "DELETE", "DELETE"),
                     behavior.requests.filter { it.path.contains(SERVER_A) }.map { it.method },
@@ -682,8 +680,6 @@ class EntryStateHolderFixtureIntegrationTest {
 
                 val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
                 assertEquals(listOf("Remote failure", "Remote result"), opened.messages.map { it.content })
-                // The pinned message payload (api_server._message_response) never carries run
-                // linkage: the client must not invent run identity or status from history.
                 assertTrue(opened.messages.all { it.runId == null && it.runStatus == null && it.runResult == null })
                 assertEquals(null, opened.latestRun)
                 assertTrue(runGateway.statusRequests.isEmpty())
@@ -799,8 +795,6 @@ class EntryStateHolderFixtureIntegrationTest {
 
                 assertEquals(listOf(session to "Local request"), runGateway.createdRunRequests)
                 val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-                // History messages carry no run linkage on the pinned Gateway; only the
-                // Run acknowledged by the submission flow is tracked locally.
                 assertTrue(opened.messages.all { it.runId == null && it.runStatus == null && it.runResult == null })
                 assertEquals(
                     listOf(

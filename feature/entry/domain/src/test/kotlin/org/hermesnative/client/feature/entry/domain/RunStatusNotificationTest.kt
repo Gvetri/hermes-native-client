@@ -84,9 +84,6 @@ class RunStatusNotificationTest {
 
     @Test
     fun notification_text_never_contains_run_or_session_content() {
-        // The mapping accepts only the presentation state, so no Run identifier,
-        // Session identifier, raw status, prompt, or response can influence it.
-        // Assert the exact produced text for states derived from arbitrary data.
         val run = Run(RunId("run-with-sensitive-ids"), SessionId("session-secret"), "running")
         val derived = run.toRunPresentationState()
         assertEquals("Run failed", RunPresentationState.FAILED.runStatusNotificationText())

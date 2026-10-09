@@ -56,9 +56,6 @@ class QualityVerificationFailClosedTest {
                                 "GatewayConnectionRepository.kt",
                         appended = unreachedProductionFixture(),
                     ),
-                    // The mutation task's own threshold is disabled here on purpose: the declared policy
-                    // must still fail the run through the report verification, so weakening the tool
-                    // configuration cannot make unreached production code pass the gate.
                     InjectedFixture(
                         relativePath = "feature/entry/domain/build.gradle.kts",
                         appended =
@@ -154,8 +151,6 @@ class QualityVerificationFailClosedTest {
 
     @Test
     fun detekt_return_count_violation_fails_the_real_analysis_task() {
-        // Two of the three returns are guard clauses: the configured rule counts them toward the
-        // limit, so a function whose only non-guard return is under the limit still fails.
         assertNewFixtureFails(
             relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektReturnCountFixture.kt",
             content =
@@ -172,8 +167,6 @@ class QualityVerificationFailClosedTest {
 
     @Test
     fun detekt_else_case_violation_fails_the_real_analysis_with_type_resolution() {
-        // The rule only knows that the `when` subject is an enum through type resolution, so this
-        // proof fails when the analysis runs without the compile classpath.
         assertNewFixtureFails(
             relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektFixtureState.kt",
             content =
@@ -282,8 +275,6 @@ class QualityVerificationFailClosedTest {
         val shadowingBaseline = repositoryRoot.resolve("config/detekt/baseline-main.xml")
         check(!shadowingBaseline.exists()) { "config/detekt/baseline-main.xml must not exist before the fixture is written." }
         try {
-            // The fixture carries the committed entries, so the analysis itself still passes and the
-            // verification's own guard against a shadowing baseline is what fails the run.
             shadowingBaseline.writeText(repositoryRoot.resolve("config/detekt/baseline.xml").readText())
             withRatchetBaseRef(ledgerText()) { baseRef ->
                 val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
@@ -320,11 +311,6 @@ class QualityVerificationFailClosedTest {
 
     private fun ledgerText(): String = repositoryRoot.resolve("config/detekt/baseline-ledger.txt").readText()
 
-    /**
-     * Creates a synthetic base ref whose committed ledger holds [ledgerContent], runs the block
-     * with the ref name, and deletes the ref again. The fixture exercises the real ratchet against
-     * a real git reference without touching the repository's own `main` reference.
-     */
     private fun withRatchetBaseRef(
         ledgerContent: String,
         block: (String) -> Unit,
@@ -434,11 +420,6 @@ class QualityVerificationFailClosedTest {
         return ProcessResult(process.waitFor(), output)
     }
 
-    /**
-     * The fixture is deliberately large enough to fail the declared thresholds from a high measured
-     * baseline: production code no test reaches must still be rejected when the module's measured
-     * coverage sits well above its declared minimums.
-     */
     private fun unreachedProductionFixture(): String {
         val lines =
             mutableListOf(

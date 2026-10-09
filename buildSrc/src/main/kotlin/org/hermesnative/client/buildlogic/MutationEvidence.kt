@@ -60,10 +60,6 @@ object MutationEvidenceVerifier {
         }
 
         val statuses = mutations.groupingBy { it.getAttribute("status") }.eachCount()
-        // PIT marks a mutation as detected when the tests killed it or it timed out, and its own
-        // thresholds compare against that count. Counting only the KILLED status would enforce a
-        // stricter number than the tool's, so the same declared threshold would mean two different
-        // things in one run.
         val detected =
             mutations.count { mutation ->
                 val flag = mutation.getAttribute("detected")

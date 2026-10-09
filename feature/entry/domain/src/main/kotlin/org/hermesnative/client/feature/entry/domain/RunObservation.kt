@@ -25,8 +25,6 @@ fun String.toRunPresentationState(): RunPresentationState =
         "completing", "finalizing", "stopping" -> RunPresentationState.COMPLETING
         "completed", "complete", "succeeded", "success" -> RunPresentationState.SUCCEEDED
         "failed", "failure", "error" -> RunPresentationState.FAILED
-        // `interrupted` is a pinned terminal Run status: the Gateway restarted before the run
-        // settled, so the run did not complete and is never retried automatically.
         "cancelled", "canceled", "interrupted" -> RunPresentationState.CANCELLED
         else -> RunPresentationState.UNCERTAIN
     }

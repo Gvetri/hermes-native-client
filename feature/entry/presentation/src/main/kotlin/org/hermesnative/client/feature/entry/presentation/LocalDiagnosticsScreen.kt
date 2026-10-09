@@ -167,10 +167,6 @@ private fun ClearDiagnosticsConfirmation(onEvent: (EntryUiEvent) -> Unit) {
     }
 }
 
-/**
- * Registers the shell back action when a back dispatcher owner exists. Plain
- * composition tests have no owner, so previews and state tests stay hermetic.
- */
 @Composable
 private fun DiagnosticsBackHandler(onBack: () -> Unit) {
     if (LocalOnBackPressedDispatcherOwner.current != null) {

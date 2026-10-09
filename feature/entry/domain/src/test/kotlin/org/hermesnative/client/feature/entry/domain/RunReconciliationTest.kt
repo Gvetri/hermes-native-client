@@ -8,8 +8,6 @@ import org.junit.Test
 class RunReconciliationTest {
     @Test
     fun a_terminal_run_is_confirmed_from_the_authoritative_run_resource_alone() {
-        // The pinned Gateway never links Session messages to Runs, so a terminal
-        // Run status must confirm even when history carries no run metadata.
         val run = Run(RunId("run-1"), SessionId("session-1"), "succeeded")
         val history = SessionHistory(run.sessionId, emptyList())
 
@@ -37,8 +35,6 @@ class RunReconciliationTest {
 
     @Test
     fun additive_message_run_metadata_does_not_change_terminal_confirmation() {
-        // A future Gateway may add run linkage to messages; the authoritative
-        // terminal status already confirms, and the additive metadata is retained.
         val run = Run(RunId("run-1"), SessionId("session-1"), "succeeded")
         val history =
             SessionHistory(

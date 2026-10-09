@@ -134,20 +134,17 @@ class LocalDiagnosticsRecordsTest {
 
         val prohibited =
             listOf(
-                // A prohibited field is never retained, even next to allowlisted ones.
                 VALID_RECORD + ""","endpoint":"https://gateway.example.com"}""",
                 VALID_RECORD + ""","prompt":"hello"}""",
                 VALID_RECORD + ""","authorization":"Bearer secret"}""",
                 VALID_RECORD + ""","stack_trace":"java.lang.IllegalStateException"}""",
                 VALID_RECORD + ""","status":"succeeded","run_id":"run-1"}""",
-                // A record without its required fields, or with an unapproved value, is not a record.
                 """{"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
                 """{"schema_version":1,"record_type":"event","event_type":"session_list_load"}""",
                 """{"schema_version":2,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
                 """{"schema_version":1,"record_type":"event_log","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",
                 """{"schema_version":1,"record_type":"event","event_type":"Session List Load","occurred_at":"2026-09-28T10:15:30Z"}""",
                 """{"schema_version":1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30+02:00"}""",
-                // Partial, truncated, reformatted, or multi-line content is never a complete record.
                 """{"schema_version":1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:3""",
                 VALID_RECORD + " trailing",
                 """{"schema_version": 1,"record_type":"event","event_type":"session_list_load","occurred_at":"2026-09-28T10:15:30Z"}""",

@@ -33,9 +33,6 @@ class MutationEvidenceTest {
 
     @Test
     fun counts_a_timed_out_mutant_as_detected_like_the_tool_does() {
-        // PIT counts a timed-out mutation as detected and compares its own thresholds against that
-        // count, so a report it passes must also pass this verification. Counting only the KILLED
-        // status would measure a test strength of 75% here and fail the run.
         val repository = fixtureRepository(pitReport(killed = 6, survived = 2, noCoverage = 2, timedOut = 4))
 
         val summary = MutationEvidenceVerifier.verify(scope, repository)

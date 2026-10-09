@@ -103,8 +103,6 @@ internal fun SessionModeContent(
                 state = state,
                 openedSession = requireNotNull(state.openedSession),
                 onEvent = onEvent,
-                // The conversation consumes IME insets for its composer. The Session list consumes them
-                // during Search or inline Rename, so its controls and editor stay above the keyboard.
                 modifier = modifier.imePadding(),
             )
         SessionShellMode.CreateSession ->
@@ -157,21 +155,15 @@ internal fun SessionListPane(
     val paneModifier = if (imeVisible && (searchFocused || renameInputOpen)) modifier.imePadding() else modifier
     BoxWithConstraints(modifier = paneModifier.fillMaxSize()) {
         val density = LocalDensity.current
-        // The list owns the height between the pinned header and the pinned controls. Both pinned
-        // regions are capped so a short window still keeps a working list: past its cap each one
-        // scrolls on its own instead of starving the list, so rows, warnings and every control
-        // stay reachable at any pane height.
         val pinnedHeaderMaxHeight = panePinnedHeaderMaxHeight(maxHeight)
         var pinnedHeaderHeight by remember { mutableStateOf(0.dp) }
         val pinnedTailMaxHeight = paneTailMaxHeight(maxHeight - pinnedHeaderHeight)
         Column(modifier = Modifier.fillMaxSize()) {
-            // Search and Create Session stay reachable while the rows and warnings scroll.
             Column(
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .heightIn(max = pinnedHeaderMaxHeight)
-                        // Measured outside the scroll so the cap, not the scrolled content, is reported.
                         .onSizeChanged { pinnedHeaderHeight = with(density) { it.height.toDp() } }
                         .verticalScroll(rememberScrollState()),
             ) {
@@ -182,8 +174,6 @@ internal fun SessionListPane(
                 )
             }
             val listState = rememberLazyListState()
-            // A Search change starts the list at its beginning, so clearing Search shows the first
-            // Session again instead of leaving the list scrolled where the Search left it.
             LaunchedEffect(state.searchQuery) {
                 if (state.searchQuery.isEmpty()) listState.scrollToItem(0)
             }
@@ -356,7 +346,6 @@ private fun SessionListPaneHeader(
     }
 }
 
-/** State content for a pane without rows; panes with rows render the list instead. */
 @Composable
 private fun SessionListStateContent(state: SessionListUiState) {
     if ((state.isLoading || state.isSearching) && state.visibleSessions.isEmpty()) {
@@ -428,7 +417,6 @@ private fun SessionListStatusTexts(state: SessionListUiState) {
     }
 }
 
-/** Controls pinned below the list area: refresh, local diagnostics and the notification settings. */
 @Composable
 private fun SessionListPaneControls(
     state: SessionListUiState,
@@ -436,8 +424,6 @@ private fun SessionListPaneControls(
     runStatusNotifications: RunStatusNotificationsUiState,
 ) {
     Spacer(modifier = Modifier.height(12.dp))
-    // Local diagnostics shares the Refresh row: the pinned tail is already tight, and a control of
-    // its own would take the list area's height away from the rows in a short pane.
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -938,26 +924,10 @@ private fun DeleteSessionContent(
     }
 }
 
-/**
- * The cap for a pane tail that must not starve the region above it: the tail takes all but
- * 120 dp, but never less than a 48 dp touch target - and never more than the space that exists.
- * The tail scrolls inside whatever it gets, which is what keeps its controls reachable at any
- * pane height, including windows too short for the region above to keep its full 120 dp.
- */
 private fun paneTailMaxHeight(available: Dp): Dp = (available - 120.dp).coerceAtLeast(minOf(48.dp, available))
 
-/**
- * Caps the pinned header so a short pane still gives the list its working height and the pinned
- * tail its floor. Past the cap the header scrolls on its own, so Search and Create Session stay
- * reachable. The header yields first on a very short pane: a slice of it stays on screen and the
- * rest scrolls.
- */
 private fun panePinnedHeaderMaxHeight(available: Dp): Dp = (available - 120.dp - 48.dp).coerceAtLeast(minOf(24.dp, available))
 
-/**
- * The opened Session's title and preview. With a transcript they ride inside it, so a short pane
- * or a large font scale scrolls them instead of pushing the composer and Send out of reach.
- */
 @Composable
 private fun SessionDetailHeader(state: OpenSessionUiState) {
     Text(
@@ -999,34 +969,19 @@ internal fun SessionDetailContent(
             !state.isReconciliationInProgress &&
             !state.hasUnresolvedSubmission &&
             !listRequestActive
-    // Without a transcript there is no weighted list to absorb the free space, so the pane
-    // scrolls as one surface and the composer and Send stay reachable in short windows.
     val paneScrollState = rememberScrollState()
     val tailScrollState = rememberScrollState()
-    // The transcript opens at its newest content and follows the messages that arrive while
-    // the reader is at that content; a reader who scrolled away is never pulled back down.
-    // The newest item is pinned by its end, so a message taller than the pane keeps its newest
-    // lines in view instead of its start. The header and summary occupy item 0, so the count
-    // of messages is the newest item's index.
     val transcriptListState = rememberLazyListState()
     val newestMessageItemIndex = displayedMessages.size
     val followNewestMessages = rememberTranscriptFollow(transcriptListState)
     var transcriptPositionPending by remember(state.session.id) { mutableStateOf(true) }
-    // A streamed response grows in place without changing the item count, so its content is
-    // part of the key: every later chunk re-runs the follow while the reader is at the newest
-    // content.
     val streamedResponseContent = state.activeResponse?.content
     LaunchedEffect(state.session.id, newestMessageItemIndex, streamedResponseContent) {
         if (newestMessageItemIndex == 0) return@LaunchedEffect
         if (transcriptPositionPending) {
-            // Clear the flag only once the jump has been applied, so a message that arrives
-            // mid-jump re-runs the initial positioning instead of leaving it undone.
             transcriptListState.pinNewestItemEnd(newestMessageItemIndex)
             transcriptPositionPending = false
         } else if (followNewestMessages) {
-            // The pin is a snap, so a restarted effect cancels the previous scroll and lands the
-            // newest content's end again: a burst of chunks can neither fight an older scroll
-            // nor cancel it into a stalled position.
             transcriptListState.pinNewestItemEnd(newestMessageItemIndex)
         }
     }
@@ -1086,8 +1041,6 @@ internal fun SessionDetailContent(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // The header travels with the transcript, so a short pane or a large font
-                // scale scrolls it instead of pushing the composer and Send out of reach.
                 item {
                     SessionDetailHeader(state = state)
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1116,10 +1069,6 @@ internal fun SessionDetailContent(
             }
         }
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            // The composer tail keeps a floor of 120 dp for the transcript while the pane is
-            // tall enough, and below that it keeps a share of the space instead of collapsing;
-            // it scrolls on its own, so a long draft at a large font scale cannot push Send out
-            // of a short window.
             val tailMaxHeight = paneTailMaxHeight(maxHeight)
             Column(
                 modifier =
@@ -1148,8 +1097,6 @@ internal fun SessionDetailContent(
                     onValueChange = { onEvent(EntryUiEvent.ComposerTextChanged(it)) },
                     label = { Text("Message") },
                     placeholder = { Text("Write a message") },
-                    // A long draft scrolls inside the field instead of growing it without bound,
-                    // which would otherwise push Send out of a short window.
                     modifier = Modifier.fillMaxWidth(),
                     enabled = composerEnabled,
                     singleLine = false,
@@ -1198,11 +1145,6 @@ internal fun SessionDetailContent(
     }
 }
 
-/**
- * Pins the newest item's end to the end of the viewport. An item whose measured size is not
- * known yet is first brought into view, and the offset is then computed from that measured size,
- * so no message is too tall for the pin.
- */
 private suspend fun LazyListState.pinNewestItemEnd(index: Int) {
     if (layoutInfo.visibleItemsInfo.none { item -> item.index == index }) {
         scrollToItem(index)
@@ -1237,10 +1179,6 @@ internal fun rememberTranscriptFollow(listState: LazyListState): Boolean {
     return follow
 }
 
-/**
- * The Session summary above the transcript: history refresh, state warnings, Session actions,
- * and Run information. It renders inside the transcript when one exists.
- */
 @Composable
 private fun SessionDetailSummary(
     state: OpenSessionUiState,
@@ -1318,9 +1256,6 @@ private fun SessionDetailSummary(
         } ?: Text(text = "Run status: ${run.status.stableRunStatusLabel()}")
         if (state.latestRunRetryAvailable) {
             Spacer(modifier = Modifier.height(8.dp))
-            // The pinned Gateway's history carries no Run linkage, so the explicit retry
-            // for a settled failed Run lives in this known-Run summary and exists only
-            // while the client still holds the original input in process memory.
             OutlinedButton(
                 onClick = { onEvent(EntryUiEvent.RetryRunClicked(run.id)) },
                 enabled = retryEnabled,
@@ -1417,11 +1352,6 @@ internal fun SessionMessageContent(
     }
 }
 
-/**
- * The message-level actions. Both carry exactly the selected message content and run
- * only when the user selects them, so no credential, hidden diagnostic detail, or
- * other Session content can leave the client through them.
- */
 @Composable
 private fun MessageActionControls(
     content: String,

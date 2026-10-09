@@ -29,7 +29,6 @@ object JourneyEndpointCatalog {
             "runs" to Endpoint("POST", "/v1/runs"),
             "run_status" to Endpoint("GET", "/v1/runs/{run_id}"),
             "run_events" to Endpoint("GET", "/v1/runs/{run_id}/events"),
-            // Additive endpoint used only by the capabilities-additive journey.
             "gateway_future_endpoint" to Endpoint("GET", "/v1/future"),
         )
 }
@@ -157,11 +156,6 @@ object JourneyScenarioParser {
             runCatching { scenarioFile.readText() }.getOrElse { error ->
                 throw JourneyScenarioFormatException("Journey scenario could not be read: ${error.message}")
             }
-        // kotlinx.serialization collapses duplicate JSON keys before the object
-        // model is built, so "exactly one provenance field" must be checked on
-        // the raw document; otherwise a duplicate hermes_revision key would be
-        // silently accepted. JSON permits \uXXXX escapes inside object keys, so
-        // the raw check decodes those escapes before counting.
         val normalizedText =
             UNICODE_ESCAPE.replace(text) { match ->
                 val codePoint = match.groupValues[1].toInt(16)

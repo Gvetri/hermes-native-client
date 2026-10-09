@@ -26,15 +26,11 @@ internal fun rememberMessageActions(): MessageActions {
         MessageActions(
             openLink = { destination ->
                 externalBrowserIntent(destination)?.let { intent ->
-                    // Untrusted content must not crash the client on a device that has no
-                    // browser to hand an HTTPS destination to.
                     runCatching { context.startActivity(intent) }
                 }
             },
             copy = { text -> clipboard.setText(AnnotatedString(text)) },
             share = { text ->
-                // Nothing to share with and no browser are the same class of missing
-                // handler: untrusted content must not crash the client for either.
                 runCatching { context.startActivity(messageShareIntent(text)) }
             },
         )

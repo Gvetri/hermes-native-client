@@ -104,7 +104,6 @@ private fun MarkdownList(
     }
 }
 
-/** One list row: the authored ordinal or the bullet style, plus the item content. */
 private data class RenderedItem(
     val marker: String,
     val spans: List<MarkdownSpan>,
@@ -112,11 +111,6 @@ private data class RenderedItem(
 
 private const val BULLET_MARKER = "•"
 
-/**
- * A fenced code block: the code is literal text in a monospace face that scrolls
- * horizontally instead of wrapping, so long lines stay readable, and the explicit Copy
- * action carries exactly the code of this block.
- */
 @Composable
 private fun MarkdownCodeBlock(
     block: MarkdownBlock.CodeBlock,
@@ -181,8 +175,6 @@ private fun List<MarkdownSpan>.toAnnotatedString(
                     LinkAnnotation.Url(
                         url = destination,
                         styles = TextLinkStyles(style = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
-                        // The client's own action handles the selection, so the platform's
-                        // default URI handling never opens anything by itself.
                         linkInteractionListener = { onOpenLink(destination) },
                     ),
                     start = start,

@@ -40,9 +40,6 @@ class LocalDiagnosticsWiringTest {
 
     @Before
     fun resetFileProviderPathCache() {
-        // Every test method runs with its own data directory, while FileProvider caches the
-        // resolved provider paths per authority for the whole process. Clearing the cache makes
-        // each method resolve its own cache directory instead of a previous method's.
         val cacheField = FileProvider::class.java.getDeclaredField("sCache")
         cacheField.isAccessible = true
         (cacheField.get(null) as MutableMap<*, *>).clear()
@@ -63,7 +60,6 @@ class LocalDiagnosticsWiringTest {
         assertEquals(context.noBackupFilesDir, requireNotNull(file).parentFile)
         assertFalse(requireNotNull(file).path.startsWith(context.filesDir.path))
 
-        // A separate storage instance sees the same private records.
         assertEquals(1, buffer().recordCount())
     }
 
@@ -117,7 +113,6 @@ class LocalDiagnosticsWiringTest {
         assertEquals(buffer.records(), lines.drop(1))
         assertTrue(lines.all(LocalDiagnosticsRecords::isValidRecord))
 
-        // The export never clears, mutates, or appends a second copy to the buffer.
         assertEquals(2, buffer.recordCount())
         assertEquals(buffer.records(), FileLocalDiagnosticsStorage(context).read())
 
@@ -220,7 +215,6 @@ class LocalDiagnosticsWiringTest {
             ),
             snapshots.map(File::getName).toSet(),
         )
-        // A snapshot another app may still be reading is never rewritten.
         assertEquals(firstContent, firstSnapshot.readText())
     }
 

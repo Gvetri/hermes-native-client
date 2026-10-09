@@ -32,8 +32,6 @@ fun main(args: Array<String>) {
     val telemetry = fetchTelemetry(telemetryUrl, keystoreFile, keystorePassword)
     JourneyInvariants.verify(scenarioName, telemetry)
     if (scenarioName == "active-run-isolation") {
-        // The remote Run must still be running after the switch away and back;
-        // the live status is read from the still-running fake Gateway.
         val run =
             fetchTelemetry(
                 telemetryUrl.resolve("/v1/runs/${JourneyInvariants.ACTIVE_RUN_ID}"),
@@ -78,11 +76,8 @@ internal fun fetchTelemetry(
     connection.connectTimeout = 5_000
     connection.readTimeout = 5_000
     connection.requestMethod = "GET"
-    // Telemetry reads are infrastructure probes; the fixture serves them
-    // without recording them as application traffic.
     connection.setRequestProperty("X-Journey-Probe", "verifier")
     if (connection is HttpsURLConnection) {
-        // The journey certificate is fixed to 127.0.0.1/10.0.2.2 loopback SANs.
         connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
     }
     return try {
@@ -180,8 +175,6 @@ internal object JourneyInvariants {
                 fields.getValue("method").jsonPrimitive.content to fields.getValue("path").jsonPrimitive.content
             }
         val mutations = requests.filter { (method, _) -> method != "GET" }
-        // Create once, then explicitly rename/pin/unpin/delete from the conversation
-        // and from the list. Menu dismissal and cancelled confirmations add no writes.
         val expected =
             listOf(
                 "POST" to "/api/sessions",
@@ -215,8 +208,6 @@ internal object JourneyInvariants {
                 "delete" to "session-alpha",
             )
         check(operations == expectedOperations) { "The confirmed Session operation types or targets did not match the journey." }
-        // Read-only refreshes after the two cancellation groups prove that no write
-        // happened during menu dismissal or cancellation, before confirmed actions.
         var writesSeen = 0
         val checkpoints =
             buildList {
@@ -252,11 +243,6 @@ internal object JourneyInvariants {
     }
 
     private fun verifyActiveRunIsolation(telemetry: JsonObject) {
-        // The journey observes the active Run once, refreshes history (which
-        // must not open a duplicate SSE observation), switches to another
-        // Session (which must not cancel the Run), and returns (re-observing
-        // exactly once). Opened == 2 proves the refresh added no duplicate;
-        // closed == 1 proves only the Session switch closed the stream.
         val sse = sseFor(telemetry, ACTIVE_RUN_ID)
         check(sse.opened == 2) {
             "Active Run was observed ${sse.opened} times; expected 2 (initial plus re-open, no refresh duplicate)."
@@ -302,10 +288,6 @@ internal object JourneyInvariants {
     }
 
     private fun verifyExplicitRetry(telemetry: JsonObject) {
-        // The pinned Gateway's history carries no Run linkage, so the client
-        // retries only the failed Run it created itself, reusing the original
-        // input it still holds in memory. The journey proves exactly one
-        // explicit retry submission over the Run resource.
         check(runCreatesFor(telemetry, RETRY_SESSION_ID) == 2) {
             "The client did not submit exactly two Run creations (initial run plus one explicit retry)."
         }
@@ -325,8 +307,6 @@ internal object JourneyInvariants {
     }
 
     private fun verifyCapabilitiesAdditive(telemetry: JsonObject) {
-        // The additive journey reaches a succeeded terminal state, so its Run
-        // submission is counted exactly like every other terminal journey.
         requireConnectionAttempted(telemetry)
         check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
             "The client submitted the additive Run more than once."

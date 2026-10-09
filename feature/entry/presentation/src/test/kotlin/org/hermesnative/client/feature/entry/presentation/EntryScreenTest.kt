@@ -458,9 +458,6 @@ class EntryScreenTest {
                                                 pinned = false,
                                             ),
                                         ),
-                                    // The pinned Gateway has no general Session search, so the
-                                    // query filters loaded rows locally and never produces a
-                                    // search-in-flight state.
                                     searchQuery = "Existing",
                                 ),
                         ),
