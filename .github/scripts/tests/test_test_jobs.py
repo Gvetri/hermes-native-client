@@ -597,7 +597,7 @@ redact_file "$runner_output" || status=$?
         )[1].split("        run: |\n", 1)[1]
         script = textwrap.dedent(block)
         required = [
-            "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
+            "FORMATTING", "STATIC_ANALYSIS", "DETEKT", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
             "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
             "ARCHITECTURE_CHECK", "COVERAGE_MUTATION", "COMPOSE_TEST",
             "CONFORMANCE", "COMMIT_MESSAGE", "DRAFT_VALIDATION", "FORK_GUARD",
@@ -641,7 +641,7 @@ redact_file "$runner_output" || status=$?
         )[1].split("        run: |\n", 1)[1]
         script = textwrap.dedent(block)
         required = [
-            "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
+            "FORMATTING", "STATIC_ANALYSIS", "DETEKT", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
             "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
             "ARCHITECTURE_CHECK", "COVERAGE_MUTATION", "COMPOSE_TEST", "CONFORMANCE",
         ]
@@ -709,7 +709,7 @@ redact_file "$runner_output" || status=$?
         )[1].split("        run: |\n", 1)[1]
         script = textwrap.dedent(block)
         core = [
-            "FORMATTING", "STATIC_ANALYSIS", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
+            "FORMATTING", "STATIC_ANALYSIS", "DETEKT", "UNIT_TESTS", "FIXTURE_DESCRIPTOR",
             "FIXTURE_LIFECYCLE", "FIXTURE_CONTRACT", "ANDROID_BUILD",
             "ARCHITECTURE_CHECK", "COVERAGE_MUTATION", "COMPOSE_TEST", "CONFORMANCE",
         ]

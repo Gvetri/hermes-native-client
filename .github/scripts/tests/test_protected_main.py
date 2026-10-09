@@ -18,6 +18,7 @@ CONFORMANCE_SCRIPT = ROOT / ".github/scripts/verify-repository-conformance.py"
 HEAVY_JOBS = (
     "formatting",
     "static_analysis",
+    "detekt",
     "unit_tests",
     "fixture_descriptor",
     "fixture_lifecycle",

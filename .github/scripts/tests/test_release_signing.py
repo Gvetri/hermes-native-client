@@ -13,7 +13,7 @@ SCRIPT = ROOT / ".github/scripts/release-signing.py"
 REPOSITORY = "Gvetri/hermes-native-client"
 SOURCE = "a" * 40
 REQUIRED_JOBS = (
-    "formatting", "static-analysis", "unit-tests", "fixture-descriptor",
+    "formatting", "static-analysis", "detekt", "unit-tests", "fixture-descriptor",
     "fixture-lifecycle", "fixture-contract", "android-build", "architecture-check",
     "coverage-mutation", "compose-jvm-tests", "conformance", "api24-instrumentation",
     "maestro-journeys", "quality-gate",

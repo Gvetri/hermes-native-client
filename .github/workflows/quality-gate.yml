@@ -100,6 +100,27 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew :app:lintDebug --no-daemon
 
+  # The detekt analysis runs with type resolution for every Kotlin module, and its verification
+  # enforces the committed baseline's ledger and the shrink-only ratchet against main, so the
+  # fetch step brings the base reference into the shallow checkout.
+  detekt:
+    name: detekt
+    if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Fetch the main reference for the shrink-only baseline ratchet
+        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - run: ./gradlew detekt detektVerify --no-daemon --console=plain
+
   unit_tests:
     name: unit-tests
     if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
@@ -628,6 +649,7 @@ jobs:
       - draft_validation
       - formatting
       - static_analysis
+      - detekt
       - unit_tests
       - fixture_descriptor
       - fixture_lifecycle
@@ -649,6 +671,7 @@ jobs:
         env:
           FORMATTING_RESULT: ${{ needs.formatting.result }}
           STATIC_ANALYSIS_RESULT: ${{ needs.static_analysis.result }}
+          DETEKT_RESULT: ${{ needs.detekt.result }}
           UNIT_TESTS_RESULT: ${{ needs.unit_tests.result }}
           FIXTURE_DESCRIPTOR_RESULT: ${{ needs.fixture_descriptor.result }}
           FIXTURE_LIFECYCLE_RESULT: ${{ needs.fixture_lifecycle.result }}
@@ -673,6 +696,7 @@ jobs:
           expected="$(awk 'NF' .github/quality-gate/required-checks.txt)"
           expected_declaration='formatting
           static_analysis
+          detekt
           unit_tests
           fixture_descriptor
           fixture_lifecycle
@@ -731,6 +755,7 @@ jobs:
             for result in \
               "$FORMATTING_RESULT" \
               "$STATIC_ANALYSIS_RESULT" \
+              "$DETEKT_RESULT" \
               "$UNIT_TESTS_RESULT" \
               "$FIXTURE_DESCRIPTOR_RESULT" \
               "$FIXTURE_LIFECYCLE_RESULT" \
@@ -758,6 +783,7 @@ jobs:
             for result in \
               "$FORMATTING_RESULT" \
               "$STATIC_ANALYSIS_RESULT" \
+              "$DETEKT_RESULT" \
               "$UNIT_TESTS_RESULT" \
               "$FIXTURE_DESCRIPTOR_RESULT" \
               "$FIXTURE_LIFECYCLE_RESULT" \
