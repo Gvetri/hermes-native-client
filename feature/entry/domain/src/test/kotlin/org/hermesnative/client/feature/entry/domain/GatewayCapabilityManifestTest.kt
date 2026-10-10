@@ -61,6 +61,10 @@ class GatewayCapabilityManifestTest {
             ),
             manifest.requirements.map { it.path },
         )
+        assertRequiredEndpointMap(manifest)
+    }
+
+    private fun assertRequiredEndpointMap(manifest: GatewayCapabilityManifest) {
         assertEquals(manifest.requirements.map { it.endpoint }.distinct().size, manifest.requiredEndpoints.size)
         assertEquals(GatewayEndpoint("GET", "/api/sessions"), manifest.requiredEndpoints.getValue("sessions"))
         assertEquals(

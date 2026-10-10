@@ -60,6 +60,15 @@ class DefaultGatewayClientTest {
         val client = DefaultGatewayClient("https://gateway.example", "test-token", transport)
         val sessionId = SessionId(SESSION_ID)
 
+        assertEveryOperationAgainstFixtures(transport, client, sessionId)
+        assertRecordedRequests(transport)
+    }
+
+    private fun assertEveryOperationAgainstFixtures(
+        transport: RecordingTransport,
+        client: GatewayContractPort,
+        sessionId: SessionId,
+    ) {
         val capabilities = client.discoverCapabilities()
         assertEquals(10, capabilities.endpoints.size)
         assertTrue(capabilities.supports("run_events"))
@@ -90,7 +99,9 @@ class DefaultGatewayClientTest {
             client.observeRun(RunId(RUN_ID)).toList().map { it.type },
         )
         assertTrue(transport.eventStreamClosed)
+    }
 
+    private fun assertRecordedRequests(transport: RecordingTransport) {
         val expectedFixtures =
             listOf(
                 "capabilities/request.json",
