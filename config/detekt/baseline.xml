@@ -5,15 +5,10 @@
 <ID>ComplexCondition:DefaultGatewayClient.kt$DefaultGatewayClient$value.isBlank() || value.any { it == '/' || it == '?' || it == '#' }</ID>
 <ID>ComplexCondition:GatewayRouteBuilder.kt$GatewayRouteBuilder$uri.isOpaque || uri.scheme?.lowercase() != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || uri.query != null || uri.fragment != null</ID>
 <ID>ComplexCondition:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$runId.isEmpty() || segments.size !in 1..2 || (segments.size == 2 &amp;&amp; segments[1] != "events")</ID>
-<ID>ComplexCondition:SessionListScreen.kt$state.visibleSessions.isEmpty() &amp;&amp; !state.isLoading &amp;&amp; !state.isSearching &amp;&amp; state.nextOffset != null</ID>
 <ID>ComplexCondition:VerifyGatewayConnection.kt$GatewayEndpointValidator$character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "-._~"</ID>
 <ID>CyclomaticComplexMethod:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionResource( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
 <ID>CyclomaticComplexMethod:JourneyVerifier.kt$JourneyInvariants$fun verify( scenarioName: String, telemetry: JsonObject, )</ID>
 <ID>CyclomaticComplexMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun send_timeout_applies_authoritative_history_while_preserving_the_uncertain_draft()</ID>
-<ID>CyclomaticComplexMethod:SafeMarkdown.kt$internal fun parseSafeMarkdown(content: String): List&lt;MarkdownBlock&gt;</ID>
-<ID>CyclomaticComplexMethod:SessionListScreen.kt$@Composable internal fun SessionMessageContent( message: SessionMessageUiState, retryEnabled: Boolean, onRetry: (RunId) -&gt; Unit, actions: MessageActions = rememberMessageActions(), )</ID>
-<ID>CyclomaticComplexMethod:SessionListScreen.kt$@Composable private fun SessionDetailSummary( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, retryEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
-<ID>CyclomaticComplexMethod:SessionListScreen.kt$@OptIn(ExperimentalLayoutApi::class) @Composable internal fun SessionDetailContent( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
 <ID>LargeClass:EntryScreenTest.kt$EntryScreenTest</ID>
 <ID>LargeClass:JourneyScenarioTest.kt$JourneyScenarioTest</ID>
 <ID>LargeClass:RunObservationStateHolderTest.kt$RunObservationStateHolderTest</ID>
@@ -23,14 +18,12 @@
 <ID>LargeClass:SessionHistoryScreenTest.kt$SessionHistoryScreenTest</ID>
 <ID>LongMethod:ContractFixtureParserTest.kt$ContractFixtureParserTest$@Test fun session_fixtures_cover_pagination_and_all_supported_mutations()</ID>
 <ID>LongMethod:DefaultGatewayClientTest.kt$DefaultGatewayClientTest$@Test fun adapter_executes_every_supported_operation_against_the_client_owned_fixtures()</ID>
-<ID>LongMethod:EntryScreen.kt$@Composable private fun GatewayConnectionForm( state: EntryUiState, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
 <ID>LongMethod:EntryScreenTest.kt$EntryScreenTest$@Test fun switching_from_an_active_run_keeps_send_available_in_another_session()</ID>
 <ID>LongMethod:EntryWiring.kt$EntryWiring$fun createEntryStateHolder( context: Context, capabilityDiscovery: ((String, String) -&gt; GatewayCapabilities)? = null, sessionGatewayFactory: ((String, String) -&gt; SessionGatewayPort)? = null, runGatewayFactory: ((String, String) -&gt; RunGatewayPort)? = null, coroutineScope: CoroutineScope? = null, clientVersion: String = androidClientVersion(context), ): EntryStateHolder</ID>
 <ID>LongMethod:GatewayCapabilityManifestTest.kt$GatewayCapabilityManifestTest$@Test fun public_beta_manifest_is_versioned_and_maps_every_required_endpoint()</ID>
 <ID>LongMethod:GatewayTransportTest.kt$GatewayTransportTest$@Test fun closing_an_open_event_stream_cancels_without_draining_the_body()</ID>
 <ID>LongMethod:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionResource( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
 <ID>LongMethod:JourneyVerifier.kt$JourneyInvariants$private fun verifySessionLifecycle(telemetry: JsonObject)</ID>
-<ID>LongMethod:LocalDiagnosticsScreen.kt$@Composable internal fun LocalDiagnosticsContent( state: LocalDiagnosticsUiState, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
 <ID>LongMethod:PinnedFixtureDescriptor.kt$PinnedFixtureDescriptor.Companion$private fun parse(content: String): PinnedFixtureDescriptor</ID>
 <ID>LongMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun an_old_same_text_message_does_not_resolve_an_unrelated_new_run()</ID>
 <ID>LongMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun history_run_selection_is_atomic_with_unresolved_submission_state()</ID>
@@ -40,26 +33,14 @@
 <ID>LongMethod:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$@Test fun retry_uses_the_recorded_original_message_and_never_overwrites_the_composer_draft()</ID>
 <ID>LongMethod:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$@Test fun retry_run_is_shown_independently_with_its_own_identity_and_the_failed_run_stays_visible()</ID>
 <ID>LongMethod:SessionHistoryScreenTest.kt$SessionHistoryScreenTest$@Test fun uncertain_run_has_no_retry_or_failure_detail_until_authoritative_reconciliation_confirms_failure()</ID>
-<ID>LongMethod:SessionListScreen.kt$@Composable internal fun CreateSessionContent( state: SessionCreationUiState, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
-<ID>LongMethod:SessionListScreen.kt$@Composable internal fun SessionMessageContent( message: SessionMessageUiState, retryEnabled: Boolean, onRetry: (RunId) -&gt; Unit, actions: MessageActions = rememberMessageActions(), )</ID>
-<ID>LongMethod:SessionListScreen.kt$@Composable private fun RenameSessionContent( session: SessionItemUiState, state: SessionRenameUiState, enabled: Boolean, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
-<ID>LongMethod:SessionListScreen.kt$@Composable private fun SessionActionControls( session: SessionItemUiState, mutation: SessionMutationUiState?, enabled: Boolean, onEvent: (EntryUiEvent) -&gt; Unit, showMenu: Boolean = true, )</ID>
-<ID>LongMethod:SessionListScreen.kt$@Composable private fun SessionDetailSummary( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, retryEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
-<ID>LongMethod:SessionListScreen.kt$@Composable private fun SessionListPaneHeader( state: SessionListUiState, onEvent: (EntryUiEvent) -&gt; Unit, onSearchFocusChanged: (Boolean) -&gt; Unit, )</ID>
-<ID>LongMethod:SessionListScreen.kt$@OptIn(ExperimentalLayoutApi::class) @Composable internal fun SessionDetailContent( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
-<ID>LongMethod:SessionListScreen.kt$@OptIn(ExperimentalLayoutApi::class) @Composable internal fun SessionListPane( state: SessionListUiState, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, runStatusNotifications: RunStatusNotificationsUiState = RunStatusNotificationsUiState(), selectedSessionId: SessionId? = null, )</ID>
 <ID>LongParameterList:DefaultGatewayClient.kt$DefaultGatewayClient$( operation: String, method: String, path: String, expectedStatus: Int, query: Map&lt;String, String?&gt; = emptyMap(), body: String? = null, )</ID>
 <ID>LongParameterList:EntryWiring.kt$EntryWiring$( context: Context, capabilityDiscovery: ((String, String) -&gt; GatewayCapabilities)? = null, sessionGatewayFactory: ((String, String) -&gt; SessionGatewayPort)? = null, runGatewayFactory: ((String, String) -&gt; RunGatewayPort)? = null, coroutineScope: CoroutineScope? = null, clientVersion: String = androidClientVersion(context), )</ID>
 <ID>LongParameterList:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$( gateway: FakeGateway, dispatcher: CoroutineDispatcher = Dispatchers.Unconfined, sendTimeoutMillis: Long = 30_000L, recoveryRegistry: RunRecoveryRegistry? = null, uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore, scope: CoroutineScope = CoroutineScope(SupervisorJob() + dispatcher), )</ID>
 <ID>LongParameterList:RunRetryStateHolderTest.kt$RunRetryStateHolderTest$( gateway: FakeGateway, dispatcher: CoroutineDispatcher = Dispatchers.Unconfined, onRunSubmissionSettled: (() -&gt; Unit)? = null, recoveryRegistry: RunRecoveryRegistry? = null, uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore, persistRunRecoveryEntry: ((String, RunRecoveryEntry) -&gt; Unit)? = null, removeRunRecoveryEntry: ((String, RunRecoveryEntry) -&gt; Unit)? = null, )</ID>
 <ID>LongParameterList:RunStatusNotificationStateHolderTest.kt$RunStatusNotificationStateHolderTest$( gateway: ScriptedGateway, dispatcher: CoroutineDispatcher = Dispatchers.Unconfined, store: FakeNotificationSettingsStore = FakeNotificationSettingsStore(), permission: FakeNotificationPermission = FakeNotificationPermission(canPost = true, requiresRuntimePermissionRequest = false), notifier: FakeRunStatusNotifier = FakeRunStatusNotifier(), permissionRequests: AtomicInteger = AtomicInteger(0), recoveryRegistry: RunRecoveryRegistry? = null, )</ID>
-<ID>LongParameterList:SessionListScreen.kt$( session: SessionItemUiState, mutation: SessionMutationUiState?, selected: Boolean, enabled: Boolean, onClick: () -&gt; Unit, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
-<ID>LongParameterList:SessionListScreen.kt$( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
-<ID>LongParameterList:SessionListScreen.kt$( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, retryEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
 <ID>NestedBlockDepth:ContractFixtureParser.kt$ContractFixtureParser$internal fun countJsonMember( content: String, field: String, ): Int</ID>
 <ID>NestedBlockDepth:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun streamRunEvents( exchange: HttpExchange, behavior: JourneyGatewayBehavior, runId: String, )</ID>
 <ID>NestedBlockDepth:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.FakeGateway$override fun observeRun(runId: RunId): RunEventObservation</ID>
-<ID>NestedBlockDepth:SafeMarkdown.kt$internal fun parseSafeMarkdown(content: String): List&lt;MarkdownBlock&gt;</ID>
 <ID>TooGenericExceptionCaught:AndroidKeyStoreGatewayCredentialStore.kt$AndroidKeyStoreGatewayCredentialStore$error: Exception</ID>
 <ID>TooGenericExceptionCaught:ContractFixtureParser.kt$ContractFixtureParser$error: Exception</ID>
 <ID>TooGenericExceptionCaught:DefaultGatewayClient.kt$DefaultGatewayClient$error: Exception</ID>
@@ -81,7 +62,5 @@
 <ID>TooManyFunctions:JourneyVerifier.kt$JourneyInvariants</ID>
 <ID>TooManyFunctions:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess$Companion</ID>
 <ID>TooManyFunctions:RunSubmissionUncertainty.kt$RunSubmissionUncertaintyStore</ID>
-<ID>TooManyFunctions:SafeMarkdown.kt$org.hermesnative.client.feature.entry.presentation.SafeMarkdown.kt</ID>
-<ID>TooManyFunctions:SessionListScreen.kt$org.hermesnative.client.feature.entry.presentation.SessionListScreen.kt</ID>
   </CurrentIssues>
 </SmellBaseline>
