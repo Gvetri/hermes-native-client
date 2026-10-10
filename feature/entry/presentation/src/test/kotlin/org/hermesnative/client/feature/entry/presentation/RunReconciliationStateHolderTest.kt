@@ -2572,13 +2572,7 @@ class RunReconciliationStateHolderTest {
         endpoint: String,
         entry: RunRecoveryEntry,
     ) {
-        EntryStateHolder::class.java
-            .getDeclaredMethod(
-                "reconcilePersistedRecoveryEntryIfConnected",
-                String::class.java,
-                RunRecoveryEntry::class.java,
-            ).apply { isAccessible = true }
-            .invoke(holder, endpoint, entry)
+        holder.reconcilePersistedRecoveryEntryIfConnected(endpoint, entry)
     }
 
     private class FakeGateway(
@@ -2921,10 +2915,7 @@ class RunReconciliationStateHolderTest {
         sessionId: SessionId,
         openedSession: org.hermesnative.client.feature.entry.application.OpenedSession,
     ): RunId? {
-        val method =
-            EntryStateHolder::class.java.declaredMethods.single { it.name.startsWith("historyRunIdToReconcile") }
-                .apply { isAccessible = true }
-        return (method.invoke(holder, sessionId.value, openedSession) as String?)?.let(::RunId)
+        return holder.historyRunIdToReconcile(sessionId, openedSession)
     }
 
     private class InMemoryUncertaintyStorage : RunSubmissionUncertaintyStorage {
