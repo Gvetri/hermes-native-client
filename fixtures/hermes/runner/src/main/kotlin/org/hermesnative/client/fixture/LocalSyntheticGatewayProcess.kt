@@ -166,10 +166,10 @@ class LocalSyntheticGatewayProcess private constructor(
                 respond(exchange, behavior.capabilityStatus, capabilitiesJson(behavior))
             }
             server.createContext("/api/sessions") { exchange ->
-                handleSessionListRequest(exchange, behavior)
+                SyntheticGatewayRoutes.handleSessionListRequest(exchange, behavior)
             }
             server.createContext("/api/sessions/") { exchange ->
-                handleSessionResourceRequest(exchange, behavior)
+                SyntheticGatewayRoutes.handleSessionResourceRequest(exchange, behavior)
             }
             server.createContext("/") { exchange ->
                 recordRequest(exchange, behavior)
@@ -199,312 +199,316 @@ class LocalSyntheticGatewayProcess private constructor(
                 )
                 append("}}")
             }
+    }
+}
 
-        private fun handleSessionListRequest(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-        ) {
-            val body = recordRequest(exchange, behavior)
-            if (exchange.requestURI.path != "/api/sessions") {
-                respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
-                return
-            }
-            when (exchange.requestMethod) {
-                "GET" -> handleSessionListRead(exchange, behavior)
-                "POST" -> {
-                    val created =
-                        SyntheticGatewaySession(
-                            id = behavior.createdSessionId,
-                            title = parseTitle(body),
-                            preview = null,
-                            pinned = false,
-                            history =
-                                listOf(
-                                    SyntheticGatewayMessage(
-                                        id = "message-${behavior.createdSessionId}",
-                                        role = "assistant",
-                                        content = "Created history",
-                                    ),
+private fun replaceSession(
+    behavior: SyntheticGatewayBehavior,
+    session: SyntheticGatewaySession,
+) {
+    val index = behavior.sessions.indexOfFirst { it.id == session.id }
+    if (index >= 0) behavior.sessions[index] = session
+}
+
+private fun queryParameters(uri: URI): Map<String, String> = GatewayHttpSupport.queryParameters(uri)
+
+private fun quote(value: String): String = GatewayHttpSupport.quote(value)
+
+private fun recordRequest(
+    exchange: HttpExchange,
+    behavior: SyntheticGatewayBehavior,
+): String? = GatewayHttpSupport.recordRequest(exchange, behavior.requests)
+
+private fun respond(
+    exchange: HttpExchange,
+    status: Int,
+    body: String,
+) {
+    GatewayHttpSupport.respond(exchange, status, body)
+}
+
+private object SyntheticGatewayRoutes {
+    internal fun handleSessionListRequest(
+        exchange: HttpExchange,
+        behavior: SyntheticGatewayBehavior,
+    ) {
+        val body = recordRequest(exchange, behavior)
+        if (exchange.requestURI.path != "/api/sessions") {
+            respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
+            return
+        }
+        when (exchange.requestMethod) {
+            "GET" -> handleSessionListRead(exchange, behavior)
+            "POST" -> {
+                val created =
+                    SyntheticGatewaySession(
+                        id = behavior.createdSessionId,
+                        title = SyntheticGatewayJson.parseTitle(body),
+                        preview = null,
+                        pinned = false,
+                        history =
+                            listOf(
+                                SyntheticGatewayMessage(
+                                    id = "message-${behavior.createdSessionId}",
+                                    role = "assistant",
+                                    content = "Created history",
                                 ),
+                            ),
+                    )
+                behavior.sessions.removeIf { it.id == created.id }
+                behavior.sessions += created
+                respond(
+                    exchange,
+                    HTTP_CREATED,
+                    "{\"object\":\"hermes.session\",\"session\":${SyntheticGatewayJson.sessionJson(created)}}",
+                )
+            }
+            else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, "{\"error\":\"method-not-allowed\"}")
+        }
+    }
+
+    private fun handleSessionListRead(
+        exchange: HttpExchange,
+        behavior: SyntheticGatewayBehavior,
+    ) {
+        if (behavior.failNextSessionList) {
+            behavior.failNextSessionList = false
+            respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-refresh-failure\"}")
+            return
+        }
+        val query = queryParameters(exchange.requestURI)
+        val requestedLimit = query["limit"]?.toIntOrNull() ?: DEFAULT_PAGE_LIMIT
+        val offset = query["offset"]?.toIntOrNull() ?: 0
+        val paginationFailure = sessionListPaginationFailure(requestedLimit, offset, behavior)
+        if (paginationFailure != null) {
+            respond(exchange, HTTP_BAD_REQUEST, paginationFailure)
+            return
+        }
+        val effectiveLimit = minOf(requestedLimit, behavior.sessionPageSize ?: requestedLimit)
+        val matchingSessions = behavior.sessions.toList()
+        val page = matchingSessions.drop(offset).take(effectiveLimit)
+        val hasMore = offset + page.size < matchingSessions.size
+        val sessions = page.joinToString(",") { SyntheticGatewayJson.sessionJson(it) }
+        respond(
+            exchange,
+            HTTP_OK,
+            "{\"object\":\"list\",\"data\":[$sessions],\"limit\":$effectiveLimit,\"offset\":$offset," +
+                "\"has_more\":$hasMore}",
+        )
+    }
+
+    private fun sessionListPaginationFailure(
+        requestedLimit: Int,
+        offset: Int,
+        behavior: SyntheticGatewayBehavior,
+    ): String? =
+        when {
+            requestedLimit <= 0 || offset < 0 -> "{\"error\":\"invalid-pagination\"}"
+            offset > behavior.sessions.size -> "{\"error\":\"offset-out-of-range\"}"
+            else -> null
+        }
+
+    internal fun handleSessionResourceRequest(
+        exchange: HttpExchange,
+        behavior: SyntheticGatewayBehavior,
+    ) {
+        val body = recordRequest(exchange, behavior)
+        val resource = exchange.requestURI.path.removePrefix("/api/sessions/")
+        val segments = resource.split('/')
+        val sessionId = segments.firstOrNull().orEmpty()
+        val session = behavior.sessions.firstOrNull { it.id == sessionId }
+        if (session == null || segments.size !in 1..2) {
+            respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"session-not-found\"}")
+            return
+        }
+
+        when (exchange.requestMethod) {
+            "GET" ->
+                when {
+                    segments.size == 1 ->
+                        respond(
+                            exchange,
+                            HTTP_OK,
+                            "{\"object\":\"hermes.session\",\"session\":${SyntheticGatewayJson.sessionJson(session)}}",
                         )
-                    behavior.sessions.removeIf { it.id == created.id }
-                    behavior.sessions += created
-                    respond(
-                        exchange,
-                        HTTP_CREATED,
-                        "{\"object\":\"hermes.session\",\"session\":${sessionJson(created)}}",
-                    )
+                    segments[1] == "messages" -> respond(exchange, HTTP_OK, SyntheticGatewayJson.historyJson(session))
+                    else -> respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
                 }
-                else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, "{\"error\":\"method-not-allowed\"}")
-            }
+            "PATCH" -> handleSessionPatch(exchange, behavior, session, body, segments)
+            "DELETE" -> handleSessionDelete(exchange, behavior, sessionId, segments)
+            else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, "{\"error\":\"method-not-allowed\"}")
         }
+    }
 
-        private fun handleSessionListRead(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-        ) {
-            if (behavior.failNextSessionList) {
-                behavior.failNextSessionList = false
-                respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-refresh-failure\"}")
-                return
-            }
-            val query = queryParameters(exchange.requestURI)
-            val requestedLimit = query["limit"]?.toIntOrNull() ?: DEFAULT_PAGE_LIMIT
-            val offset = query["offset"]?.toIntOrNull() ?: 0
-            val paginationFailure = sessionListPaginationFailure(requestedLimit, offset, behavior)
-            if (paginationFailure != null) {
-                respond(exchange, HTTP_BAD_REQUEST, paginationFailure)
-                return
-            }
-            val effectiveLimit = minOf(requestedLimit, behavior.sessionPageSize ?: requestedLimit)
-            val matchingSessions = behavior.sessions.toList()
-            val page = matchingSessions.drop(offset).take(effectiveLimit)
-            val hasMore = offset + page.size < matchingSessions.size
-            val sessions = page.joinToString(",") { sessionJson(it) }
-            respond(
-                exchange,
-                HTTP_OK,
-                "{\"object\":\"list\",\"data\":[$sessions],\"limit\":$effectiveLimit,\"offset\":$offset," +
-                    "\"has_more\":$hasMore}",
-            )
+    private fun handleSessionPatch(
+        exchange: HttpExchange,
+        behavior: SyntheticGatewayBehavior,
+        session: SyntheticGatewaySession,
+        body: String?,
+        segments: List<String>,
+    ) {
+        if (segments.size != 1) {
+            respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
+        } else if (SyntheticGatewayJson.bodyContainsField(body, "pinned")) {
+            applyPinnedPatch(exchange, behavior, session, body)
+        } else {
+            applyRenamePatch(exchange, behavior, session, body)
         }
+    }
 
-        private fun sessionListPaginationFailure(
-            requestedLimit: Int,
-            offset: Int,
-            behavior: SyntheticGatewayBehavior,
-        ): String? =
-            when {
-                requestedLimit <= 0 || offset < 0 -> "{\"error\":\"invalid-pagination\"}"
-                offset > behavior.sessions.size -> "{\"error\":\"offset-out-of-range\"}"
-                else -> null
+    private fun applyPinnedPatch(
+        exchange: HttpExchange,
+        behavior: SyntheticGatewayBehavior,
+        session: SyntheticGatewaySession,
+        body: String?,
+    ) {
+        val pinned = SyntheticGatewayJson.bodyBoolean(body, "pinned")
+        when {
+            pinned == null ->
+                respond(exchange, HTTP_BAD_REQUEST, "{\"error\":\"invalid-session-field\"}")
+            pinned && behavior.failNextSessionPin -> {
+                behavior.failNextSessionPin = false
+                respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-pin-failure\"}")
             }
-
-        private fun handleSessionResourceRequest(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-        ) {
-            val body = recordRequest(exchange, behavior)
-            val resource = exchange.requestURI.path.removePrefix("/api/sessions/")
-            val segments = resource.split('/')
-            val sessionId = segments.firstOrNull().orEmpty()
-            val session = behavior.sessions.firstOrNull { it.id == sessionId }
-            if (session == null || segments.size !in 1..2) {
-                respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"session-not-found\"}")
-                return
-            }
-
-            when (exchange.requestMethod) {
-                "GET" ->
-                    when {
-                        segments.size == 1 ->
-                            respond(
-                                exchange,
-                                HTTP_OK,
-                                "{\"object\":\"hermes.session\",\"session\":${sessionJson(session)}}",
-                            )
-                        segments[1] == "messages" -> respond(exchange, HTTP_OK, historyJson(session))
-                        else -> respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
-                    }
-                "PATCH" -> handleSessionPatch(exchange, behavior, session, body, segments)
-                "DELETE" -> handleSessionDelete(exchange, behavior, sessionId, segments)
-                else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, "{\"error\":\"method-not-allowed\"}")
-            }
-        }
-
-        private fun handleSessionPatch(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-            session: SyntheticGatewaySession,
-            body: String?,
-            segments: List<String>,
-        ) {
-            if (segments.size != 1) {
-                respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
-            } else if (bodyContainsField(body, "pinned")) {
-                applyPinnedPatch(exchange, behavior, session, body)
-            } else {
-                applyRenamePatch(exchange, behavior, session, body)
-            }
-        }
-
-        private fun applyPinnedPatch(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-            session: SyntheticGatewaySession,
-            body: String?,
-        ) {
-            val pinned = bodyBoolean(body, "pinned")
-            when {
-                pinned == null ->
-                    respond(exchange, HTTP_BAD_REQUEST, "{\"error\":\"invalid-session-field\"}")
-                pinned && behavior.failNextSessionPin -> {
-                    behavior.failNextSessionPin = false
-                    respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-pin-failure\"}")
-                }
-                !pinned && behavior.failNextSessionUnpin -> {
-                    behavior.failNextSessionUnpin = false
-                    respond(
-                        exchange,
-                        HTTP_SERVICE_UNAVAILABLE,
-                        "{\"error\":\"synthetic-unpin-failure\"}",
-                    )
-                }
-                else -> {
-                    val updated = session.copy(pinned = pinned)
-                    replaceSession(behavior, updated)
-                    respond(
-                        exchange,
-                        HTTP_OK,
-                        "{\"object\":\"hermes.session\",\"session\":${sessionJson(updated)}}",
-                    )
-                }
-            }
-        }
-
-        private fun applyRenamePatch(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-            session: SyntheticGatewaySession,
-            body: String?,
-        ) {
-            if (behavior.failNextSessionRename) {
-                behavior.failNextSessionRename = false
+            !pinned && behavior.failNextSessionUnpin -> {
+                behavior.failNextSessionUnpin = false
                 respond(
                     exchange,
                     HTTP_SERVICE_UNAVAILABLE,
-                    "{\"error\":\"synthetic-rename-failure\"}",
+                    "{\"error\":\"synthetic-unpin-failure\"}",
                 )
-            } else {
-                val renamed = session.copy(title = parseTitle(body))
-                replaceSession(behavior, renamed)
+            }
+            else -> {
+                val updated = session.copy(pinned = pinned)
+                replaceSession(behavior, updated)
                 respond(
                     exchange,
                     HTTP_OK,
-                    "{\"object\":\"hermes.session\",\"session\":${sessionJson(renamed)}}",
+                    "{\"object\":\"hermes.session\",\"session\":${SyntheticGatewayJson.sessionJson(updated)}}",
                 )
             }
         }
+    }
 
-        private fun handleSessionDelete(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-            sessionId: String,
-            segments: List<String>,
-        ) {
-            when {
-                segments.size != 1 -> respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
-                behavior.failNextSessionDelete -> {
-                    behavior.failNextSessionDelete = false
-                    respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-delete-failure\"}")
-                }
-                else -> {
-                    behavior.sessions.removeIf { it.id == sessionId }
-                    respond(
-                        exchange,
-                        HTTP_OK,
-                        "{\"object\":\"hermes.session.deleted\",\"id\":${quote(sessionId)},\"deleted\":true}",
-                    )
-                }
+    private fun applyRenamePatch(
+        exchange: HttpExchange,
+        behavior: SyntheticGatewayBehavior,
+        session: SyntheticGatewaySession,
+        body: String?,
+    ) {
+        if (behavior.failNextSessionRename) {
+            behavior.failNextSessionRename = false
+            respond(
+                exchange,
+                HTTP_SERVICE_UNAVAILABLE,
+                "{\"error\":\"synthetic-rename-failure\"}",
+            )
+        } else {
+            val renamed = session.copy(title = SyntheticGatewayJson.parseTitle(body))
+            replaceSession(behavior, renamed)
+            respond(
+                exchange,
+                HTTP_OK,
+                "{\"object\":\"hermes.session\",\"session\":${SyntheticGatewayJson.sessionJson(renamed)}}",
+            )
+        }
+    }
+
+    private fun handleSessionDelete(
+        exchange: HttpExchange,
+        behavior: SyntheticGatewayBehavior,
+        sessionId: String,
+        segments: List<String>,
+    ) {
+        when {
+            segments.size != 1 -> respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
+            behavior.failNextSessionDelete -> {
+                behavior.failNextSessionDelete = false
+                respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-delete-failure\"}")
+            }
+            else -> {
+                behavior.sessions.removeIf { it.id == sessionId }
+                respond(
+                    exchange,
+                    HTTP_OK,
+                    "{\"object\":\"hermes.session.deleted\",\"id\":${quote(sessionId)},\"deleted\":true}",
+                )
             }
         }
+    }
+}
 
-        private fun replaceSession(
-            behavior: SyntheticGatewayBehavior,
-            session: SyntheticGatewaySession,
-        ) {
-            val index = behavior.sessions.indexOfFirst { it.id == session.id }
-            if (index >= 0) behavior.sessions[index] = session
+private object SyntheticGatewayJson {
+    internal fun sessionJson(session: SyntheticGatewaySession): String =
+        buildString {
+            append("{\"id\":")
+            append(quote(session.id))
+            append(",\"source\":\"api_server\",\"title\":")
+            append(session.title.jsonValue())
+            append(",\"preview\":")
+            append(session.preview.jsonValue())
+            append(",\"pinned\":")
+            append(session.pinned)
+            append(",\"message_count\":")
+            append(session.history.size)
+            append('}')
         }
 
-        private fun sessionJson(session: SyntheticGatewaySession): String =
-            buildString {
-                append("{\"id\":")
-                append(quote(session.id))
-                append(",\"source\":\"api_server\",\"title\":")
-                append(session.title.jsonValue())
-                append(",\"preview\":")
-                append(session.preview.jsonValue())
-                append(",\"pinned\":")
-                append(session.pinned)
-                append(",\"message_count\":")
-                append(session.history.size)
-                append('}')
-            }
-
-        private fun historyJson(session: SyntheticGatewaySession): String =
-            buildString {
-                append("{\"object\":\"list\",\"session_id\":")
-                append(quote(session.id))
-                append(",\"data\":[")
-                append(session.history.joinToString(",") { messageJson(it) })
-                append("],\"pagination\":{\"limit\":500,\"offset\":0,\"order\":\"latest\",\"returned\":")
-                append(session.history.size)
-                append("}}")
-            }
-
-        private fun messageJson(message: SyntheticGatewayMessage): String =
-            buildString {
-                append("{\"id\":")
-                append(quote(message.id))
-                append(",\"role\":")
-                append(message.role.jsonValue())
-                append(",\"content\":")
-                append(message.content.jsonValue())
-                message.timestamp?.let { append(",\"timestamp\":${quote(it)}") }
-                append('}')
-            }
-
-        private fun bodyContainsField(
-            body: String?,
-            field: String,
-        ): Boolean {
-            val text = body?.takeIf(String::isNotBlank) ?: return false
-            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject
-            return root?.containsKey(field) ?: false
+    internal fun historyJson(session: SyntheticGatewaySession): String =
+        buildString {
+            append("{\"object\":\"list\",\"session_id\":")
+            append(quote(session.id))
+            append(",\"data\":[")
+            append(session.history.joinToString(",") { messageJson(it) })
+            append("],\"pagination\":{\"limit\":500,\"offset\":0,\"order\":\"latest\",\"returned\":")
+            append(session.history.size)
+            append("}}")
         }
 
-        private fun bodyBoolean(
-            body: String?,
-            field: String,
-        ): Boolean? {
-            val root =
-                body?.takeIf(String::isNotBlank)
-                    ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject
-            val value = root?.get(field) as? JsonPrimitive ?: return null
-            return if (value.isString || value.content !in setOf("true", "false")) {
-                null
-            } else {
-                value.content == "true"
-            }
+    private fun messageJson(message: SyntheticGatewayMessage): String =
+        buildString {
+            append("{\"id\":")
+            append(quote(message.id))
+            append(",\"role\":")
+            append(message.role.jsonValue())
+            append(",\"content\":")
+            append(message.content.jsonValue())
+            message.timestamp?.let { append(",\"timestamp\":${quote(it)}") }
+            append('}')
         }
 
-        private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)
+    internal fun bodyContainsField(
+        body: String?,
+        field: String,
+    ): Boolean {
+        val text = body?.takeIf(String::isNotBlank) ?: return false
+        val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject
+        return root?.containsKey(field) ?: false
+    }
 
-        private fun queryParameters(uri: URI): Map<String, String> = GatewayHttpSupport.queryParameters(uri)
-
-        private fun quote(value: String): String = GatewayHttpSupport.quote(value)
-
-        private fun parseTitle(body: String?): String? {
-            val root =
-                body?.takeIf(String::isNotBlank)
-                    ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject
-                    ?: return null
-            val title = root["title"]
-            return if (title == null || title == JsonNull) null else (title as? JsonPrimitive)?.content
+    internal fun bodyBoolean(
+        body: String?,
+        field: String,
+    ): Boolean? {
+        val root =
+            body?.takeIf(String::isNotBlank)
+                ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject
+        val value = root?.get(field) as? JsonPrimitive ?: return null
+        return if (value.isString || value.content !in setOf("true", "false")) {
+            null
+        } else {
+            value.content == "true"
         }
+    }
 
-        private fun recordRequest(
-            exchange: HttpExchange,
-            behavior: SyntheticGatewayBehavior,
-        ): String? = GatewayHttpSupport.recordRequest(exchange, behavior.requests)
+    private fun String?.jsonValue(): String = GatewayHttpSupport.jsonValue(this)
 
-        private fun respond(
-            exchange: HttpExchange,
-            status: Int,
-            body: String,
-        ) {
-            GatewayHttpSupport.respond(exchange, status, body)
-        }
+    internal fun parseTitle(body: String?): String? {
+        val root =
+            body?.takeIf(String::isNotBlank)
+                ?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject
+                ?: return null
+        val title = root["title"]
+        return if (title == null || title == JsonNull) null else (title as? JsonPrimitive)?.content
     }
 }
