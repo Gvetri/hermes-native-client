@@ -82,7 +82,6 @@
 <ID>TooManyFunctions:DefaultRunSubmissionUncertaintyStore.kt$DefaultRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore</ID>
 <ID>TooManyFunctions:EndpointScopedRunRecoveryRegistry.kt$EndpointScopedRunRecoveryRegistry : RunRecoveryRegistry</ID>
 <ID>TooManyFunctions:EntryStateHolder.kt$EntryStateHolder</ID>
-<ID>TooManyFunctions:EntryStateHolder.kt$ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore</ID>
 <ID>TooManyFunctions:EntryStateHolder.kt$org.hermesnative.client.feature.entry.presentation.EntryStateHolder.kt</ID>
 <ID>TooManyFunctions:GatewayJsonParser.kt$GatewayJsonParser</ID>
 <ID>TooManyFunctions:JourneyGatewayProcess.kt$JourneyGatewayProcess$Companion</ID>
