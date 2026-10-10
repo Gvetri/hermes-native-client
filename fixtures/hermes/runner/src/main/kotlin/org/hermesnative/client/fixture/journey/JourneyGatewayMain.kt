@@ -32,5 +32,4 @@ fun main(args: Array<String>) {
     }
 }
 
-private const val DEFAULT_KEYSTORE_PASSWORD = "journey-fixture"
 private const val STARTUP_POLL_MILLIS = 1_000L

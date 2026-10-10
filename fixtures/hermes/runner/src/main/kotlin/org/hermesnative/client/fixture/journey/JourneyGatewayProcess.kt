@@ -30,7 +30,7 @@ private const val HTTP_NOT_FOUND = 404
 private const val HTTP_METHOD_NOT_ALLOWED = 405
 private const val HTTP_SERVICE_UNAVAILABLE = 503
 private const val DEFAULT_PAGE_LIMIT = 50
-private const val DEFAULT_KEYSTORE_PASSWORD = "journey-fixture"
+internal const val DEFAULT_KEYSTORE_PASSWORD = "journey-fixture"
 private const val HOLD_OPEN_KEEPALIVE_MILLIS = 500L
 private val keepAliveComment: ByteArray = ": keep-alive\n\n".toByteArray(Charsets.UTF_8)
 
@@ -76,16 +76,6 @@ class JourneyGatewayProcess private constructor(
     }
 
     companion object {
-        private const val HTTP_OK = 200
-        private const val HTTP_CREATED = 201
-        private const val HTTP_ACCEPTED = 202
-        private const val HTTP_BAD_REQUEST = 400
-        private const val HTTP_UNAUTHORIZED = 401
-        private const val HTTP_NOT_FOUND = 404
-        private const val HTTP_METHOD_NOT_ALLOWED = 405
-        private const val HTTP_SERVICE_UNAVAILABLE = 503
-        private const val DEFAULT_PAGE_LIMIT = 50
-
         fun start(
             scenario: JourneyScenario,
             keystoreFile: File? = null,

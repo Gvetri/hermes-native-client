@@ -360,7 +360,6 @@ private object JourneyRunInvariants {
     }
 }
 
-private const val DEFAULT_KEYSTORE_PASSWORD = "journey-fixture"
 private const val MIN_ARGUMENT_COUNT = 2
 private const val MAX_ARGUMENT_COUNT = 4
 private const val KEYSTORE_PASSWORD_ARG_INDEX = 3
