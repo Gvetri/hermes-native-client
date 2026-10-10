@@ -83,8 +83,6 @@ import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-private const val LEGACY_ATTEMPT_ID = "legacy"
-
 sealed interface EntryUiEvent {
     data object AddGatewayConnectionClicked : EntryUiEvent
 
@@ -221,150 +219,6 @@ private const val RECOVERY_CLAIM_RETRY_MILLIS = 10L
 private const val UNCERTAIN_RUN_STATUS = "uncertain"
 private const val RECOVERY_PENDING_STATUS = "recovery_pending"
 
-object ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
-    private val lock = Any()
-    private val keys = mutableMapOf<PendingRunSubmissionKey, UncertaintyRecord>()
-
-    override fun add(
-        key: PendingRunSubmissionKey,
-        knownRunIds: Set<RunId>,
-        attemptId: String?,
-    ): Boolean {
-        synchronized(lock) {
-            val current = keys[key]
-            if (current != null && attemptId != null && current.attemptId != attemptId) return false
-            val record = current ?: UncertaintyRecord(attemptId = attemptId ?: LEGACY_ATTEMPT_ID)
-            record.knownRunIds += knownRunIds
-            keys[key] = record
-            return true
-        }
-    }
-
-    override fun remove(
-        key: PendingRunSubmissionKey,
-        attemptId: String?,
-    ): Boolean =
-        synchronized(lock) {
-            val current = keys[key] ?: return false
-            if (attemptId != null && current.attemptId != attemptId) return false
-            keys.remove(key)
-            true
-        }
-
-    override fun contains(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { key in keys }
-
-    override fun clearEndpoint(endpoint: String) {
-        synchronized(lock) {
-            keys.keys.filter { it.endpoint == endpoint }.forEach(keys::remove)
-        }
-    }
-
-    override fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> {
-        return synchronized(lock) { keys[key]?.knownRunIds?.toSet().orEmpty() }
-    }
-
-    override fun attemptId(key: PendingRunSubmissionKey): String? = synchronized(lock) { keys[key]?.attemptId }
-
-    override fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? =
-        synchronized(lock) {
-            keys[key]?.let { record ->
-                RunSubmissionUncertaintySnapshot(
-                    attemptId = record.attemptId,
-                    knownRunIds = record.knownRunIds.toSet(),
-                    boundRunId = record.boundRunId,
-                    settled = record.settled,
-                    requiresRunMatch = record.requiresRunMatch,
-                )
-            }
-        }
-
-    override fun bindRun(
-        key: PendingRunSubmissionKey,
-        runId: RunId,
-        attemptId: String?,
-    ): Boolean =
-        synchronized(lock) {
-            val current = keys[key] ?: return false
-            if (attemptId != null && current.attemptId != attemptId) return false
-            current.boundRunId = runId
-            true
-        }
-
-    override fun boundRunId(key: PendingRunSubmissionKey): RunId? = synchronized(lock) { keys[key]?.boundRunId }
-
-    override fun markSettled(
-        key: PendingRunSubmissionKey,
-        attemptId: String?,
-    ): Boolean =
-        synchronized(lock) {
-            val current = keys[key] ?: return false
-            if (attemptId != null && current.attemptId != attemptId) return false
-            current.settled = true
-            true
-        }
-
-    override fun isSettled(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { keys[key]?.settled == true }
-
-    override fun markAmbiguous(
-        key: PendingRunSubmissionKey,
-        attemptId: String?,
-    ): Boolean =
-        synchronized(lock) {
-            val current = keys[key] ?: return false
-            if (attemptId != null && current.attemptId != attemptId) return false
-            current.requiresRunMatch = true
-            true
-        }
-
-    override fun requiresRunMatch(key: PendingRunSubmissionKey): Boolean {
-        return synchronized(lock) { keys[key]?.requiresRunMatch == true }
-    }
-
-    override fun removeIfKnownRunIdsMatch(
-        key: PendingRunSubmissionKey,
-        knownRunIds: Set<RunId>,
-        attemptId: String?,
-    ): Boolean =
-        synchronized(lock) {
-            val current = keys[key]
-            if (
-                current == null ||
-                current.knownRunIds.toSet() != knownRunIds ||
-                !current.matchesAttempt(attemptId)
-            ) {
-                false
-            } else {
-                keys.remove(key)
-                true
-            }
-        }
-
-    private fun UncertaintyRecord.matchesAttempt(attemptId: String?): Boolean {
-        return attemptId == null || this.attemptId == attemptId
-    }
-
-    override fun removeIfSnapshotMatches(
-        key: PendingRunSubmissionKey,
-        snapshot: RunSubmissionUncertaintySnapshot,
-    ): Boolean =
-        synchronized(lock) {
-            val current = keys[key] ?: return@synchronized false
-            if (current.matchesSnapshot(snapshot)) {
-                keys.remove(key)
-                true
-            } else {
-                false
-            }
-        }
-
-    private fun UncertaintyRecord.matchesSnapshot(snapshot: RunSubmissionUncertaintySnapshot): Boolean =
-        attemptId == snapshot.attemptId &&
-            knownRunIds.toSet() == snapshot.knownRunIds &&
-            boundRunId == snapshot.boundRunId &&
-            settled == snapshot.settled &&
-            requiresRunMatch == snapshot.requiresRunMatch
-}
-
 object NoOpRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
     override fun add(
         key: PendingRunSubmissionKey,
@@ -390,14 +244,6 @@ object NoOpRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
         snapshot: RunSubmissionUncertaintySnapshot,
     ): Boolean = true
 }
-
-private data class UncertaintyRecord(
-    val attemptId: String,
-    val knownRunIds: MutableSet<RunId> = mutableSetOf(),
-    var boundRunId: RunId? = null,
-    var settled: Boolean = false,
-    var requiresRunMatch: Boolean = false,
-)
 
 data class EntryUiState(
     val title: String,
