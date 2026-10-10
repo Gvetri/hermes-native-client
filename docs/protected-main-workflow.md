@@ -56,10 +56,6 @@ after it passes, so a build or device-suite failure never reaches the journey la
 pull request reports both suites as `skipped`, and the aggregate requires exactly that routing; the
 label on a draft or an external-fork pull request starts nothing.
 
-The `detekt` check fetches the `main` reference into its shallow checkout before it runs, because
-its shrink-only baseline ratchet compares the committed ledger against the one on `main`; see
-[Quality gates](quality-gates.md) for the declared analysis and the ratchet rules.
-
 A merge does not package or publish an application APK or generate a product version.
 Signing-policy tests may create minimal disposable APK fixtures; those are not application
 builds or distribution artifacts. Full scheduled/manual validation is required before
