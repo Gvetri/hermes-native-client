@@ -8,7 +8,6 @@
 <ID>ComplexCondition:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$runId.isEmpty() || segments.size !in 1..2 || (segments.size == 2 &amp;&amp; segments[1] != "events")</ID>
 <ID>ComplexCondition:SessionListScreen.kt$state.visibleSessions.isEmpty() &amp;&amp; !state.isLoading &amp;&amp; !state.isSearching &amp;&amp; state.nextOffset != null</ID>
 <ID>ComplexCondition:VerifyGatewayConnection.kt$GatewayEndpointValidator$character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "-._~"</ID>
-<ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun applyTimedOutSendReconciliation( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, reconciliation: SessionReconciliation, resolveWhenNoNewRun: Boolean, ): TimedOutSendReconciliationOutcome</ID>
 <ID>CyclomaticComplexMethod:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionResource( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
 <ID>CyclomaticComplexMethod:JourneyVerifier.kt$JourneyInvariants$fun verify( scenarioName: String, telemetry: JsonObject, )</ID>
 <ID>CyclomaticComplexMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun send_timeout_applies_authoritative_history_while_preserving_the_uncertain_draft()</ID>
@@ -30,7 +29,6 @@
 <ID>LongMethod:DefaultGatewayClientTest.kt$DefaultGatewayClientTest$@Test fun adapter_executes_every_supported_operation_against_the_client_owned_fixtures()</ID>
 <ID>LongMethod:EntryScreen.kt$@Composable private fun GatewayConnectionForm( state: EntryUiState, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
 <ID>LongMethod:EntryScreenTest.kt$EntryScreenTest$@Test fun switching_from_an_active_run_keeps_send_available_in_another_session()</ID>
-<ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun applyTimedOutSendReconciliation( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, reconciliation: SessionReconciliation, resolveWhenNoNewRun: Boolean, ): TimedOutSendReconciliationOutcome</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun createSessionJob( gateway: SessionGatewayPort, request: CreateSessionRequest, ): Job</ID>
 <ID>LongMethod:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$@Test fun a_created_run_stays_locally_tracked_after_history_refresh_without_inventing_history_runs()</ID>
 <ID>LongMethod:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$@Test fun history_without_run_metadata_never_invents_runs_or_local_recovery_entries()</ID>
