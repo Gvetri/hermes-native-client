@@ -15,7 +15,6 @@
 <ID>CyclomaticComplexMethod:SessionListScreen.kt$@Composable private fun SessionDetailSummary( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, retryEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
 <ID>CyclomaticComplexMethod:SessionListScreen.kt$@OptIn(ExperimentalLayoutApi::class) @Composable internal fun SessionDetailContent( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
 <ID>LargeClass:EntryScreenTest.kt$EntryScreenTest</ID>
-<ID>LargeClass:EntryStateHolder.kt$EntryStateHolder</ID>
 <ID>LargeClass:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest</ID>
 <ID>LargeClass:EntryStateHolderTest.kt$EntryStateHolderTest</ID>
 <ID>LargeClass:JourneyScenarioTest.kt$JourneyScenarioTest</ID>
@@ -81,8 +80,6 @@
 <ID>TooManyFunctions:DefaultGatewayClient.kt$DefaultGatewayClient : GatewayContractPort</ID>
 <ID>TooManyFunctions:DefaultRunSubmissionUncertaintyStore.kt$DefaultRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore</ID>
 <ID>TooManyFunctions:EndpointScopedRunRecoveryRegistry.kt$EndpointScopedRunRecoveryRegistry : RunRecoveryRegistry</ID>
-<ID>TooManyFunctions:EntryStateHolder.kt$EntryStateHolder</ID>
-<ID>TooManyFunctions:EntryStateHolder.kt$org.hermesnative.client.feature.entry.presentation.EntryStateHolder.kt</ID>
 <ID>TooManyFunctions:GatewayJsonParser.kt$GatewayJsonParser</ID>
 <ID>TooManyFunctions:JourneyGatewayProcess.kt$JourneyGatewayProcess$Companion</ID>
 <ID>TooManyFunctions:JourneyScenario.kt$JourneyScenarioParser</ID>
