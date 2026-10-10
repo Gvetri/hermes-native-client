@@ -1,117 +1,43 @@
 package org.hermesnative.client.feature.entry.presentation
 
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import org.hermesnative.client.feature.entry.application.EntryState
-import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
-import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
-import org.hermesnative.client.feature.entry.data.DefaultGatewayConnectionRepository
-import org.hermesnative.client.feature.entry.data.InMemoryGatewayConnectionDataSource
 import org.hermesnative.client.feature.entry.data.InMemoryRunRecoveryRegistry
-import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
-import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
-import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import org.hermesnative.client.feature.entry.domain.Run
 import org.hermesnative.client.feature.entry.domain.RunEvent
-import org.hermesnative.client.feature.entry.domain.RunEventObservation
 import org.hermesnative.client.feature.entry.domain.RunEventType
-import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
-import org.hermesnative.client.feature.entry.domain.RunRecoveryRegistry
-import org.hermesnative.client.feature.entry.domain.Session
-import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
-import org.hermesnative.client.feature.entry.domain.SessionListRequest
-import org.hermesnative.client.feature.entry.domain.SessionPage
-import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.ArrayDeque
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
 
 class RunObservationStateHolderTest {
     @Test
-    fun one_foreground_observer_appends_deltas_and_reaches_succeeded_without_duplicate_content() {
-        val session = session("session-1")
-        val run = Run(RunId("run-1"), session.id, "starting")
-        val recoveryRegistry = InMemoryRunRecoveryRegistry()
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList()))
-                enqueueHistory(
-                    SessionHistory(
-                        session.id,
-                        listOf(GatewayHistoryMessage("assistant-1", "assistant", "Hello world", run.id, "succeeded")),
-                    ),
-                )
-                enqueueStatus(run.copy(status = "succeeded"))
-                observation =
-                    ScriptedObservation(
-                        listOf(
-                            RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
-                            RunEvent(RunEventType.RUNNING, run.id, "running", eventId = "running"),
-                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Hello", "delta-1"),
-                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Hello", "delta-1"),
-                            RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", " world", "delta-2"),
-                            RunEvent(RunEventType.COMPLETING, run.id, "completing", eventId = "completing"),
-                            RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded"),
-                        ),
-                    )
-            }
-        val holder = holder(gateway, recoveryRegistry = recoveryRegistry)
-
-        try {
-            open(holder, gateway, session.id)
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-
-            val opened = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-            assertEquals(listOf(run.id), gateway.observedRunIds)
-            assertEquals(RunPresentationState.SUCCEEDED, opened.latestRunState)
-            assertEquals(listOf("Hello world"), opened.messages.map { it.content })
-            assertTrue(opened.activeResponse == null)
-            assertTrue(recoveryRegistry.load().isEmpty())
-        } finally {
-            holder.close()
-        }
-    }
-
-    @Test
     fun interrupted_observation_preserves_partial_text_and_exposes_uncertain_state() {
-        val session = session("session-1")
+        val session = observationSession("session-1")
         val run = Run(RunId("run-1"), session.id, "starting")
         val gateway =
-            ScriptedGateway(session).apply {
+            ObservationScriptedGateway(session).apply {
                 enqueueRun(run)
                 observation =
-                    ThrowingObservation(
+                    ObservationThrowingObservation(
                         listOf(
                             RunEvent(RunEventType.STARTED, run.id, "starting", eventId = "started"),
                             RunEvent(RunEventType.MESSAGE_DELTA, run.id, "running", "Partial", "delta-1"),
                         ),
                     )
             }
-        val holder = holder(gateway)
+        val holder = observationHolder(gateway)
 
         try {
-            open(holder, gateway, session.id)
+            openObservedSession(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
 
@@ -128,25 +54,25 @@ class RunObservationStateHolderTest {
 
     @Test
     fun returning_to_sessions_closes_only_the_screen_observer_and_does_not_cancel_the_remote_run() {
-        val session = session("session-1")
+        val session = observationSession("session-1")
         val run = Run(RunId("run-1"), session.id, "starting")
-        val observation = BlockingObservation()
+        val observation = ObservationBlockingObservation()
         val gateway =
-            ScriptedGateway(session).apply {
+            ObservationScriptedGateway(session).apply {
                 enqueueRun(run)
                 this.observation = observation
             }
-        val holder = holder(gateway, Dispatchers.Default)
+        val holder = observationHolder(gateway, Dispatchers.Default)
 
         try {
-            open(holder, gateway, session.id)
+            openObservedSession(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(observation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
 
-            assertTrue(observation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(observation.closed.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             assertEquals(emptyList<SessionId>(), gateway.cancelledRunIds)
             assertTrue(holder.uiState.value.sessionList?.openedSession == null)
         } finally {
@@ -156,104 +82,23 @@ class RunObservationStateHolderTest {
     }
 
     @Test
-    fun disconnect_during_create_persists_the_remote_run_in_its_original_endpoint_scope() {
-        val session = session("disconnect-during-create")
-        val run = Run(RunId("run-disconnected"), session.id, "running")
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
-                blockCreate = true
-            }
-        val persisted = CopyOnWriteArrayList<Pair<String, RunRecoveryEntry>>()
-        val holder =
-            holder(
-                gateway = gateway,
-                dispatcher = Dispatchers.Default,
-                persistRunRecoveryEntry = { endpoint, entry -> persisted += endpoint to entry },
-            )
-
-        try {
-            open(holder, gateway, session.id)
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(gateway.createStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-
-            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
-            gateway.createRelease.countDown()
-
-            awaitCondition { persisted.isNotEmpty() }
-            assertEquals(
-                listOf("https://gateway.example/profile" to RunRecoveryEntry(session.id, run.id)),
-                persisted.toList(),
-            )
-            assertTrue(gateway.cancelledRunIds.isEmpty())
-        } finally {
-            gateway.createRelease.countDown()
-            holder.close()
-        }
-    }
-
-    @Test
-    fun late_create_result_reconciles_after_reconnecting_before_recovery_metadata_is_written() {
-        val session = session("disconnect-reconnect-race")
-        val run = Run(RunId("run-reconnect-race"), session.id, "running")
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
-                statusByRun[run.id] = run
-                blockCreate = true
-            }
-        val persisted = CopyOnWriteArrayList<Pair<String, RunRecoveryEntry>>()
-        val holder =
-            holder(
-                gateway = gateway,
-                dispatcher = Dispatchers.Default,
-                persistRunRecoveryEntry = { endpoint, entry -> persisted += endpoint to entry },
-            )
-
-        try {
-            open(holder, gateway, session.id)
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(gateway.createStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-
-            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
-            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-            holder.onEvent(EntryUiEvent.BearerCredentialChanged("test-only-credential"))
-            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-            awaitState(holder) { it.sessionList?.sessions == listOf(session.toSessionItemUiState()) }
-
-            gateway.createRelease.countDown()
-
-            awaitCondition {
-                persisted.isNotEmpty() &&
-                    gateway.statusRequests.contains(run.id)
-            }
-        } finally {
-            gateway.createRelease.countDown()
-            holder.close()
-        }
-    }
-
-    @Test
     fun a_locally_started_nonterminal_run_is_registered_and_survives_screen_switching() {
-        val session = session("session-1")
+        val session = observationSession("session-1")
         val run = Run(RunId("run-1"), session.id, "running")
-        val observation = BlockingObservation()
+        val observation = ObservationBlockingObservation()
         val gateway =
-            ScriptedGateway(session).apply {
+            ObservationScriptedGateway(session).apply {
                 enqueueRun(run)
                 this.observation = observation
             }
         val recoveryRegistry = InMemoryRunRecoveryRegistry()
-        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry)
+        val holder = observationHolder(gateway, Dispatchers.Default, recoveryRegistry)
 
         try {
-            open(holder, gateway, session.id)
+            openObservedSession(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(observation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             assertEquals(
                 listOf(RunRecoveryEntry(session.id, run.id)),
                 recoveryRegistry.load(),
@@ -261,7 +106,7 @@ class RunObservationStateHolderTest {
 
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
 
-            assertTrue(observation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(observation.closed.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             assertEquals(listOf(RunRecoveryEntry(session.id, run.id)), recoveryRegistry.load())
             assertTrue(gateway.statusRequests.isEmpty())
         } finally {
@@ -271,115 +116,26 @@ class RunObservationStateHolderTest {
     }
 
     @Test
-    fun recovery_persistence_failure_keeps_the_created_run_and_marks_its_outcome_uncertain() {
-        val session = session("session-1")
-        val run = Run(RunId("run-1"), session.id, "running")
-        val observation = BlockingObservation()
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
-                this.observation = observation
-            }
-        val holder = holder(gateway, Dispatchers.Default, FailingRunRecoveryRegistry())
-
-        try {
-            open(holder, gateway, session.id)
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-            awaitState(holder) {
-                val opened = it.sessionList?.openedSession
-                opened?.latestRun?.id == run.id &&
-                    opened.latestRunState == RunPresentationState.UNCERTAIN &&
-                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN &&
-                    opened.hasUnresolvedSubmission &&
-                    opened.composerText == "Run this"
-            }
-            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-        } finally {
-            observation.release.countDown()
-            holder.close()
-        }
-    }
-
-    @Test
-    fun recovery_persistence_failure_is_retried_after_connection_recreation() {
-        val session = session("recovery-retry")
-        val run = Run(RunId("run-recovery-retry"), session.id, "running")
-        val observation = BlockingObservation()
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
-                this.observation = observation
-            }
-        val recoveryRegistry = FlakyRunRecoveryRegistry()
-        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry)
-
-        try {
-            open(holder, gateway, session.id)
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Retry this"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-            awaitState(holder) {
-                it.sessionList?.openedSession?.hasUnresolvedSubmission == true
-            }
-
-            holder.onEvent(EntryUiEvent.RemoveGatewayConnectionClicked)
-            recoveryRegistry.failSave = false
-            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-            holder.onEvent(EntryUiEvent.BearerCredentialChanged("test-only-credential"))
-            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-
-            awaitCondition {
-                recoveryRegistry.load() == listOf(RunRecoveryEntry(session.id, run.id))
-            }
-            assertEquals(1, gateway.createRunCount.get())
-        } finally {
-            observation.release.countDown()
-            holder.close()
-        }
-    }
-
-    @Test
-    fun recovery_load_failure_blocks_submission_until_authoritative_recovery_is_available() {
-        val gateway = ScriptedGateway(session("recovery-load-failure"))
-        val holder = holder(gateway, recoveryRegistry = FailingLoadRunRecoveryRegistry())
-
-        try {
-            open(holder, gateway, gateway.session.id)
-            awaitState(holder) {
-                val opened = it.sessionList?.openedSession
-                opened?.hasUnresolvedSubmission == true &&
-                    opened.sendErrorCategory == MessageSendErrorCategory.UNCERTAIN
-            }
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Do not duplicate"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertEquals(0, gateway.createRunCount.get())
-        } finally {
-            holder.close()
-        }
-    }
-
-    @Test
     fun reopening_reconciles_the_locally_created_run_without_history_run_metadata() {
-        val session = session("session-1")
+        val session = observationSession("session-1")
         val localRun = Run(RunId("run-local"), session.id, "running")
-        val initialObservation = BlockingObservation()
-        val reopenedObservation = BlockingObservation()
+        val initialObservation = ObservationBlockingObservation()
+        val reopenedObservation = ObservationBlockingObservation()
         val gateway =
-            ScriptedGateway(session).apply {
+            ObservationScriptedGateway(session).apply {
                 enqueueRun(localRun)
                 observation = initialObservation
             }
-        val holder = holder(gateway, Dispatchers.Default)
+        val holder = observationHolder(gateway, Dispatchers.Default)
 
         try {
-            open(holder, gateway, session.id)
+            openObservedSession(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(initialObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(initialObservation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
-            assertTrue(initialObservation.closed.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(initialObservation.closed.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             gateway.observation = reopenedObservation
             gateway.enqueueStatus(localRun)
@@ -391,7 +147,7 @@ class RunObservationStateHolderTest {
             )
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
 
-            awaitState(holder) {
+            awaitObservationState(holder) {
                 val opened = it.sessionList?.openedSession
                 gateway.statusRequests == listOf(localRun.id) &&
                     opened?.activeRuns?.any { run -> run.id == localRun.id } == true &&
@@ -400,7 +156,7 @@ class RunObservationStateHolderTest {
                     opened.activeResponse?.runId == localRun.id &&
                     !opened.isReconciliationInProgress
             }
-            assertTrue(reopenedObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(reopenedObservation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
         } finally {
             initialObservation.release.countDown()
             reopenedObservation.release.countDown()
@@ -410,34 +166,34 @@ class RunObservationStateHolderTest {
 
     @Test
     fun switching_to_another_session_closes_the_previous_screen_observer() {
-        val first = session("session-1")
-        val second = session("session-2")
-        val firstObservation = BlockingObservation()
+        val first = observationSession("session-1")
+        val second = observationSession("session-2")
+        val firstObservation = ObservationBlockingObservation()
         val gateway =
-            ScriptedGateway(first, additionalSessions = listOf(second)).apply {
+            ObservationScriptedGateway(first, additionalSessions = listOf(second)).apply {
                 observation = firstObservation
                 enqueueRun(Run(RunId("run-switch"), first.id, "running"))
             }
-        val holder = holder(gateway, Dispatchers.Default)
+        val holder = observationHolder(gateway, Dispatchers.Default)
 
         try {
             holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
             holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
             holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
             holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-            awaitState(holder) {
+            awaitObservationState(holder) {
                 it.sessionList?.sessions == listOf(first, second).map { session -> session.toSessionItemUiState() }
             }
 
             holder.onEvent(EntryUiEvent.SessionClicked(first.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
+            awaitObservationState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
 
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(firstObservation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionClicked(second.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
+            awaitObservationState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
 
             assertTrue(
                 "the previous Session's screen observer closes when another Session replaces it",
@@ -451,23 +207,23 @@ class RunObservationStateHolderTest {
 
     @Test
     fun searching_the_session_list_closes_the_open_conversations_observer() {
-        val session = session("session-search")
-        val observer = BlockingObservation()
+        val session = observationSession("session-search")
+        val observer = ObservationBlockingObservation()
         val gateway =
-            ScriptedGateway(session).apply {
+            ObservationScriptedGateway(session).apply {
                 observation = observer
                 enqueueRun(Run(RunId("run-search"), session.id, "running"))
             }
-        val holder = holder(gateway, Dispatchers.Default)
+        val holder = observationHolder(gateway, Dispatchers.Default)
 
         try {
-            open(holder, gateway, session.id)
+            openObservedSession(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(observer.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(observer.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("filter"))
-            awaitState(holder) { it.sessionList?.openedSession == null }
+            awaitObservationState(holder) { it.sessionList?.openedSession == null }
 
             assertTrue(
                 "the open conversation's screen observer closes when a search replaces it",
@@ -481,38 +237,38 @@ class RunObservationStateHolderTest {
 
     @Test
     fun a_pending_second_open_does_not_restart_the_replaced_sessions_observer() {
-        val first = session("session-1")
-        val second = session("session-2")
-        val firstObservation = BlockingObservation()
+        val first = observationSession("session-1")
+        val second = observationSession("session-2")
+        val firstObservation = ObservationBlockingObservation()
         val gateway =
-            ScriptedGateway(first, additionalSessions = listOf(second)).apply {
+            ObservationScriptedGateway(first, additionalSessions = listOf(second)).apply {
                 observation = firstObservation
                 enqueueRun(Run(RunId("run-pending"), first.id, "running"))
                 blockOpenFor = second.id
             }
-        val holder = holder(gateway, Dispatchers.Default)
+        val holder = observationHolder(gateway, Dispatchers.Default)
 
         try {
             holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
             holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
             holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
             holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-            awaitState(holder) {
+            awaitObservationState(holder) {
                 it.sessionList?.sessions == listOf(first, second).map { session -> session.toSessionItemUiState() }
             }
 
             holder.onEvent(EntryUiEvent.SessionClicked(first.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
+            awaitObservationState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
 
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(firstObservation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionClicked(second.id))
-            assertTrue(gateway.openStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(gateway.openStarted.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
             Thread.sleep(300)
             gateway.openRelease.countDown()
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
+            awaitObservationState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
 
             assertEquals(
                 "the replaced Session's observer must not restart while its replacement is pending",
@@ -528,35 +284,37 @@ class RunObservationStateHolderTest {
 
     @Test
     fun a_failed_switch_keeps_the_still_visible_sessions_observer() {
-        val first = session("session-1")
-        val second = session("session-2")
-        val firstObservation = BlockingObservation()
+        val first = observationSession("session-1")
+        val second = observationSession("session-2")
+        val firstObservation = ObservationBlockingObservation()
         val gateway =
-            ScriptedGateway(first, additionalSessions = listOf(second)).apply {
+            ObservationScriptedGateway(first, additionalSessions = listOf(second)).apply {
                 observation = firstObservation
                 enqueueRun(Run(RunId("run-failed-switch"), first.id, "running"))
                 failOpenFor = second.id
             }
-        val holder = holder(gateway, Dispatchers.Default)
+        val holder = observationHolder(gateway, Dispatchers.Default)
 
         try {
             holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
             holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
             holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
             holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-            awaitState(holder) {
+            awaitObservationState(holder) {
                 it.sessionList?.sessions == listOf(first, second).map { session -> session.toSessionItemUiState() }
             }
 
             holder.onEvent(EntryUiEvent.SessionClicked(first.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
+            awaitObservationState(holder) { it.sessionList?.openedSession?.session?.id == first.id }
 
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(firstObservation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(firstObservation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionClicked(second.id))
-            awaitState(holder) { it.sessionList?.openingSessionId == null && it.sessionList?.isStale == true }
+            awaitObservationState(holder) {
+                it.sessionList?.openingSessionId == null && it.sessionList?.isStale == true
+            }
 
             assertFalse(
                 "the still-visible Session keeps its observer when the switch fails",
@@ -565,9 +323,9 @@ class RunObservationStateHolderTest {
 
             gateway.failOpenFor = null
             holder.onEvent(EntryUiEvent.RefreshSessionListClicked)
-            awaitState(holder) { it.sessionList?.isStale == false && it.sessionList?.isUnavailable == false }
+            awaitObservationState(holder) { it.sessionList?.isStale == false && it.sessionList?.isUnavailable == false }
             holder.onEvent(EntryUiEvent.SessionClicked(second.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
+            awaitObservationState(holder) { it.sessionList?.openedSession?.session?.id == second.id }
 
             assertTrue(
                 "the replaced Session's observer closes once the switch finally succeeds",
@@ -581,532 +339,34 @@ class RunObservationStateHolderTest {
 
     @Test
     fun terminal_reconciliation_of_another_run_keeps_the_current_run_observer_open() {
-        val session = session("session-multiple-runs")
+        val session = observationSession("session-multiple-runs")
         val observedRun = Run(RunId("run-observed"), session.id, "running")
         val reconciledRun = Run(RunId("run-reconciled"), session.id, "succeeded")
-        val observation = BlockingObservation()
+        val observation = ObservationBlockingObservation()
         val recoveryRegistry = InMemoryRunRecoveryRegistry()
         val gateway =
-            ScriptedGateway(session).apply {
+            ObservationScriptedGateway(session).apply {
                 enqueueRun(observedRun)
                 this.observation = observation
                 statusByRun[reconciledRun.id] = reconciledRun
             }
-        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry)
+        val holder = observationHolder(gateway, Dispatchers.Default, recoveryRegistry)
 
         try {
-            open(holder, gateway, session.id)
+            openObservedSession(holder, gateway, session.id)
             holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
             holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
+            assertTrue(observation.started.await(OBSERVATION_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             recoveryRegistry.save(RunRecoveryEntry(session.id, reconciledRun.id))
             holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
 
-            awaitCondition { gateway.statusRequests.contains(reconciledRun.id) }
+            awaitObservationCondition { gateway.statusRequests.contains(reconciledRun.id) }
             assertEquals(listOf(observedRun.id), gateway.observedRunIds)
             assertFalse(observation.closed.await(100, TimeUnit.MILLISECONDS))
         } finally {
             observation.release.countDown()
             holder.close()
         }
-    }
-
-    @Test
-    fun restart_reconciles_only_known_local_nonterminal_runs() {
-        val session = session("session-1")
-        val run = Run(RunId("run-local"), session.id, "running")
-        val recoveryEntry = RunRecoveryEntry(session.id, run.id)
-        val recoveryRegistry = InMemoryRunRecoveryRegistry(listOf(recoveryEntry))
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueStatus(run)
-            }
-        val holder = holder(gateway, recoveryRegistry = recoveryRegistry)
-
-        try {
-            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-            holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
-            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-
-            awaitState(holder) {
-                it.sessionList?.sessions == listOf(session.toSessionItemUiState()) &&
-                    gateway.statusRequests == listOf(run.id)
-            }
-            assertEquals(listOf(recoveryEntry), recoveryRegistry.load())
-            assertTrue(gateway.observedRunIds.isEmpty())
-        } finally {
-            holder.close()
-        }
-    }
-
-    @Test
-    fun recovery_removal_failure_keeps_metadata_without_failing_the_recovery_job() {
-        val session = session("session-remove-failure")
-        val run = Run(RunId("run-remove-failure"), session.id, "succeeded")
-        val entry = RunRecoveryEntry(session.id, run.id)
-        val recoveryRegistry = FailingRemoveRunRecoveryRegistry(entry)
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueStatus(run)
-                enqueueHistory(
-                    SessionHistory(
-                        session.id,
-                        listOf(GatewayHistoryMessage("result", "assistant", "Done", run.id, "succeeded")),
-                    ),
-                )
-            }
-        val holder = holder(gateway, recoveryRegistry = recoveryRegistry)
-
-        try {
-            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-            holder.onEvent(EntryUiEvent.BearerCredentialChanged("test-only-credential"))
-            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-            awaitCondition { gateway.statusRequests.contains(run.id) }
-            assertEquals(listOf(entry), recoveryRegistry.load())
-        } finally {
-            holder.close()
-        }
-    }
-
-    @Test
-    fun terminal_observation_forgets_a_recovery_write_queued_after_save_failure() {
-        val session = session("session-queued-removal")
-        val run = Run(RunId("run-queued-removal"), session.id, "running")
-        val observation =
-            DelayedTerminalObservation(
-                RunEvent(RunEventType.SUCCEEDED, run.id, "succeeded", eventId = "succeeded"),
-            )
-        val recoveryRegistry = FlakyRunRecoveryRegistry()
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueRun(run)
-                enqueueHistory(SessionHistory(session.id, emptyList()))
-                enqueueHistory(
-                    SessionHistory(
-                        session.id,
-                        listOf(GatewayHistoryMessage("result", "assistant", "Done", run.id, "succeeded")),
-                    ),
-                )
-                enqueueStatus(run.copy(status = "succeeded"))
-                this.observation = observation
-            }
-        val holder = holder(gateway, recoveryRegistry = recoveryRegistry)
-
-        try {
-            open(holder, gateway, session.id)
-            holder.onEvent(EntryUiEvent.ComposerTextChanged("Run this"))
-            holder.onEvent(EntryUiEvent.SendMessageClicked)
-            assertTrue(observation.started.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertEquals(1, recoveryRegistry.saveAttempts.get())
-
-            recoveryRegistry.failSave = false
-            observation.release.countDown()
-            awaitState(holder) {
-                val opened = it.sessionList?.openedSession
-                opened?.latestRunState == RunPresentationState.SUCCEEDED &&
-                    opened.hasUnresolvedSubmission == false
-            }
-            assertTrue(recoveryRegistry.load().isEmpty())
-
-            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-            awaitState(holder) { it.sessionList?.isRefreshing == false }
-            assertEquals(1, recoveryRegistry.saveAttempts.get())
-            assertTrue(recoveryRegistry.load().isEmpty())
-        } finally {
-            observation.release.countDown()
-            holder.close()
-        }
-    }
-
-    @Test
-    fun recovery_continues_after_switching_sessions_while_authoritative_queries_are_blocked() {
-        val firstSession = session("session-recovery-1")
-        val secondSession = session("session-recovery-2")
-        val firstRun = Run(RunId("run-recovery-1"), firstSession.id, "running")
-        val secondRun = Run(RunId("run-recovery-2"), secondSession.id, "running")
-        val recoveryRegistry =
-            InMemoryRunRecoveryRegistry(
-                listOf(
-                    RunRecoveryEntry(firstSession.id, firstRun.id),
-                    RunRecoveryEntry(secondSession.id, secondRun.id),
-                ),
-            )
-        val gateway =
-            ScriptedGateway(firstSession, listOf(secondSession)).apply {
-                blockStatus = true
-                statusByRun[firstRun.id] = firstRun.copy(status = "succeeded")
-                statusByRun[secondRun.id] = secondRun.copy(status = "succeeded")
-                historyBySession[firstSession.id] =
-                    SessionHistory(
-                        firstSession.id,
-                        listOf(GatewayHistoryMessage("first-result", "assistant", "Done", firstRun.id, "succeeded")),
-                    )
-                historyBySession[secondSession.id] =
-                    SessionHistory(
-                        secondSession.id,
-                        listOf(GatewayHistoryMessage("second-result", "assistant", "Done", secondRun.id, "succeeded")),
-                    )
-            }
-        val holder = holder(gateway, Dispatchers.Default, recoveryRegistry)
-
-        try {
-            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-            holder.onEvent(EntryUiEvent.BearerCredentialChanged("test-only-credential"))
-            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-            awaitState(holder) { it.sessionList?.sessions?.size == 2 }
-            assertTrue(gateway.statusStarted.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-
-            holder.onEvent(EntryUiEvent.SessionClicked(firstSession.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == firstSession.id }
-            holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
-            holder.onEvent(EntryUiEvent.SessionClicked(secondSession.id))
-            awaitState(holder) { it.sessionList?.openedSession?.session?.id == secondSession.id }
-
-            gateway.statusRelease.countDown()
-            awaitCondition {
-                recoveryRegistry.load().isEmpty() &&
-                    gateway.statusRequests.containsAll(listOf(firstRun.id, secondRun.id))
-            }
-        } finally {
-            gateway.statusRelease.countDown()
-            holder.close()
-        }
-    }
-
-    @Test
-    fun restart_removes_a_recovery_entry_only_after_terminal_history_confirms_the_run() {
-        val session = session("session-1")
-        val run = Run(RunId("run-local"), session.id, "succeeded")
-        val recoveryEntry = RunRecoveryEntry(session.id, run.id)
-        val recoveryRegistry = InMemoryRunRecoveryRegistry(listOf(recoveryEntry))
-        val gateway =
-            ScriptedGateway(session).apply {
-                enqueueStatus(run)
-                enqueueHistory(
-                    SessionHistory(
-                        session.id,
-                        listOf(GatewayHistoryMessage("result", "assistant", "Done", run.id, "succeeded")),
-                    ),
-                )
-            }
-        val holder = holder(gateway, recoveryRegistry = recoveryRegistry)
-
-        try {
-            holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-            holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-            holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
-            holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-
-            awaitState(holder) {
-                it.sessionList?.sessions == listOf(session.toSessionItemUiState()) &&
-                    gateway.statusRequests == listOf(run.id) &&
-                    recoveryRegistry.load().isEmpty()
-            }
-            assertTrue(gateway.observedRunIds.isEmpty())
-        } finally {
-            holder.close()
-        }
-    }
-
-    private fun holder(
-        gateway: ScriptedGateway,
-        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-        recoveryRegistry: RunRecoveryRegistry? = null,
-        persistRunRecoveryEntry: ((String, RunRecoveryEntry) -> Unit)? = null,
-    ): EntryStateHolder {
-        val repository: GatewayConnectionRepository =
-            DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource())
-        return EntryStateHolder(
-            initialState = EntryState(isGatewayConnectionConfigured = false),
-            verifyGatewayConnection =
-                VerifyGatewayConnection(repository) { _, _ ->
-                    GatewayCapabilities(PublicBetaGatewayCapabilityManifest.current.requiredEndpoints)
-                },
-            scope = CoroutineScope(SupervisorJob() + dispatcher),
-            sessionGatewayFactory = { _, _ -> gateway },
-            runGatewayFactory = { _, _ -> gateway },
-            dependencies =
-                EntryStateHolderDependencies(
-                    runRecoveryRegistry = recoveryRegistry,
-                    persistRunRecoveryEntry = persistRunRecoveryEntry,
-                    removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-                ),
-        )
-    }
-
-    private fun open(
-        holder: EntryStateHolder,
-        gateway: ScriptedGateway,
-        sessionId: SessionId,
-    ) {
-        holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-        holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-        holder.onEvent(EntryUiEvent.BearerCredentialChanged("[REDACTED]"))
-        holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-        awaitState(holder) { it.sessionList?.sessions == listOf(gateway.session.toSessionItemUiState()) }
-        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
-        awaitState(holder) { it.sessionList?.openedSession?.session?.id == sessionId }
-    }
-
-    private fun awaitState(
-        holder: EntryStateHolder,
-        predicate: (EntryUiState) -> Boolean,
-    ) {
-        runBlocking {
-            withTimeout(TEST_TIMEOUT_MILLIS) {
-                holder.uiState.first(predicate)
-            }
-        }
-    }
-
-    private fun awaitCondition(predicate: () -> Boolean) {
-        runBlocking {
-            withTimeout(TEST_TIMEOUT_MILLIS) {
-                while (!predicate()) delay(10)
-            }
-        }
-    }
-
-    private fun session(id: String): Session =
-        Session(
-            id = SessionId(id),
-            title = "Session $id",
-            preview = "Preview",
-            pinned = false,
-        )
-
-    private class ScriptedGateway(
-        val session: Session,
-        private val additionalSessions: List<Session> = emptyList(),
-    ) : SessionGatewayPort, RunGatewayPort {
-        private val runResults = ArrayDeque<Run>()
-        private val historyResults = ArrayDeque<SessionHistory>()
-        private val statusResults = ArrayDeque<Run>()
-        val statusByRun = ConcurrentHashMap<RunId, Run>()
-        val historyBySession = ConcurrentHashMap<SessionId, SessionHistory>()
-        var observation: RunEventObservation = ScriptedObservation(emptyList())
-        val observedRunIds = CopyOnWriteArrayList<RunId>()
-        val statusRequests = CopyOnWriteArrayList<RunId>()
-        val cancelledRunIds = CopyOnWriteArrayList<RunId>()
-        val createRunCount = AtomicInteger(0)
-        var blockCreate = false
-        val createStarted = CountDownLatch(1)
-        val createRelease = CountDownLatch(1)
-        var blockStatus = false
-        val statusStarted = CountDownLatch(1)
-        val statusRelease = CountDownLatch(1)
-        var blockOpenFor: SessionId? = null
-        val openStarted = CountDownLatch(1)
-        val openRelease = CountDownLatch(1)
-        var failOpenFor: SessionId? = null
-
-        fun enqueueRun(run: Run) {
-            runResults += run
-        }
-
-        fun enqueueHistory(history: SessionHistory) {
-            historyResults += history
-        }
-
-        fun enqueueStatus(run: Run) {
-            statusResults += run
-        }
-
-        override fun listSessions(request: SessionListRequest): SessionPage =
-            SessionPage(
-                listOf(session) + additionalSessions,
-                null,
-            )
-
-        override fun createSession(title: String?): Session = error("not used")
-
-        override fun openSession(sessionId: SessionId): Session {
-            if (failOpenFor == sessionId) error("gateway unavailable")
-            if (blockOpenFor == sessionId) {
-                openStarted.countDown()
-                openRelease.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-            }
-            return (listOf(session) + additionalSessions).single { it.id == sessionId }
-        }
-
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            historyBySession[sessionId]
-                ?: if (historyResults.isEmpty()) {
-                    SessionHistory(sessionId, emptyList())
-                } else {
-                    historyResults.removeFirst()
-                }
-
-        override fun renameSession(
-            sessionId: SessionId,
-            title: String,
-        ): Session = error("not used")
-
-        override fun deleteSession(sessionId: SessionId): Unit = error("not used")
-
-        override fun pinSession(sessionId: SessionId): SessionPinResult = error("not used")
-
-        override fun unpinSession(sessionId: SessionId): SessionPinResult = error("not used")
-
-        override fun createRun(
-            sessionId: SessionId,
-            input: String,
-        ): Run {
-            createRunCount.incrementAndGet()
-            if (blockCreate) {
-                createStarted.countDown()
-                createRelease.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-            }
-            return runResults.removeFirst()
-        }
-
-        override fun getRunStatus(runId: RunId): Run {
-            statusRequests += runId
-            if (blockStatus) {
-                statusStarted.countDown()
-                statusRelease.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-            }
-            return statusByRun[runId]
-                ?: if (statusResults.isEmpty()) {
-                    error("not used")
-                } else {
-                    statusResults.removeFirst()
-                }
-        }
-
-        override fun observeRun(runId: RunId): RunEventObservation {
-            observedRunIds += runId
-            return observation
-        }
-    }
-
-    private open class ScriptedObservation(
-        private val events: List<RunEvent>,
-    ) : RunEventObservation {
-        override fun iterator(): Iterator<RunEvent> = events.iterator()
-
-        override fun close() = Unit
-    }
-
-    private class ThrowingObservation(
-        events: List<RunEvent>,
-    ) : ScriptedObservation(events) {
-        override fun iterator(): Iterator<RunEvent> {
-            val delegate = super.iterator()
-            return object : Iterator<RunEvent> {
-                override fun hasNext(): Boolean =
-                    if (delegate.hasNext()) {
-                        true
-                    } else {
-                        error("stream interrupted")
-                    }
-
-                override fun next(): RunEvent = delegate.next()
-            }
-        }
-    }
-
-    private class BlockingObservation : RunEventObservation {
-        val started = CountDownLatch(1)
-        val closed = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        private val closeCount = AtomicInteger(0)
-
-        override fun iterator(): Iterator<RunEvent> =
-            object : Iterator<RunEvent> {
-                override fun hasNext(): Boolean {
-                    started.countDown()
-                    release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-                    return false
-                }
-
-                override fun next(): RunEvent = error("not used")
-            }
-
-        override fun close() {
-            if (closeCount.incrementAndGet() == 1) {
-                closed.countDown()
-            }
-            release.countDown()
-        }
-    }
-
-    private class DelayedTerminalObservation(
-        private val terminalEvent: RunEvent,
-    ) : RunEventObservation {
-        val started = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        private var emitted = false
-
-        override fun iterator(): Iterator<RunEvent> =
-            object : Iterator<RunEvent> {
-                override fun hasNext(): Boolean {
-                    started.countDown()
-                    check(release.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Observation was not released." }
-                    return !emitted
-                }
-
-                override fun next(): RunEvent {
-                    check(!emitted) { "Terminal event was already emitted." }
-                    emitted = true
-                    return terminalEvent
-                }
-            }
-
-        override fun close() {
-            release.countDown()
-        }
-    }
-
-    private class FailingRunRecoveryRegistry : RunRecoveryRegistry {
-        override fun load(): List<RunRecoveryEntry> = emptyList()
-
-        override fun save(entry: RunRecoveryEntry): Unit = error("recovery storage unavailable")
-
-        override fun remove(entry: RunRecoveryEntry) = Unit
-    }
-
-    private class FailingLoadRunRecoveryRegistry : RunRecoveryRegistry {
-        override fun load(): List<RunRecoveryEntry> = error("recovery storage unavailable")
-
-        override fun save(entry: RunRecoveryEntry) = Unit
-
-        override fun remove(entry: RunRecoveryEntry) = Unit
-    }
-
-    private class FlakyRunRecoveryRegistry : RunRecoveryRegistry {
-        private val entries = CopyOnWriteArrayList<RunRecoveryEntry>()
-        var failSave = true
-        val saveAttempts = AtomicInteger(0)
-
-        override fun load(): List<RunRecoveryEntry> = entries.toList()
-
-        override fun save(entry: RunRecoveryEntry) {
-            saveAttempts.incrementAndGet()
-            if (failSave) error("recovery storage unavailable")
-            if (entry !in entries) entries += entry
-        }
-
-        override fun remove(entry: RunRecoveryEntry) {
-            entries -= entry
-        }
-    }
-
-    private class FailingRemoveRunRecoveryRegistry(
-        private val entry: RunRecoveryEntry,
-    ) : RunRecoveryRegistry {
-        override fun load(): List<RunRecoveryEntry> = listOf(entry)
-
-        override fun save(entry: RunRecoveryEntry) = Unit
-
-        override fun remove(entry: RunRecoveryEntry): Unit = error("recovery cleanup unavailable")
-    }
-
-    private companion object {
-        const val TEST_TIMEOUT_MILLIS = 5_000L
     }
 }
