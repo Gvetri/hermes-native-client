@@ -230,7 +230,10 @@ class LocalDiagnosticsWiringTest {
         val holder =
             EntryWiring.createEntryStateHolder(
                 context = context,
-                coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                overrides =
+                    EntryWiringOverrides(
+                        coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                    ),
                 clientVersion = "0.1.0",
             )
         holders += holder

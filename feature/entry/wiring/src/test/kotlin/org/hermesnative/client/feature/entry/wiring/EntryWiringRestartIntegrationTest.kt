@@ -466,14 +466,17 @@ class EntryWiringRestartIntegrationTest {
     ): EntryStateHolder =
         EntryWiring.createEntryStateHolder(
             context = context,
-            capabilityDiscovery = { _, _ ->
-                GatewayCapabilities(
-                    PublicBetaGatewayCapabilityManifest.current.requiredEndpoints,
-                )
-            },
-            sessionGatewayFactory = { _, _ -> gateway },
-            runGatewayFactory = { _, _ -> gateway },
-            coroutineScope = coroutineScope,
+            overrides =
+                EntryWiringOverrides(
+                    capabilityDiscovery = { _, _ ->
+                        GatewayCapabilities(
+                            PublicBetaGatewayCapabilityManifest.current.requiredEndpoints,
+                        )
+                    },
+                    sessionGatewayFactory = { _, _ -> gateway },
+                    runGatewayFactory = { _, _ -> gateway },
+                    coroutineScope = coroutineScope,
+                ),
         ).also {
             holders += it
             gateways += gateway

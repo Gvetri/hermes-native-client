@@ -9,6 +9,8 @@ import org.hermesnative.client.feature.entry.data.EncryptedGatewayCredentialReco
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionPersistenceException
 import org.hermesnative.client.feature.entry.domain.GatewayCredentialStore
 import java.io.File
+import java.io.IOException
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -42,14 +44,14 @@ class AndroidKeyStoreGatewayCredentialStore(
             val stream =
                 try {
                     atomicFile.startWrite()
-                } catch (error: Exception) {
+                } catch (error: IOException) {
                     throw GatewayConnectionPersistenceException(error)
                 }
             try {
                 stream.write(encryptedRecord)
                 stream.flush()
                 atomicFile.finishWrite(stream)
-            } catch (error: Exception) {
+            } catch (error: IOException) {
                 runCatching { atomicFile.failWrite(stream) }
                 throw GatewayConnectionPersistenceException(error)
             }
@@ -74,7 +76,9 @@ class AndroidKeyStoreGatewayCredentialStore(
             try {
                 val keyStore = loadKeyStore()
                 if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)
-            } catch (error: Exception) {
+            } catch (error: GeneralSecurityException) {
+                if (hasCredentialRecord) failure = error
+            } catch (error: IOException) {
                 if (hasCredentialRecord) failure = error
             }
             failure?.let { throw GatewayConnectionPersistenceException(it) }

@@ -103,7 +103,12 @@ private object GatewayEndpointValidator {
         val canonicalPath =
             path.replace(percentEscapePattern) { escape ->
                 val character = escape.groupValues[1].toInt(HEX_RADIX).toChar()
-                if (character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "-._~") {
+                val isUnreservedLiteral =
+                    character in 'a'..'z' ||
+                        character in 'A'..'Z' ||
+                        character in '0'..'9' ||
+                        character in "-._~"
+                if (isUnreservedLiteral) {
                     character.toString()
                 } else {
                     escape.value
