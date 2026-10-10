@@ -1,7 +1,6 @@
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import org.hermesnative.client.buildlogic.BoundaryDoubleVerifier
 import org.hermesnative.client.buildlogic.CoverageEvidenceVerifier
-import org.hermesnative.client.buildlogic.DetektBaselineEvidence
 import org.hermesnative.client.buildlogic.FixtureDescriptorValidator
 import org.hermesnative.client.buildlogic.MutationEvidenceVerifier
 import org.hermesnative.client.buildlogic.QualityPolicy
@@ -24,14 +23,13 @@ plugins {
 }
 
 // The detekt analysis is declared once: every Kotlin module applies the pinned plugin, and this
-// block supplies the strict configuration, the shared config file, and the shared baseline, so a
-// module build script cannot drift from the declared policy.
+// block supplies the strict configuration and the shared config file, so a module build script
+// cannot drift from the declared policy.
 subprojects {
     plugins.withId("io.gitlab.arturbosch.detekt") {
         extensions.configure(DetektExtension::class.java) {
             buildUponDefaultConfig = true
             config.setFrom(rootProject.file("config/detekt/detekt.yml"))
-            baseline = rootProject.file("config/detekt/baseline.xml")
         }
         // The plain per-module `detekt` task runs without type resolution, so it is disabled: the
         // gate analyzes through the type-resolution tasks (`detektMain`/`detektTest`), and an
@@ -469,7 +467,7 @@ tasks.register("detekt") {
 
 tasks.register("detektVerify") {
     group = "verification"
-    description = "Verifies the detekt evidence and enforces the shrink-only baseline ratchet."
+    description = "Verifies that the detekt analysis ran fail-closed and that no baseline can absorb findings."
     dependsOn("detekt")
     doLast {
         requireTasksInInvocation(
@@ -483,30 +481,20 @@ tasks.register("detektVerify") {
             "Detekt verification requires its analysis tasks to be enabled in this invocation: " +
                 "${disabled.map { task -> task.path }}"
         }
-        val shadowing = DetektBaselineEvidence.shadowingBaselines(file("config/detekt"))
-        check(shadowing.isEmpty()) {
-            "Detekt verification found source-set-specific baselines that would shadow the committed " +
-                "baseline: $shadowing"
+        // The committed baseline was burnt to zero and removed, so every reported finding must fail
+        // the build. A baseline file that returns would absorb findings again, which is an error.
+        val baselines =
+            file("config/detekt").listFiles().orEmpty()
+                .filter { candidate ->
+                    candidate.isFile && candidate.name.startsWith("baseline") && candidate.name.endsWith(".xml")
+                }
+                .map { candidate -> candidate.name }
+                .sorted()
+        check(baselines.isEmpty()) {
+            "Detekt verification found baseline files that would absorb findings: $baselines. " +
+                "A finding must be fixed, not baselined."
         }
-        val baselineCount = DetektBaselineEvidence.baselineEntryCount(file(DetektBaselineEvidence.BASELINE_PATH))
-        val ledgerCount = DetektBaselineEvidence.ledgerCount(file(DetektBaselineEvidence.LEDGER_PATH))
-        check(baselineCount == ledgerCount) {
-            "Detekt baseline ledger mismatch: the committed baseline holds $baselineCount entries, " +
-                "config/detekt/baseline-ledger.txt records $ledgerCount."
-        }
-        val baseRef = providers.gradleProperty("detekt.ratchetBaseRef").getOrElse("origin/main")
-        val baseLedger = DetektBaselineEvidence.baseLedger(projectDir, baseRef)
-        if (baseLedger == null) {
-            logger.lifecycle(
-                "Detekt baseline ratchet: $baseRef holds no baseline ledger yet, so this change may introduce it.",
-            )
-        } else {
-            check(ledgerCount <= baseLedger) {
-                "Detekt baseline ratchet grew against $baseRef: this tree records $ledgerCount entries " +
-                    "where the base records $baseLedger. A new finding must be fixed, not baselined."
-            }
-        }
-        logger.lifecycle("Detekt verified: $baselineCount baselined finding(s) at parity with the ledger.")
+        logger.lifecycle("Detekt verified: no baseline exists, so every reported finding fails the analysis.")
         detektVerified = true
     }
 }

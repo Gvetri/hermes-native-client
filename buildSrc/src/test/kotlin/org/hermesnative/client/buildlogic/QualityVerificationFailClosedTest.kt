@@ -221,144 +221,38 @@ class QualityVerificationFailClosedTest {
 
     @Test
     fun detekt_verification_passes_on_a_clean_tree() {
-        withRatchetBaseRef(ledgerText()) { baseRef ->
-            val result = runGradle(listOf("detekt", "detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
+        val result = runGradle(listOf("detekt", "detektVerify"))
 
-            assertEquals("The detekt verification rejected a clean tree:\n${result.output}", 0, result.exitCode)
-        }
+        assertEquals("The detekt verification rejected a clean tree:\n${result.output}", 0, result.exitCode)
     }
 
     @Test
-    fun detekt_verification_rejects_a_ledger_that_does_not_match_the_baseline() {
-        val ledgerFile = repositoryRoot.resolve("config/detekt/baseline-ledger.txt")
-        val original = ledgerFile.readText()
+    fun detekt_verification_rejects_a_committed_baseline() {
+        val baseline = repositoryRoot.resolve("config/detekt/baseline.xml")
+        check(!baseline.exists()) { "config/detekt/baseline.xml must not exist before the fixture is written." }
         try {
-            ledgerFile.writeText((original.trim().toInt() + 1).toString() + "\n")
-            withRatchetBaseRef(original) { baseRef ->
-                val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
-
-                assertNotEquals(
-                    "The detekt verification accepted a ledger that disagrees with the baseline:\n${result.output}",
-                    0,
-                    result.exitCode,
-                )
-                assertTrue(
-                    "The detekt verification did not report the ledger mismatch:\n${result.output}",
-                    result.output.contains("Detekt baseline ledger mismatch:"),
-                )
-            }
-        } finally {
-            ledgerFile.writeText(original)
-        }
-    }
-
-    @Test
-    fun detekt_verification_rejects_a_baseline_ratchet_that_grows_against_the_base() {
-        val ledger = ledgerText().trim().toInt()
-        withRatchetBaseRef((ledger - 1).toString() + "\n") { baseRef ->
-            val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
+            baseline.writeText(
+                "<?xml version=\"1.0\" ?>\n" +
+                    "<SmellBaseline>\n" +
+                    "  <ManuallySuppressedIssues/>\n" +
+                    "  <CurrentIssues>\n" +
+                    "  </CurrentIssues>\n" +
+                    "</SmellBaseline>\n",
+            )
+            val result = runGradle(listOf("detektVerify"))
 
             assertNotEquals(
-                "The detekt verification accepted a ledger that grew against the base:\n${result.output}",
+                "The detekt verification accepted a committed baseline:\n${result.output}",
                 0,
                 result.exitCode,
             )
             assertTrue(
-                "The detekt verification did not report the grown ratchet:\n${result.output}",
-                result.output.contains("Detekt baseline ratchet grew against"),
+                "The detekt verification did not report the baseline file:\n${result.output}",
+                result.output.contains("Detekt verification found baseline files"),
             )
-        }
-    }
-
-    @Test
-    fun detekt_verification_rejects_a_source_set_baseline_that_shadows_the_committed_baseline() {
-        val shadowingBaseline = repositoryRoot.resolve("config/detekt/baseline-main.xml")
-        check(!shadowingBaseline.exists()) { "config/detekt/baseline-main.xml must not exist before the fixture is written." }
-        try {
-            shadowingBaseline.writeText(repositoryRoot.resolve("config/detekt/baseline.xml").readText())
-            withRatchetBaseRef(ledgerText()) { baseRef ->
-                val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=$baseRef"))
-
-                assertNotEquals(
-                    "The detekt verification accepted a shadowing source-set baseline:\n${result.output}",
-                    0,
-                    result.exitCode,
-                )
-                assertTrue(
-                    "The detekt verification did not report the shadowing baseline:\n${result.output}",
-                    result.output.contains("would shadow the committed baseline"),
-                )
-            }
         } finally {
-            shadowingBaseline.delete()
+            baseline.delete()
         }
-    }
-
-    @Test
-    fun detekt_verification_fails_closed_when_the_base_reference_is_unavailable() {
-        val result = runGradle(listOf("detektVerify", "-Pdetekt.ratchetBaseRef=refs/hermes-verification/unavailable-base"))
-
-        assertNotEquals(
-            "The detekt verification accepted an unverifiable ratchet base:\n${result.output}",
-            0,
-            result.exitCode,
-        )
-        assertTrue(
-            "The detekt verification did not fail closed on the missing base:\n${result.output}",
-            result.output.contains("is not available in this checkout"),
-        )
-    }
-
-    private fun ledgerText(): String = repositoryRoot.resolve("config/detekt/baseline-ledger.txt").readText()
-
-    private fun withRatchetBaseRef(
-        ledgerContent: String,
-        block: (String) -> Unit,
-    ) {
-        val baseRef = "refs/hermes-verification/ratchet-base"
-        val blob = git(listOf("hash-object", "-w", "--stdin"), stdin = ledgerContent)
-        val detektTree = git(listOf("mktree"), stdin = "100644 blob $blob\tbaseline-ledger.txt\n")
-        val configTree = git(listOf("mktree"), stdin = "040000 tree $detektTree\tdetekt\n")
-        val rootTree = git(listOf("mktree"), stdin = "040000 tree $configTree\tconfig\n")
-        val commit = git(listOf("commit-tree", rootTree, "-m", "synthetic ratchet base for detekt verification"))
-        git(listOf("update-ref", baseRef, commit))
-        try {
-            block(baseRef)
-        } finally {
-            ProcessBuilder("git", "update-ref", "-d", baseRef)
-                .directory(repositoryRoot)
-                .redirectErrorStream(true)
-                .start()
-                .waitFor()
-        }
-    }
-
-    private fun git(
-        arguments: List<String>,
-        stdin: String? = null,
-    ): String {
-        val process =
-            ProcessBuilder(listOf("git") + arguments)
-                .directory(repositoryRoot)
-                .redirectErrorStream(true)
-                .apply {
-                    environment()["GIT_AUTHOR_NAME"] = "detekt-verification-fixture"
-                    environment()["GIT_AUTHOR_EMAIL"] = "detekt-verification-fixture@localhost"
-                    environment()["GIT_COMMITTER_NAME"] = "detekt-verification-fixture"
-                    environment()["GIT_COMMITTER_EMAIL"] = "detekt-verification-fixture@localhost"
-                }
-                .start()
-        if (stdin != null) {
-            process.outputStream.use { stream -> stream.write(stdin.toByteArray()) }
-        } else {
-            process.outputStream.close()
-        }
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        val exitCode = process.waitFor()
-        check(exitCode == 0) {
-            "git ${arguments.joinToString(" ")} failed with $exitCode:\n$output"
-        }
-        return output.trim()
     }
 
     private fun assertInjectedFixturesFail(

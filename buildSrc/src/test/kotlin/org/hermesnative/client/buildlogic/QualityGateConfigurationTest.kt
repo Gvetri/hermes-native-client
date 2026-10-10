@@ -991,7 +991,7 @@ class QualityGateConfigurationTest {
     }
 
     @Test
-    fun detekt_analyzes_every_module_with_type_resolution_and_enforces_the_shrink_only_baseline() {
+    fun detekt_analyzes_every_module_with_type_resolution_and_fails_directly() {
         val workflow = repositoryRoot.resolve(".github/workflows/quality-gate.yml").readText()
         val requiredChecks = repositoryRoot.resolve(".github/quality-gate/required-checks.txt").readLines()
         val buildScript = repositoryRoot.resolve("build.gradle.kts").readText()
@@ -1010,10 +1010,6 @@ class QualityGateConfigurationTest {
                 "    if: \${{ always() && (github.event_name != 'pull_request' || " +
                     "(!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}",
             ),
-        )
-        assertTrue(
-            "The detekt job must fetch the main reference for the shrink-only ratchet.",
-            detektJob.contains("git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main"),
         )
         assertTrue(
             "The detekt job must run the aggregate analysis and its verification.",
@@ -1067,14 +1063,17 @@ class QualityGateConfigurationTest {
         ).forEach { declaration ->
             assertTrue("The detekt configuration must declare $declaration.", configuration.contains(declaration))
         }
-        assertTrue("The committed baseline must be part of the repository.", baseline.isFile)
-        assertTrue("The committed baseline ledger must be part of the repository.", ledger.isFile)
-        assertEquals(
-            "The committed ledger must record the committed baseline entry count.",
-            Regex("<ID>").findAll(baseline.readText()).count(),
-            ledger.readText().trim().toInt(),
+        assertTrue("The burnt-down baseline must not be part of the repository.", !baseline.exists())
+        assertTrue("The baseline ledger must not be part of the repository.", !ledger.exists())
+        assertTrue(
+            "The build logic must not wire a baseline into the analysis.",
+            !buildScript.contains("baseline = rootProject.file"),
         )
-        listOf("detekt", "detektVerify", "baseline-ledger.txt").forEach { entry ->
+        assertTrue(
+            "The verification must reject a baseline that would absorb findings.",
+            buildScript.contains("found baseline files that would absorb findings"),
+        )
+        listOf("detekt", "detektVerify").forEach { entry ->
             assertTrue("Documentation must name the $entry entry point.", documentation.contains(entry))
         }
     }
