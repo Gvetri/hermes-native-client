@@ -15,8 +15,6 @@
 <ID>CyclomaticComplexMethod:SessionListScreen.kt$@Composable private fun SessionDetailSummary( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, retryEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
 <ID>CyclomaticComplexMethod:SessionListScreen.kt$@OptIn(ExperimentalLayoutApi::class) @Composable internal fun SessionDetailContent( state: OpenSessionUiState, mutation: SessionMutationUiState?, actionsEnabled: Boolean, listRequestActive: Boolean, listIsStale: Boolean, listErrorCategory: SessionListErrorCategory?, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
 <ID>LargeClass:EntryScreenTest.kt$EntryScreenTest</ID>
-<ID>LargeClass:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest</ID>
-<ID>LargeClass:EntryStateHolderTest.kt$EntryStateHolderTest</ID>
 <ID>LargeClass:JourneyScenarioTest.kt$JourneyScenarioTest</ID>
 <ID>LargeClass:RunObservationStateHolderTest.kt$RunObservationStateHolderTest</ID>
 <ID>LargeClass:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest</ID>
@@ -27,9 +25,6 @@
 <ID>LongMethod:DefaultGatewayClientTest.kt$DefaultGatewayClientTest$@Test fun adapter_executes_every_supported_operation_against_the_client_owned_fixtures()</ID>
 <ID>LongMethod:EntryScreen.kt$@Composable private fun GatewayConnectionForm( state: EntryUiState, onEvent: (EntryUiEvent) -&gt; Unit, )</ID>
 <ID>LongMethod:EntryScreenTest.kt$EntryScreenTest$@Test fun switching_from_an_active_run_keeps_send_available_in_another_session()</ID>
-<ID>LongMethod:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$@Test fun a_created_run_stays_locally_tracked_after_history_refresh_without_inventing_history_runs()</ID>
-<ID>LongMethod:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$@Test fun history_without_run_metadata_never_invents_runs_or_local_recovery_entries()</ID>
-<ID>LongMethod:EntryStateHolderFixtureIntegrationTest.kt$EntryStateHolderFixtureIntegrationTest$@Test fun restart_reconciles_a_known_local_run_through_the_gateway_fixture()</ID>
 <ID>LongMethod:EntryWiring.kt$EntryWiring$fun createEntryStateHolder( context: Context, capabilityDiscovery: ((String, String) -&gt; GatewayCapabilities)? = null, sessionGatewayFactory: ((String, String) -&gt; SessionGatewayPort)? = null, runGatewayFactory: ((String, String) -&gt; RunGatewayPort)? = null, coroutineScope: CoroutineScope? = null, clientVersion: String = androidClientVersion(context), ): EntryStateHolder</ID>
 <ID>LongMethod:GatewayCapabilityManifestTest.kt$GatewayCapabilityManifestTest$@Test fun public_beta_manifest_is_versioned_and_maps_every_required_endpoint()</ID>
 <ID>LongMethod:GatewayTransportTest.kt$GatewayTransportTest$@Test fun closing_an_open_event_stream_cancels_without_draining_the_body()</ID>
