@@ -14,7 +14,6 @@ import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionReconciliation
 import org.hermesnative.client.feature.entry.domain.isActive
-import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 
 internal fun EntryStateHolder.markTimedOutSendUncertain(
     sessionId: SessionId,
@@ -39,19 +38,9 @@ internal fun EntryStateHolder.markTimedOutSendUncertain(
             sessionList =
                 ui.current.copy(
                     openedSession =
-                        ui.opened.copy(
+                        ui.opened.withRunSnapshot(knownRuns, latestObservation).copy(
                             messages = ui.authoritativeMessages ?: ui.opened.messages,
                             isSending = false,
-                            latestRun = knownRuns.latestRun(),
-                            activeRuns = knownRuns.activeRuns(),
-                            latestRunState =
-                                latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                            latestRunRetryAvailable =
-                                latestRunRetryAvailable(
-                                    knownRuns,
-                                    latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                                ),
-                            activeResponse = observedMessageUiState(latestObservation),
                             sendErrorCategory = errorCategory,
                             hasUnresolvedSubmission = true,
                             errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
@@ -387,20 +376,10 @@ internal fun EntryStateHolder.clearTimedOutSendUncertainty(
             sessionList =
                 current.copy(
                     openedSession =
-                        opened.copy(
+                        opened.withRunSnapshot(knownRuns, latestObservation).copy(
                             messages = evaluation.authoritativeMessages,
                             composerText = sessionDrafts[sessionId].orEmpty(),
                             isSending = false,
-                            latestRun = knownRuns.latestRun(),
-                            activeRuns = knownRuns.activeRuns(),
-                            latestRunState =
-                                latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                            latestRunRetryAvailable =
-                                latestRunRetryAvailable(
-                                    knownRuns,
-                                    latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                                ),
-                            activeResponse = observedMessageUiState(latestObservation),
                             sendErrorCategory = clearedSendErrorCategory,
                             hasUnresolvedSubmission = false,
                             errorCategory = null,

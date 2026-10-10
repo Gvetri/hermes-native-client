@@ -30,6 +30,7 @@ import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintySnap
 import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyStore
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionId
+import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 import java.util.concurrent.atomic.AtomicBoolean
 
 sealed interface EntryUiEvent {
@@ -469,6 +470,20 @@ class EntryStateHolder(
             is EntryUiEvent.ConfirmClearDiagnosticsClicked -> confirmClearLocalDiagnostics()
             is EntryUiEvent.CancelClearDiagnosticsClicked -> cancelClearLocalDiagnostics()
         }
+    }
+
+    internal fun OpenSessionUiState.withRunSnapshot(
+        knownRuns: List<Run>,
+        latestObservation: RunObservationState?,
+    ): OpenSessionUiState {
+        val latestRunState = latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState()
+        return copy(
+            latestRun = knownRuns.latestRun(),
+            activeRuns = knownRuns.activeRuns(),
+            latestRunState = latestRunState,
+            latestRunRetryAvailable = latestRunRetryAvailable(knownRuns, latestRunState),
+            activeResponse = observedMessageUiState(latestObservation),
+        )
     }
 
     fun close() {

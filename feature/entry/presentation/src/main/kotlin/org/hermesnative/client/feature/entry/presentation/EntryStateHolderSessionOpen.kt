@@ -9,7 +9,6 @@ import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.RunEventObservation
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionId
-import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 
 internal fun EntryStateHolder.showOpenedSessionFailure(requestGeneration: Long) {
     updateCurrentSessionRequest(requestGeneration) { current ->
@@ -95,7 +94,6 @@ internal fun EntryStateHolder.applyOpenedSessionResult(
     val authoritativeSession = openedSession.session.toSessionItemUiState()
     val knownRuns = rememberSessionRuns(sessionId, openedSession)
     val latestObservation = latestObservationState(sessionId, knownRuns)
-    val latestRun = knownRuns.latestRun()
     val recoveryLoadBlocksSession =
         recoveryLoadPending ||
             recoveryLoadFailed ||
@@ -120,19 +118,9 @@ internal fun EntryStateHolder.applyOpenedSessionResult(
                     sendErrorCategory = sendErrorCategoryFor(sessionId),
                     hasUnresolvedSubmission =
                         hasUnresolvedSubmission(sessionId) || recoveryLoadBlocksSession,
-                    latestRun = latestRun,
-                    activeRuns = knownRuns.activeRuns(),
                     isSending = runJobs.containsKey(sessionId),
-                    latestRunState =
-                        latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                    latestRunRetryAvailable =
-                        latestRunRetryAvailable(
-                            knownRuns,
-                            latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                        ),
-                    activeResponse = observedMessageUiState(latestObservation),
                 ),
-            ).copy(
+            ).withRunSnapshot(knownRuns, latestObservation).copy(
                 isRefreshing = recoveryLoadBlocksSession,
                 isReconciliationInProgress =
                     openedSession.history.latestRun() != null || recoveryLoadBlocksSession,

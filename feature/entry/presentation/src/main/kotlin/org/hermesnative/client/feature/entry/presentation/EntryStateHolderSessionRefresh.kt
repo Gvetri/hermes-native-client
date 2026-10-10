@@ -11,7 +11,6 @@ import org.hermesnative.client.feature.entry.domain.LocalDiagnosticStatus
 import org.hermesnative.client.feature.entry.domain.RunId
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionId
-import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 
 internal fun EntryStateHolder.refreshOpenedSession(gateway: SessionGatewayPort): Job? =
     synchronized(sessionRequestLock) {
@@ -94,7 +93,6 @@ internal fun EntryStateHolder.applyRefreshedSessionResult(
     val authoritativeSession = openedSession.session.toSessionItemUiState()
     val knownRuns = rememberSessionRuns(sessionId, openedSession)
     val latestObservation = latestObservationState(sessionId, knownRuns)
-    val latestRun = knownRuns.latestRun()
     return current.copy(
         sessions =
             current.sessions
@@ -107,20 +105,10 @@ internal fun EntryStateHolder.applyRefreshedSessionResult(
                     composerText = sessionDrafts[sessionId] ?: previous.composerText,
                     sendErrorCategory = sendErrorCategoryFor(sessionId),
                     hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                    latestRun = latestRun,
-                    activeRuns = knownRuns.activeRuns(),
                     isSending = previous.isSending || runJobs.containsKey(sessionId),
-                    latestRunState =
-                        latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                    latestRunRetryAvailable =
-                        latestRunRetryAvailable(
-                            knownRuns,
-                            latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                        ),
-                    activeResponse = observedMessageUiState(latestObservation),
                     isRefreshing = previous.isRefreshing,
                 ),
-            ).copy(
+            ).withRunSnapshot(knownRuns, latestObservation).copy(
                 isReconciliationInProgress =
                     previous.isReconciliationInProgress ||
                         openedSession.history.latestRun() != null,

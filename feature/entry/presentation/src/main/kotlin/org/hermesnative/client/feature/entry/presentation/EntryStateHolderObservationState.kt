@@ -7,7 +7,6 @@ import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.isActive
 import org.hermesnative.client.feature.entry.domain.isTerminal
 import org.hermesnative.client.feature.entry.domain.runs
-import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 
 internal fun EntryStateHolder.updateVisibleRunState(sessionId: SessionId) {
     val current = mutableUiState.value.sessionList ?: return
@@ -18,19 +17,7 @@ internal fun EntryStateHolder.updateVisibleRunState(sessionId: SessionId) {
         mutableUiState.value.copy(
             sessionList =
                 current.copy(
-                    openedSession =
-                        opened.copy(
-                            latestRun = knownRuns.latestRun(),
-                            activeRuns = knownRuns.activeRuns(),
-                            latestRunState =
-                                latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                            latestRunRetryAvailable =
-                                latestRunRetryAvailable(
-                                    knownRuns,
-                                    latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                                ),
-                            activeResponse = observedMessageUiState(latestObservation),
-                        ),
+                    openedSession = opened.withRunSnapshot(knownRuns, latestObservation),
                 ),
         )
 }

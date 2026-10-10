@@ -7,7 +7,6 @@ import org.hermesnative.client.feature.entry.domain.RunPresentationState
 import org.hermesnative.client.feature.entry.domain.RunRecoveryEntry
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.isActive
-import org.hermesnative.client.feature.entry.domain.toRunPresentationState
 
 internal fun EntryStateHolder.updateUnconfirmedRunSessionUi(
     sessionId: SessionId,
@@ -20,26 +19,15 @@ internal fun EntryStateHolder.updateUnconfirmedRunSessionUi(
     if (session == null) return
     val (current, opened) = session
     val knownRuns = visibleSessionRuns(sessionId)
-    val latestRun = knownRuns.latestRun()
     val latestObservation = latestObservationState(sessionId, knownRuns)
     mutableUiState.value =
         mutableUiState.value.copy(
             sessionList =
                 current.copy(
                     openedSession =
-                        opened.copy(
-                            latestRun = latestRun,
-                            activeRuns = knownRuns.activeRuns(),
+                        opened.withRunSnapshot(knownRuns, latestObservation).copy(
                             sendErrorCategory = opened.sendErrorCategory,
                             hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                            latestRunState =
-                                latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                            latestRunRetryAvailable =
-                                latestRunRetryAvailable(
-                                    knownRuns,
-                                    latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                                ),
-                            activeResponse = observedMessageUiState(latestObservation),
                             errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                             isStale = true,
                         ),
@@ -110,19 +98,9 @@ internal fun EntryStateHolder.showRunReconciliationFailure(
                 sessionList =
                     current.copy(
                         openedSession =
-                            opened.copy(
-                                latestRun = knownRuns.latestRun(),
-                                activeRuns = knownRuns.activeRuns(),
+                            opened.withRunSnapshot(knownRuns, latestObservation).copy(
                                 sendErrorCategory = opened.sendErrorCategory,
                                 hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                                latestRunState =
-                                    latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                                latestRunRetryAvailable =
-                                    latestRunRetryAvailable(
-                                        knownRuns,
-                                        latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                                    ),
-                                activeResponse = observedMessageUiState(latestObservation),
                                 errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                                 isStale = true,
                             ),

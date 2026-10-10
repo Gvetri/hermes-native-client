@@ -221,27 +221,16 @@ internal fun EntryStateHolder.updateConfirmedRunSessionUi(
     val (current, opened) = session
     val knownRuns = visibleSessionRuns(sessionId)
     val latestObservation = latestObservationState(sessionId, knownRuns)
-    val latestRun = knownRuns.latestRun()
     mutableUiState.value =
         mutableUiState.value.copy(
             sessionList =
                 current.copy(
                     openedSession =
-                        opened.copy(
+                        opened.withRunSnapshot(knownRuns, latestObservation).copy(
                             messages = toMessageUiStates(reconciliation.history),
                             composerText = sessionDrafts[sessionId].orEmpty(),
                             sendErrorCategory = if (canClearSendState) null else opened.sendErrorCategory,
                             hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                            latestRun = latestRun,
-                            activeRuns = knownRuns.activeRuns(),
-                            latestRunState =
-                                latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                            latestRunRetryAvailable =
-                                latestRunRetryAvailable(
-                                    knownRuns,
-                                    latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                                ),
-                            activeResponse = observedMessageUiState(latestObservation),
                             errorCategory = null,
                             isStale = false,
                         ),
