@@ -4,30 +4,18 @@
   <CurrentIssues>
 <ID>ComplexCondition:DefaultGatewayClient.kt$DefaultGatewayClient$value.isBlank() || value.any { it == '/' || it == '?' || it == '#' }</ID>
 <ID>ComplexCondition:GatewayRouteBuilder.kt$GatewayRouteBuilder$uri.isOpaque || uri.scheme?.lowercase() != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || uri.query != null || uri.fragment != null</ID>
-<ID>ComplexCondition:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$runId.isEmpty() || segments.size !in 1..2 || (segments.size == 2 &amp;&amp; segments[1] != "events")</ID>
 <ID>ComplexCondition:VerifyGatewayConnection.kt$GatewayEndpointValidator$character in 'a'..'z' || character in 'A'..'Z' || character in '0'..'9' || character in "-._~"</ID>
-<ID>CyclomaticComplexMethod:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionResource( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
-<ID>CyclomaticComplexMethod:JourneyVerifier.kt$JourneyInvariants$fun verify( scenarioName: String, telemetry: JsonObject, )</ID>
-<ID>LargeClass:JourneyScenarioTest.kt$JourneyScenarioTest</ID>
-<ID>LongMethod:ContractFixtureParserTest.kt$ContractFixtureParserTest$@Test fun session_fixtures_cover_pagination_and_all_supported_mutations()</ID>
 <ID>LongMethod:DefaultGatewayClientTest.kt$DefaultGatewayClientTest$@Test fun adapter_executes_every_supported_operation_against_the_client_owned_fixtures()</ID>
 <ID>LongMethod:EntryWiring.kt$EntryWiring$fun createEntryStateHolder( context: Context, capabilityDiscovery: ((String, String) -&gt; GatewayCapabilities)? = null, sessionGatewayFactory: ((String, String) -&gt; SessionGatewayPort)? = null, runGatewayFactory: ((String, String) -&gt; RunGatewayPort)? = null, coroutineScope: CoroutineScope? = null, clientVersion: String = androidClientVersion(context), ): EntryStateHolder</ID>
 <ID>LongMethod:GatewayCapabilityManifestTest.kt$GatewayCapabilityManifestTest$@Test fun public_beta_manifest_is_versioned_and_maps_every_required_endpoint()</ID>
 <ID>LongMethod:GatewayTransportTest.kt$GatewayTransportTest$@Test fun closing_an_open_event_stream_cancels_without_draining_the_body()</ID>
-<ID>LongMethod:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionResource( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
-<ID>LongMethod:JourneyVerifier.kt$JourneyInvariants$private fun verifySessionLifecycle(telemetry: JsonObject)</ID>
-<ID>LongMethod:PinnedFixtureDescriptor.kt$PinnedFixtureDescriptor.Companion$private fun parse(content: String): PinnedFixtureDescriptor</ID>
 <ID>LongParameterList:DefaultGatewayClient.kt$DefaultGatewayClient$( operation: String, method: String, path: String, expectedStatus: Int, query: Map&lt;String, String?&gt; = emptyMap(), body: String? = null, )</ID>
 <ID>LongParameterList:EntryWiring.kt$EntryWiring$( context: Context, capabilityDiscovery: ((String, String) -&gt; GatewayCapabilities)? = null, sessionGatewayFactory: ((String, String) -&gt; SessionGatewayPort)? = null, runGatewayFactory: ((String, String) -&gt; RunGatewayPort)? = null, coroutineScope: CoroutineScope? = null, clientVersion: String = androidClientVersion(context), )</ID>
-<ID>NestedBlockDepth:ContractFixtureParser.kt$ContractFixtureParser$internal fun countJsonMember( content: String, field: String, ): Int</ID>
-<ID>NestedBlockDepth:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun streamRunEvents( exchange: HttpExchange, behavior: JourneyGatewayBehavior, runId: String, )</ID>
 <ID>TooGenericExceptionCaught:AndroidKeyStoreGatewayCredentialStore.kt$AndroidKeyStoreGatewayCredentialStore$error: Exception</ID>
-<ID>TooGenericExceptionCaught:ContractFixtureParser.kt$ContractFixtureParser$error: Exception</ID>
 <ID>TooGenericExceptionCaught:DefaultGatewayClient.kt$DefaultGatewayClient$error: Exception</ID>
 <ID>TooGenericExceptionCaught:DefaultGatewayConnectionRepository.kt$DefaultGatewayConnectionRepository$error: Exception</ID>
 <ID>TooGenericExceptionCaught:DeterministicGatewayFixture.kt$DeterministicGatewayFixture$error: Throwable</ID>
 <ID>TooGenericExceptionCaught:DeterministicGatewayFixture.kt$DeterministicGatewayFixture$stopError: Throwable</ID>
-<ID>TooGenericExceptionCaught:DeterministicGatewayFixture.kt$HttpFixtureReadinessChecker$error: Exception</ID>
 <ID>TooGenericExceptionCaught:EndpointScopedRunRecoveryRegistry.kt$EndpointScopedRunRecoveryRegistry$error: Exception</ID>
 <ID>TooGenericExceptionCaught:GatewayRunEventObservation.kt$GatewayRunEventObservation$error: Exception</ID>
 <ID>TooGenericExceptionCaught:GatewayRunEventObservation.kt$GatewayRunEventObservation.&lt;no name provided&gt;$error: Exception</ID>
@@ -37,10 +25,6 @@
 <ID>TooManyFunctions:DefaultRunSubmissionUncertaintyStore.kt$DefaultRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore</ID>
 <ID>TooManyFunctions:EndpointScopedRunRecoveryRegistry.kt$EndpointScopedRunRecoveryRegistry : RunRecoveryRegistry</ID>
 <ID>TooManyFunctions:GatewayJsonParser.kt$GatewayJsonParser</ID>
-<ID>TooManyFunctions:JourneyGatewayProcess.kt$JourneyGatewayProcess$Companion</ID>
-<ID>TooManyFunctions:JourneyScenario.kt$JourneyScenarioParser</ID>
-<ID>TooManyFunctions:JourneyVerifier.kt$JourneyInvariants</ID>
-<ID>TooManyFunctions:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess$Companion</ID>
 <ID>TooManyFunctions:RunSubmissionUncertainty.kt$RunSubmissionUncertaintyStore</ID>
   </CurrentIssues>
 </SmellBaseline>
