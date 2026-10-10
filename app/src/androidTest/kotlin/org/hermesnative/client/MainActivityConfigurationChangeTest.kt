@@ -80,8 +80,6 @@ class MainActivityConfigurationChangeTest {
             composeTestRule.runOnUiThread {
                 composeTestRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
-            // A display rotation settles asynchronously. Wait for the original viewport, so the
-            // configuration change cannot leak into the next test's activity in this process.
             composeTestRule.waitUntil(timeoutMillis = 10_000) {
                 runCatching {
                     composeTestRule.activity.resources.configuration.screenWidthDp == widthBeforeRotation

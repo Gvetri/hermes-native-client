@@ -2,8 +2,13 @@ package org.hermesnative.client.feature.entry.data
 
 import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
 import org.hermesnative.client.feature.entry.domain.RunId
+import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyReader
 import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintySnapshot
 import org.hermesnative.client.feature.entry.domain.RunSubmissionUncertaintyStore
+
+private const val LEGACY_ATTEMPT_ID = "legacy"
+
+private val submissionUncertaintyLock = Any()
 
 interface RunSubmissionUncertaintyStorage {
     fun read(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot?
@@ -20,17 +25,21 @@ interface RunSubmissionUncertaintyStorage {
 
 class DefaultRunSubmissionUncertaintyStore(
     private val storage: RunSubmissionUncertaintyStorage,
-) : RunSubmissionUncertaintyStore {
+) : RunSubmissionUncertaintyStore,
+    RunSubmissionUncertaintyReader by RunSubmissionUncertaintyReads(storage) {
     override fun add(
         key: PendingRunSubmissionKey,
         knownRunIds: Set<RunId>,
         attemptId: String?,
     ): Boolean {
-        synchronized(lock) {
+        synchronized(submissionUncertaintyLock) {
             val current = storage.read(key)
             if (current != null && attemptId != null && current.attemptId != attemptId) return false
+            val base =
+                current
+                    ?: RunSubmissionUncertaintySnapshot(attemptId ?: LEGACY_ATTEMPT_ID, emptySet(), null, false, false)
             val next =
-                (current ?: RunSubmissionUncertaintySnapshot(attemptId ?: LEGACY_ATTEMPT_ID, emptySet(), null, false, false)).copy(
+                base.copy(
                     knownRunIds = current?.knownRunIds.orEmpty() + knownRunIds,
                 )
             storage.write(key, next)
@@ -41,28 +50,23 @@ class DefaultRunSubmissionUncertaintyStore(
     override fun remove(
         key: PendingRunSubmissionKey,
         attemptId: String?,
-    ): Boolean {
-        synchronized(lock) {
+    ): Boolean =
+        synchronized(submissionUncertaintyLock) {
             val current = storage.read(key) ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             storage.remove(key)
-            return true
+            true
         }
+
+    override fun contains(key: PendingRunSubmissionKey): Boolean {
+        return synchronized(submissionUncertaintyLock) { storage.read(key) != null }
     }
 
-    override fun contains(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { storage.read(key) != null }
-
     override fun clearEndpoint(endpoint: String) {
-        synchronized(lock) {
+        synchronized(submissionUncertaintyLock) {
             storage.clearEndpoint(endpoint)
         }
     }
-
-    override fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = synchronized(lock) { storage.read(key)?.knownRunIds.orEmpty() }
-
-    override fun attemptId(key: PendingRunSubmissionKey): String? = synchronized(lock) { storage.read(key)?.attemptId }
-
-    override fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? = synchronized(lock) { storage.read(key) }
 
     override fun bindRun(
         key: PendingRunSubmissionKey,
@@ -70,41 +74,38 @@ class DefaultRunSubmissionUncertaintyStore(
         attemptId: String?,
     ): Boolean = updateIfMatching(key, attemptId) { it.copy(boundRunId = runId) }
 
-    override fun boundRunId(key: PendingRunSubmissionKey): RunId? = synchronized(lock) { storage.read(key)?.boundRunId }
-
     override fun markSettled(
         key: PendingRunSubmissionKey,
         attemptId: String?,
     ): Boolean = updateIfMatching(key, attemptId) { it.copy(settled = true) }
-
-    override fun isSettled(key: PendingRunSubmissionKey): Boolean = synchronized(lock) { storage.read(key)?.settled == true }
 
     override fun markAmbiguous(
         key: PendingRunSubmissionKey,
         attemptId: String?,
     ): Boolean = updateIfMatching(key, attemptId) { it.copy(requiresRunMatch = true) }
 
-    override fun requiresRunMatch(key: PendingRunSubmissionKey): Boolean =
-        synchronized(lock) { storage.read(key)?.requiresRunMatch == true }
-
     override fun removeIfKnownRunIdsMatch(
         key: PendingRunSubmissionKey,
         knownRunIds: Set<RunId>,
         attemptId: String?,
-    ): Boolean {
-        synchronized(lock) {
+    ): Boolean =
+        synchronized(submissionUncertaintyLock) {
             val current = storage.read(key) ?: return false
-            if ((attemptId != null && current.attemptId != attemptId) || current.knownRunIds != knownRunIds) return false
+            if (
+                (attemptId != null && current.attemptId != attemptId) ||
+                current.knownRunIds != knownRunIds
+            ) {
+                return false
+            }
             storage.remove(key)
-            return true
+            true
         }
-    }
 
     override fun removeIfSnapshotMatches(
         key: PendingRunSubmissionKey,
         snapshot: RunSubmissionUncertaintySnapshot,
     ): Boolean {
-        synchronized(lock) {
+        synchronized(submissionUncertaintyLock) {
             if (storage.read(key) != snapshot) return false
             storage.remove(key)
             return true
@@ -115,17 +116,37 @@ class DefaultRunSubmissionUncertaintyStore(
         key: PendingRunSubmissionKey,
         attemptId: String?,
         transform: (RunSubmissionUncertaintySnapshot) -> RunSubmissionUncertaintySnapshot,
-    ): Boolean {
-        synchronized(lock) {
+    ): Boolean =
+        synchronized(submissionUncertaintyLock) {
             val current = storage.read(key) ?: return false
             if (attemptId != null && current.attemptId != attemptId) return false
             storage.write(key, transform(current))
-            return true
+            true
         }
+}
+
+private class RunSubmissionUncertaintyReads(
+    private val storage: RunSubmissionUncertaintyStorage,
+) : RunSubmissionUncertaintyReader {
+    override fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> {
+        return synchronized(submissionUncertaintyLock) { storage.read(key)?.knownRunIds.orEmpty() }
     }
 
-    private companion object {
-        const val LEGACY_ATTEMPT_ID = "legacy"
-        val lock = Any()
+    override fun attemptId(key: PendingRunSubmissionKey): String? {
+        return synchronized(submissionUncertaintyLock) { storage.read(key)?.attemptId }
     }
+
+    override fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? {
+        return synchronized(submissionUncertaintyLock) { storage.read(key) }
+    }
+
+    override fun boundRunId(key: PendingRunSubmissionKey): RunId? =
+        synchronized(submissionUncertaintyLock) { storage.read(key)?.boundRunId }
+
+    override fun isSettled(key: PendingRunSubmissionKey): Boolean {
+        return synchronized(submissionUncertaintyLock) { storage.read(key)?.settled == true }
+    }
+
+    override fun requiresRunMatch(key: PendingRunSubmissionKey): Boolean =
+        synchronized(submissionUncertaintyLock) { storage.read(key)?.requiresRunMatch == true }
 }

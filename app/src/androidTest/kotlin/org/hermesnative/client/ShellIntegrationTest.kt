@@ -68,8 +68,6 @@ class ShellIntegrationTest {
     @Test
     fun conversation_controls_stay_usable_at_increased_font_scale() {
         composeTestRule.setContent {
-            // Only the font scale changes; the device's own density stays, so the dp viewport
-            // under test matches the real configuration instead of an invented one.
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
                 HermesTheme {
                     EntryScreen(state = conversationEntryState(), onEvent = {})
@@ -102,7 +100,9 @@ class ShellIntegrationTest {
             ),
         )
 
-    private fun sessionListEntryState(): EntryUiState = entryState(SessionListUiState(sessions = listOf(session("first", "First Session"))))
+    private fun sessionListEntryState(): EntryUiState {
+        return entryState(SessionListUiState(sessions = listOf(session("first", "First Session"))))
+    }
 
     private fun entryState(sessionList: SessionListUiState): EntryUiState =
         EntryUiState(

@@ -53,25 +53,21 @@ internal data class MarkdownSpan(
  */
 internal fun allowedExternalLinkDestination(destination: String): String? {
     val candidate = destination.trim()
-    if (candidate.length > MAX_LINK_LENGTH) return null
-    if (candidate.any { it.isWhitespace() || it.isISOControl() || it == '\\' }) return null
-    if (!candidate.startsWith(HTTPS_SCHEME, ignoreCase = true)) return null
     val authority = candidate.drop(HTTPS_SCHEME.length).takeWhile { it !in "/?#" }
-    if (authority.isEmpty()) return null
-    return candidate
+    return when {
+        candidate.length > MAX_LINK_LENGTH -> null
+        candidate.any { it.isWhitespace() || it.isISOControl() || it == '\\' } -> null
+        !candidate.startsWith(HTTPS_SCHEME, ignoreCase = true) -> null
+        authority.isEmpty() -> null
+        else -> candidate
+    }
 }
 
 private const val HTTPS_SCHEME = "https://"
 
-/** A conservative bound for a destination carried in an intent; longer targets stay inert. */
 private const val MAX_LINK_LENGTH = 2_048
 
-private const val BOLD_DELIMITER = "**"
-private const val ITALIC_DELIMITER = "*"
-private const val CODE_DELIMITER = "`"
 private const val CODE_FENCE = "```"
-private const val IMAGE_PREFIX = "!["
-private const val LINK_OPEN = "["
 
 /**
  * Parses the supported Markdown subset of untrusted Gateway content: paragraphs,
@@ -96,21 +92,9 @@ internal fun parseSafeMarkdown(content: String): List<MarkdownBlock> {
         when {
             isFenceLine(line) -> {
                 flushParagraph()
-                val code = mutableListOf<String>()
-                val openingFenceLength = fenceLength(line)
-                index++
-                while (index < lines.size && !isClosingFence(lines[index], openingFenceLength)) {
-                    code += lines[index]
-                    index++
-                }
-                val terminated = index < lines.size
-                if (terminated) index++
-                if (!terminated) {
-                    // A response still streaming its code block cannot have a closing
-                    // fence yet; the newline that ended the message is not code.
-                    while (code.isNotEmpty() && code.last().isEmpty()) code.removeLast()
-                }
-                blocks += MarkdownBlock.CodeBlock(language = fenceLanguage(line), code = code.joinToString("\n"))
+                val (block, nextIndex) = readFenceBlock(lines, index, line)
+                blocks += block
+                index = nextIndex
             }
             line.isBlank() -> {
                 flushParagraph()
@@ -138,229 +122,30 @@ internal fun parseSafeMarkdown(content: String): List<MarkdownBlock> {
     return blocks
 }
 
-private val NUMBERED_ITEM = Regex("""^[0-9]{1,9}\.\s+""")
-
-/** The parsed spans of a bullet line, or null when the line is not a bullet item. */
-private fun bulletItem(line: String): List<MarkdownSpan>? {
-    val trimmed = line.trimStart()
-    if (!trimmed.startsWith("- ") && !trimmed.startsWith("* ")) return null
-    return parseInline(trimmed.drop(2).trim())
-}
-
-/** The ordered item of a numbered line, or null when the line is not a numbered item. */
-private fun numberedItem(line: String): NumberedItem? {
-    val trimmed = line.trimStart()
-    val match = NUMBERED_ITEM.find(trimmed) ?: return null
-    return NumberedItem(
-        marker = match.value.trim(),
-        spans = parseInline(trimmed.drop(match.value.length).trim()),
-    )
-}
-
-/** The consecutive list items starting at [startIndex], with the index that follows them. */
-private fun <T> readListItemRun(
+private fun readFenceBlock(
     lines: List<String>,
     startIndex: Int,
-    item: (String) -> T?,
-): Pair<List<T>, Int> {
-    val items = mutableListOf<T>()
-    var index = startIndex
-    while (index < lines.size) {
-        val parsed = item(lines[index]) ?: break
-        items += parsed
+    openingLine: String,
+): Pair<MarkdownBlock.CodeBlock, Int> {
+    val code = mutableListOf<String>()
+    val openingFenceLength = fenceLength(openingLine)
+    var index = startIndex + 1
+    while (index < lines.size && !isClosingFence(lines[index], openingFenceLength)) {
+        code += lines[index]
         index++
     }
-    return items to index
-}
-
-/**
- * The content range of a delimiter pair that starts at [index], or null when the
- * delimiter is unpaired or empty and must therefore stay literal text.
- */
-private fun emphasisedRange(
-    text: String,
-    index: Int,
-    delimiter: String,
-): IntRange? {
-    if (!text.startsWith(delimiter, index)) return null
-    val contentStart = index + delimiter.length
-    val contentEnd = text.indexOf(delimiter, startIndex = contentStart)
-    if (contentEnd <= contentStart) return null
-    return contentStart until contentEnd
-}
-
-/**
- * Parses the inline constructs of one text run. An emphasised range is parsed in turn, so
- * emphasis, code, and links nested inside it render natively instead of leaking their markers
- * as literal text. Nesting stays shallow by construction: a delimiter pair closes at the
- * nearest delimiter of its own kind, so a range can hold at most one inner pair of the other
- * delimiter, and code spans are never parsed further.
- */
-private fun parseInline(text: String): List<MarkdownSpan> {
-    val spans = mutableListOf<MarkdownSpan>()
-    val literal = StringBuilder()
-    val linkBrackets = if (text.indexOf(LINK_OPEN) >= 0) LinkBrackets(text) else null
-
-    fun flushLiteral() {
-        if (literal.isNotEmpty()) {
-            spans += MarkdownSpan(text = literal.toString())
-            literal.clear()
-        }
+    val terminated = index < lines.size
+    if (terminated) index++
+    if (!terminated) {
+        while (code.isNotEmpty() && code.last().isEmpty()) code.removeLast()
     }
-
-    var index = 0
-    while (index < text.length) {
-        val bold = emphasisedRange(text, index, BOLD_DELIMITER)
-        val code = emphasisedRange(text, index, CODE_DELIMITER)
-        val italic = emphasisedRange(text, index, ITALIC_DELIMITER)
-        when {
-            text.startsWith(IMAGE_PREFIX, index) -> {
-                // An image is not a supported construct: it stays inert source text
-                // instead of turning into a link that carries the image target. The label's
-                // bracket follows the '!' this branch matched, so the lookup starts there, and
-                // the construct ends where that label's own brackets balance: a label holding a
-                // link of its own has a nearer closing bracket, and stopping there hands the
-                // rest of the construct to the inline parser, whose links become clickable.
-                val labelBracket = index + 1
-                val labelEnd = linkBrackets?.matchingLabelEnds?.get(labelBracket) ?: -1
-                val image = linkAt(text, labelBracket, linkBrackets, labelEnd)
-                val end = image?.endIndex ?: index + IMAGE_PREFIX.length
-                literal.append(text, index, end)
-                index = end
-            }
-            text.startsWith(LINK_OPEN, index) -> {
-                val link = linkAt(text, index, linkBrackets)
-                if (link == null) {
-                    literal.append(text[index])
-                    index++
-                } else {
-                    flushLiteral()
-                    val destination = allowedExternalLinkDestination(link.destination)
-                    // A blocked destination leaves the label inert, with no link annotation.
-                    spans += parseInline(link.label).map { span -> span.copy(link = destination) }
-                    index = link.endIndex
-                }
-            }
-            bold != null -> {
-                flushLiteral()
-                spans += parseInline(text.substring(bold)).map { span -> span.copy(bold = true) }
-                index = bold.last + 1 + BOLD_DELIMITER.length
-            }
-            code != null -> {
-                flushLiteral()
-                spans += MarkdownSpan(text = text.substring(code), code = true)
-                index = code.last + 1 + CODE_DELIMITER.length
-            }
-            italic != null -> {
-                flushLiteral()
-                spans += parseInline(text.substring(italic)).map { span -> span.copy(italic = true) }
-                index = italic.last + 1 + ITALIC_DELIMITER.length
-            }
-            else -> {
-                literal.append(text[index])
-                index++
-            }
-        }
-    }
-    flushLiteral()
-    return spans
+    return MarkdownBlock.CodeBlock(language = fenceLanguage(openingLine), code = code.joinToString("\n")) to index
 }
 
-private data class LinkMatch(
-    val label: String,
-    val destination: String,
-    val endIndex: Int,
-)
-
-/**
- * The bracket pairings of one text run, computed once per run so that no link candidate scans
- * the text for itself: the nearest closing bracket after every position, the closing bracket each
- * opening bracket balances at, and the destination end of every opening parenthesis. A candidate
- * that scanned for itself made parsing quadratic on bracket-heavy content, which a crafted message
- * could use to stall rendering.
- */
-private class LinkBrackets(
-    text: String,
-) {
-    /** The closing bracket that ends a label opened at each position, or -1 when there is none. */
-    val labelEnds = IntArray(text.length)
-
-    /**
-     * The closing bracket that the bracket opened at each position balances against, counting the
-     * brackets inside it, or -1 when they never balance. A label holding a link of its own has a
-     * nearer closing bracket, so only this pairing ends the whole construct.
-     */
-    val matchingLabelEnds = IntArray(text.length) { -1 }
-
-    /** The index just past the destination opened at each position, or -1 when it never closes. */
-    val destinationEnds = IntArray(text.length) { -1 }
-
-    init {
-        var nextClosingBracket = -1
-        for (position in text.lastIndex downTo 0) {
-            if (text[position] == ']') nextClosingBracket = position
-            labelEnds[position] = nextClosingBracket
-        }
-
-        // A bracket ends at the first closing bracket to its right that no inner opening bracket
-        // has taken, which one right-to-left pass of the free closings finds.
-        val freeClosings = IntArray(text.length)
-        var freeCount = 0
-        for (position in text.lastIndex downTo 0) {
-            when (text[position]) {
-                ']' -> freeClosings[freeCount++] = position
-                '[' -> if (freeCount > 0) matchingLabelEnds[position] = freeClosings[--freeCount]
-            }
-        }
-
-        // A destination ends at the first closing parenthesis to its right that no other opening
-        // parenthesis has taken, which one right-to-left pass of the unmatched closings finds.
-        val unmatchedClosings = IntArray(text.length)
-        var unmatchedCount = 0
-        for (position in text.lastIndex downTo 0) {
-            when (text[position]) {
-                ')' -> unmatchedClosings[unmatchedCount++] = position
-                '(' -> if (unmatchedCount > 0) destinationEnds[position] = unmatchedClosings[--unmatchedCount] + 1
-            }
-        }
-    }
-}
-
-/**
- * The link construct that starts at [index], or null when the brackets or the
- * parentheses are unpaired and the text must stay literal. The destination end comes
- * from the run's pairings, which balance parentheses, so a `)` inside the target
- * cannot end it early. [labelEnd] is the pairing that closes the label: the nearest
- * closing bracket for a link, and the one a label's own brackets balance at for the
- * inert image run.
- */
-private fun linkAt(
-    text: String,
-    index: Int,
-    linkBrackets: LinkBrackets?,
-    labelEnd: Int = linkBrackets?.labelEnds?.get(index) ?: -1,
-): LinkMatch? {
-    if (linkBrackets == null || !text.startsWith(LINK_OPEN, index)) return null
-    if (labelEnd < 0) return null
-    val destinationStart = labelEnd + 2
-    if (destinationStart >= text.length || text[labelEnd + 1] != '(') return null
-
-    val endIndex = linkBrackets.destinationEnds[labelEnd + 1]
-    if (endIndex < 0) return null
-    return LinkMatch(
-        label = text.substring(index + 1, labelEnd),
-        destination = text.substring(destinationStart, endIndex - 1),
-        endIndex = endIndex,
-    )
-}
-
-/** The opening backtick run length of a fenced code block, or zero when the line has no fence. */
 private fun fenceLength(line: String): Int = line.trimStart().takeWhile { it == '`' }.length
 
-/** Whether the line opens a fenced code block. */
 private fun isFenceLine(line: String): Boolean = fenceLength(line) >= CODE_FENCE.length
 
-/** Whether a line closes the fence opened with [openingFenceLength] backticks. */
 private fun isClosingFence(
     line: String,
     openingFenceLength: Int,
@@ -370,5 +155,6 @@ private fun isClosingFence(
     return closingFenceLength >= openingFenceLength && trimmed.drop(closingFenceLength).isEmpty()
 }
 
-/** The optional info string of a fence line, which names the code language. */
-private fun fenceLanguage(line: String): String? = line.trimStart().drop(fenceLength(line)).trim().substringBefore(' ').ifEmpty { null }
+private fun fenceLanguage(line: String): String? {
+    return line.trimStart().drop(fenceLength(line)).trim().substringBefore(' ').ifEmpty { null }
+}

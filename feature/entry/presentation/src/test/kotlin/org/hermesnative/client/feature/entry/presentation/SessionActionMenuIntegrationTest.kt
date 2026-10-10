@@ -80,7 +80,10 @@ class SessionActionMenuIntegrationTest {
         val holder = showConnectedSession(gateway, opened = true)
         try {
             composeTestRule.onNodeWithText("History message 29").assertIsDisplayed()
-            composeTestRule.onNodeWithContentDescription("Session actions for First Session").assertIsDisplayed().performClick()
+            composeTestRule
+                .onNodeWithContentDescription("Session actions for First Session")
+                .assertIsDisplayed()
+                .performClick()
             choose("Rename Session")
             composeTestRule.onNodeWithText("Current title: First Session").assertIsDisplayed()
             composeTestRule.onNodeWithText("New Session title").assertIsDisplayed()
@@ -139,30 +142,7 @@ class SessionActionMenuIntegrationTest {
             choose("Unpin Session")
             assertFalse(requireNotNull(holder.uiState.value.sessionList?.openedSession).session.pinned)
 
-            openMenu("First Session")
-            choose("Rename Session")
-            composeTestRule.onNodeWithText("New Session title").performScrollTo().performTextReplacement("Renamed Session")
-            choose("Refresh")
-            assertEquals("Renamed Session", holder.uiState.value.sessionList?.sessionMutations?.get(FIRST)?.rename?.titleDraft)
-            composeTestRule.onNodeWithText("Confirm Rename Session").assertIsDisplayed()
-            choose("Confirm Rename Session")
-            assertEquals("Renamed Session", holder.uiState.value.sessionList?.openedSession?.session?.title)
-            openMenu("Renamed Session")
-            choose("Delete Session")
-            choose("Confirm Delete Session")
-            assertNull(holder.uiState.value.sessionList?.openedSession)
-            assertEquals(listOf(SECOND), holder.uiState.value.sessionList?.sessions?.map { it.id })
-            assertEquals(
-                listOf(
-                    SessionMutationAction.PIN,
-                    SessionMutationAction.PIN,
-                    SessionMutationAction.UNPIN,
-                    SessionMutationAction.RENAME,
-                    SessionMutationAction.DELETE,
-                ),
-                gateway.mutations.map { it.first },
-            )
-            assertTrue(gateway.mutations.all { it.second == FIRST })
+            assertPagedRenameAndDeleteJourney(gateway, holder)
         } finally {
             holder.close()
         }
@@ -189,9 +169,15 @@ class SessionActionMenuIntegrationTest {
             assertEquals("First", holder.uiState.value.sessionList?.searchQuery)
             assertTrue(requireNotNull(holder.uiState.value.sessionList).visibleSessions.isEmpty())
             composeTestRule.onNodeWithTag("session-list").performScrollToNode(hasText("Try again"))
-            composeTestRule.onNodeWithText("Session action outside current search").performScrollTo().assertIsDisplayed()
+            composeTestRule
+                .onNodeWithText("Session action outside current search")
+                .performScrollTo()
+                .assertIsDisplayed()
             choose("Try again")
-            assertEquals(listOf(SessionMutationAction.PIN to FIRST, SessionMutationAction.PIN to FIRST), gateway.mutations)
+            assertEquals(
+                listOf(SessionMutationAction.PIN to FIRST, SessionMutationAction.PIN to FIRST),
+                gateway.mutations,
+            )
             assertTrue(requireNotNull(holder.uiState.value.sessionList).sessionMutations.isEmpty())
             assertEquals("First", holder.uiState.value.sessionList?.searchQuery)
         } finally {
@@ -213,7 +199,10 @@ class SessionActionMenuIntegrationTest {
             choose("Refresh")
             openMenu("First Session")
             choose("Rename Session")
-            composeTestRule.onNodeWithText("New Session title").performScrollTo().performTextReplacement("Confirmed title")
+            composeTestRule
+                .onNodeWithText("New Session title")
+                .performScrollTo()
+                .performTextReplacement("Confirmed title")
             gateway.failNextMutation = true
             choose("Confirm Rename Session")
             choose("Back to Sessions")
@@ -222,7 +211,10 @@ class SessionActionMenuIntegrationTest {
             choose("Try again")
             assertEquals("Confirmed title", firstSession(holder).title)
             assertTrue(requireNotNull(holder.uiState.value.sessionList).sessionMutations.isEmpty())
-            assertEquals(listOf(SessionMutationAction.RENAME to FIRST, SessionMutationAction.RENAME to FIRST), gateway.mutations)
+            assertEquals(
+                listOf(SessionMutationAction.RENAME to FIRST, SessionMutationAction.RENAME to FIRST),
+                gateway.mutations,
+            )
             choose("Refresh")
             assertEquals(listOf(SECOND), holder.uiState.value.sessionList?.sessions?.map { it.id })
         } finally {
@@ -271,14 +263,7 @@ class SessionActionMenuIntegrationTest {
             choose("Cancel Rename")
             assertTrue(gateway.mutations.isEmpty())
 
-            openMenu("First Session")
-            choose("Delete Session")
-            composeTestRule.onNodeWithText("Delete \"First Session\"?").performScrollTo().assertIsDisplayed()
-            composeTestRule.onNodeWithText("Remote deletion cannot be undone by this client.")
-                .performScrollTo().assertIsDisplayed()
-            assertTrue(gateway.mutations.isEmpty())
-            choose("Cancel Delete")
-            assertTrue(gateway.mutations.isEmpty())
+            assertDeleteCancellationKeepsTheSession(gateway)
 
             openMenu("First Session")
             choose("Pin Session")
@@ -292,13 +277,19 @@ class SessionActionMenuIntegrationTest {
 
             openMenu("First Session")
             choose("Rename Session")
-            composeTestRule.onNodeWithText("New Session title").performScrollTo().performTextReplacement("Requested title")
+            composeTestRule
+                .onNodeWithText("New Session title")
+                .performScrollTo()
+                .performTextReplacement("Requested title")
             assertEquals("First Session", firstSession(holder).title)
             assertEquals(2, gateway.mutations.size)
             gateway.confirmedRenameTitle = "Gateway title"
             choose("Confirm Rename Session")
             assertEquals("Gateway title", firstSession(holder).title)
-            assertEquals(if (opened) "Gateway title" else null, holder.uiState.value.sessionList?.openedSession?.session?.title)
+            assertEquals(
+                if (opened) "Gateway title" else null,
+                holder.uiState.value.sessionList?.openedSession?.session?.title,
+            )
 
             openMenu("Gateway title")
             choose("Delete Session")
@@ -318,6 +309,53 @@ class SessionActionMenuIntegrationTest {
         } finally {
             holder.close()
         }
+    }
+
+    private fun assertDeleteCancellationKeepsTheSession(gateway: MenuGateway) {
+        openMenu("First Session")
+        choose("Delete Session")
+        composeTestRule.onNodeWithText("Delete \"First Session\"?").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Remote deletion cannot be undone by this client.")
+            .performScrollTo().assertIsDisplayed()
+        assertTrue(gateway.mutations.isEmpty())
+        choose("Cancel Delete")
+        assertTrue(gateway.mutations.isEmpty())
+    }
+
+    private fun assertPagedRenameAndDeleteJourney(
+        gateway: MenuGateway,
+        holder: EntryStateHolder,
+    ) {
+        openMenu("First Session")
+        choose("Rename Session")
+        composeTestRule
+            .onNodeWithText("New Session title")
+            .performScrollTo()
+            .performTextReplacement("Renamed Session")
+        choose("Refresh")
+        assertEquals(
+            "Renamed Session",
+            holder.uiState.value.sessionList?.sessionMutations?.get(FIRST)?.rename?.titleDraft,
+        )
+        composeTestRule.onNodeWithText("Confirm Rename Session").assertIsDisplayed()
+        choose("Confirm Rename Session")
+        assertEquals("Renamed Session", holder.uiState.value.sessionList?.openedSession?.session?.title)
+        openMenu("Renamed Session")
+        choose("Delete Session")
+        choose("Confirm Delete Session")
+        assertNull(holder.uiState.value.sessionList?.openedSession)
+        assertEquals(listOf(SECOND), holder.uiState.value.sessionList?.sessions?.map { it.id })
+        assertEquals(
+            listOf(
+                SessionMutationAction.PIN,
+                SessionMutationAction.PIN,
+                SessionMutationAction.UNPIN,
+                SessionMutationAction.RENAME,
+                SessionMutationAction.DELETE,
+            ),
+            gateway.mutations.map { it.first },
+        )
+        assertTrue(gateway.mutations.all { it.second == FIRST })
     }
 
     private fun assertFailureRecovery(opened: Boolean) {
@@ -347,10 +385,16 @@ class SessionActionMenuIntegrationTest {
             gateway.failNextMutation = true
             openMenu("First Session")
             choose("Rename Session")
-            composeTestRule.onNodeWithText("New Session title").performScrollTo().performTextReplacement("Renamed Session")
+            composeTestRule
+                .onNodeWithText("New Session title")
+                .performScrollTo()
+                .performTextReplacement("Renamed Session")
             choose("Confirm Rename Session")
             assertEquals("First Session", firstSession(holder).title)
-            assertEquals("Renamed Session", holder.uiState.value.sessionList?.sessionMutations?.get(FIRST)?.rename?.titleDraft)
+            assertEquals(
+                "Renamed Session",
+                holder.uiState.value.sessionList?.sessionMutations?.get(FIRST)?.rename?.titleDraft,
+            )
             composeTestRule.onNodeWithText(SessionRenameErrorCategory.GATEWAY_REQUEST_FAILED.safeMessage)
                 .performScrollTo().assertIsDisplayed()
             assertEquals(5, gateway.mutations.size)
@@ -411,7 +455,11 @@ class SessionActionMenuIntegrationTest {
         requireNotNull(holder.uiState.value.sessionList).sessions.single { it.id == FIRST }
 
     private fun openMenu(title: String) {
-        composeTestRule.onAllNodesWithContentDescription("Session actions for $title").onLast().performScrollTo().performClick()
+        composeTestRule
+            .onAllNodesWithContentDescription("Session actions for $title")
+            .onLast()
+            .performScrollTo()
+            .performClick()
     }
 
     private fun choose(text: String) {
@@ -455,7 +503,11 @@ class SessionActionMenuIntegrationTest {
 
         override fun openSession(sessionId: SessionId): Session = sessions.single { it.id == sessionId }
 
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory = SessionHistory(sessionId, historyMessages)
+        override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
+            SessionHistory(
+                sessionId,
+                historyMessages,
+            )
 
         override fun renameSession(
             sessionId: SessionId,

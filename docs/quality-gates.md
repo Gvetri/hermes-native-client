@@ -22,6 +22,7 @@ must report `skipped`, and any other outcome fails the aggregate; see
 | --- | --- | --- |
 | `formatting` | `formatCheck` | A Kotlin file is not formatted |
 | `static-analysis` | `:app:lintDebug` | Android lint reports an error |
+| `detekt` | `detekt detektVerify` | detekt reports a finding, a baseline file could absorb it, or the analysis tasks did not execute |
 | `unit-tests` | `verifyRequiredUnitTests` | A declared unit-test scope is missing, empty, has zero executed tests, or contains a skipped test |
 | `fixture-descriptor` | `fixtureDescriptorTests verifyFixtureDescriptor` | The pinned fixture provenance or its descriptor contract changed |
 | `fixture-lifecycle` | `fixtureLifecycleTests journeyScenarioTests` | An executed fixture lifecycle or journey-scenario test fails, or the runner task did not execute |
@@ -125,6 +126,37 @@ The boundary list is declared, not discovered: adding a datasource or repository
 to `QualityPolicy.boundaryDoubles`, and the verification then fails until that boundary has a
 production declaration and a deterministic double in the repository. A port that is never declared
 keeps no double check, so a new port belongs in the same change as its declaration.
+
+### Detekt
+
+detekt is pinned in `gradle/libs.versions.toml` and every Kotlin module applies it. The root build
+script declares the strict policy once: `config/detekt/detekt.yml` is layered on detekt's default
+config (`buildUponDefaultConfig`), `build.maxIssues: 0` fails the analysis on any reported finding,
+and the rules the gate relies on are enabled explicitly — `ReturnCount` (guard clauses count toward
+the limit), `ElseCaseInsteadOfExhaustiveWhen`, `CommentOverPrivateFunction`, and
+`CommentOverPrivateProperty`. The exemptions are deliberate and stated in the configuration file:
+Compose functions are PascalCase by convention, and the two test-source exemptions cover idioms
+whose reason is recorded next to them.
+
+`./gradlew detekt` runs the type-resolution tasks (`detektMain` and `detektTest` for every module),
+so a rule that needs binding executes instead of silently skipping. The plain, non-type-resolving
+per-module tasks exist but stay disabled, and the aggregate never runs them.
+
+`./gradlew detektVerify` verifies the evidence:
+
+- the analysis tasks must execute and be enabled in this invocation, so a run that skips or disables
+  them cannot claim a verified analysis;
+- no baseline file may exist under `config/detekt` — the committed `baseline.xml` and the
+  source-set-specific `baseline-*.xml` files are gone, so a finding can never be absorbed silently
+  again.
+
+A finding must be fixed, not baselined: there is no committed baseline, and `maxIssues: 0` fails the
+build on every reported finding.
+
+The detekt contracts are self-tested as well: `QualityGateConfigurationTest` pins the workflow job,
+the declaration, and the configuration, and `QualityVerificationFailClosedTest` runs the real tasks
+against a deliberate violation of each of the four rules, a clean tree, a committed baseline file,
+and a skipped detekt verification.
 
 ## Changing a declared value
 

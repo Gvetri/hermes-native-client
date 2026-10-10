@@ -29,11 +29,7 @@ object LocalDiagnosticsRecords {
     private const val SAFE_FIELD_VALUE_PATTERN = "[a-z0-9_]{1,64}"
     private const val CLIENT_VERSION_PATTERN = "[A-Za-z0-9][A-Za-z0-9._+-]{0,31}"
 
-    /**
-     * The UTC device clock format. A record whose timestamp is not a UTC instant
-     * fails validation, so a local time zone can never enter the buffer.
-     */
-    private val utcInstantPattern = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z"
+    private const val UTC_INSTANT_PATTERN = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z"
 
     private val safeFieldValue = Regex(SAFE_FIELD_VALUE_PATTERN)
     private val clientVersion = Regex(CLIENT_VERSION_PATTERN)
@@ -43,14 +39,14 @@ object LocalDiagnosticsRecords {
     private val eventRecord =
         Regex(
             "\\A\\{\"schema_version\":$SCHEMA_VERSION,\"record_type\":\"$EVENT_RECORD_TYPE\"," +
-                "\"event_type\":\"(?:$approvedEventTypes)\",\"occurred_at\":\"$utcInstantPattern\"" +
+                "\"event_type\":\"(?:$approvedEventTypes)\",\"occurred_at\":\"$UTC_INSTANT_PATTERN\"" +
                 "(?:,\"status\":\"(?:$approvedStatuses)\")?}\\z",
         )
 
     private val metadataRecord =
         Regex(
             "\\A\\{\"schema_version\":$SCHEMA_VERSION,\"record_type\":\"$METADATA_RECORD_TYPE\"," +
-                "\"client_version\":\"$CLIENT_VERSION_PATTERN\",\"exported_at\":\"$utcInstantPattern\"" +
+                "\"client_version\":\"$CLIENT_VERSION_PATTERN\",\"exported_at\":\"$UTC_INSTANT_PATTERN\"" +
                 "(?:,\"gateway_revision\":\"$SAFE_FIELD_VALUE_PATTERN\")?}\\z",
         )
 
@@ -67,25 +63,28 @@ object LocalDiagnosticsRecords {
         occurredAt: Instant,
     ): String? {
         val eventType = event.eventType.value
-        if (!isSafeFieldValue(eventType)) return null
         val status = event.status?.value
-        if (status != null && !isSafeFieldValue(status)) return null
-        return buildString {
-            append("{\"schema_version\":")
-            append(SCHEMA_VERSION)
-            append(",\"record_type\":\"")
-            append(EVENT_RECORD_TYPE)
-            append("\",\"event_type\":\"")
-            append(eventType)
-            append("\",\"occurred_at\":\"")
-            append(formatUtcInstant(occurredAt))
-            append('"')
-            if (status != null) {
-                append(",\"status\":\"")
-                append(status)
-                append('"')
-            }
-            append('}')
+        return when {
+            !isSafeFieldValue(eventType) -> null
+            status != null && !isSafeFieldValue(status) -> null
+            else ->
+                buildString {
+                    append("{\"schema_version\":")
+                    append(SCHEMA_VERSION)
+                    append(",\"record_type\":\"")
+                    append(EVENT_RECORD_TYPE)
+                    append("\",\"event_type\":\"")
+                    append(eventType)
+                    append("\",\"occurred_at\":\"")
+                    append(formatUtcInstant(occurredAt))
+                    append('"')
+                    if (status != null) {
+                        append(",\"status\":\"")
+                        append(status)
+                        append('"')
+                    }
+                    append('}')
+                }
         }
     }
 

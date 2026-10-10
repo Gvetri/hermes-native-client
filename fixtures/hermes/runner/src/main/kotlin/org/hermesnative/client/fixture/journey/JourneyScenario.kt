@@ -10,6 +10,13 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import java.io.File
 
+private const val MIN_PORT = 1
+private const val MAX_PORT = 65535
+private const val HEX_RADIX = 16
+private const val SURROGATE_RANGE_END = 0xD7FF
+private const val SURROGATE_RANGE_START = 0xE000
+private const val CODE_POINT_MAX = 0xFFFF
+
 /** The pinned `/v1/capabilities` endpoint names a journey can advertise. */
 object JourneyEndpointCatalog {
     data class Endpoint(
@@ -29,7 +36,6 @@ object JourneyEndpointCatalog {
             "runs" to Endpoint("POST", "/v1/runs"),
             "run_status" to Endpoint("GET", "/v1/runs/{run_id}"),
             "run_events" to Endpoint("GET", "/v1/runs/{run_id}/events"),
-            // Additive endpoint used only by the capabilities-additive journey.
             "gateway_future_endpoint" to Endpoint("GET", "/v1/future"),
         )
 }
@@ -54,7 +60,7 @@ data class JourneyScenario(
         require(name.matches(Regex("[a-z][a-z0-9-]*"))) {
             "Journey scenario names must use lowercase kebab-case."
         }
-        require(port in 1..65535) { "Journey scenario port must be valid." }
+        require(port in MIN_PORT..MAX_PORT) { "Journey scenario port must be valid." }
         require(capabilities.isNotEmpty()) { "Journey scenarios must declare capabilities." }
     }
 }
@@ -104,104 +110,126 @@ data class JourneyRunEvent(
 sealed class JourneyScenarioException(message: String, cause: Throwable? = null) :
     IllegalStateException(message, cause)
 
-class JourneyScenarioFormatException(message: String) : JourneyScenarioException(message)
+class JourneyScenarioFormatException(message: String, cause: Throwable? = null) :
+    JourneyScenarioException(message, cause)
+
+private val supportedEventTypes =
+    setOf(
+        "message.delta",
+        "run.completed",
+        "run.failed",
+        "run.cancelled",
+        "run.stopping",
+        "tool.started",
+        "tool.completed",
+        "reasoning.available",
+        "approval.request",
+    )
+
+private val allowedTopLevelKeys =
+    setOf(
+        "name",
+        "hermes_revision",
+        "port",
+        "tls",
+        "capabilities",
+        "require_bearer_credential",
+        "session_page_size",
+        "sessions",
+        "runs",
+        "fail_next_session_list",
+    )
+private val allowedSessionKeys = setOf("id", "title", "preview", "pinned", "history")
+private val allowedMessageKeys = setOf("id", "role", "content", "timestamp")
+private val allowedRunKeys =
+    setOf(
+        "run_id",
+        "session_id",
+        "create_status",
+        "observation",
+        "interrupt_after_events",
+        "hold_open",
+        "final_status",
+        "terminal_history",
+    )
+private val allowedEventKeys = setOf("type", "delta")
+private val UNICODE_ESCAPE = Regex("\\\\u([0-9a-fA-F]{4})")
+
+private fun rejectUnknownKeys(
+    container: JsonObject,
+    allowed: Set<String>,
+    context: String,
+) {
+    val unknown = container.keys - allowed
+    if (unknown.isNotEmpty()) {
+        throw JourneyScenarioFormatException(
+            "Journey scenario $context declares unsupported fields: ${unknown.sorted()}",
+        )
+    }
+}
 
 object JourneyScenarioParser {
-    private val supportedEventTypes =
-        setOf(
-            "message.delta",
-            "run.completed",
-            "run.failed",
-            "run.cancelled",
-            "run.stopping",
-            "tool.started",
-            "tool.completed",
-            "reasoning.available",
-            "approval.request",
-        )
-
-    private val allowedTopLevelKeys =
-        setOf(
-            "name",
-            "hermes_revision",
-            "port",
-            "tls",
-            "capabilities",
-            "require_bearer_credential",
-            "session_page_size",
-            "sessions",
-            "runs",
-            "fail_next_session_list",
-        )
-    private val allowedSessionKeys = setOf("id", "title", "preview", "pinned", "history")
-    private val allowedMessageKeys = setOf("id", "role", "content", "timestamp")
-    private val allowedRunKeys =
-        setOf(
-            "run_id",
-            "session_id",
-            "create_status",
-            "observation",
-            "interrupt_after_events",
-            "hold_open",
-            "final_status",
-            "terminal_history",
-        )
-    private val allowedEventKeys = setOf("type", "delta")
-    private val UNICODE_ESCAPE = Regex("\\\\u([0-9a-fA-F]{4})")
-
     fun parse(
         scenarioFile: File,
         pinnedHermesRevision: String,
     ): JourneyScenario {
-        val text =
-            runCatching { scenarioFile.readText() }.getOrElse { error ->
-                throw JourneyScenarioFormatException("Journey scenario could not be read: ${error.message}")
+        val text = readScenarioText(scenarioFile)
+        val normalizedText = normalizeUnicodeEscapes(text)
+        requireSingleProvenanceField(normalizedText)
+        val root = requireScenarioRoot(text)
+        rejectUnknownKeys(root, allowedTopLevelKeys, "top-level")
+        val scenario = requireScenarioFields(root)
+        requireKnownEndpoints(scenario)
+        requireProvenance(scenario, pinnedHermesRevision)
+        return scenario
+    }
+
+    private fun readScenarioText(scenarioFile: File): String =
+        runCatching { scenarioFile.readText() }.getOrElse { error ->
+            throw JourneyScenarioFormatException("Journey scenario could not be read: ${error.message}")
+        }
+
+    private fun normalizeUnicodeEscapes(text: String): String =
+        UNICODE_ESCAPE.replace(text) { match ->
+            val codePoint = match.groupValues[1].toInt(HEX_RADIX)
+            if (codePoint in 0..SURROGATE_RANGE_END || codePoint in SURROGATE_RANGE_START..CODE_POINT_MAX) {
+                codePoint.toChar().toString()
+            } else {
+                match.value
             }
-        // kotlinx.serialization collapses duplicate JSON keys before the object
-        // model is built, so "exactly one provenance field" must be checked on
-        // the raw document; otherwise a duplicate hermes_revision key would be
-        // silently accepted. JSON permits \uXXXX escapes inside object keys, so
-        // the raw check decodes those escapes before counting.
-        val normalizedText =
-            UNICODE_ESCAPE.replace(text) { match ->
-                val codePoint = match.groupValues[1].toInt(16)
-                if (codePoint in 0..0xD7FF || codePoint in 0xE000..0xFFFF) {
-                    codePoint.toChar().toString()
-                } else {
-                    match.value
-                }
-            }
-        val provenanceFieldCount = Regex("\"hermes_revision\"\\s*:").findAll(normalizedText).count()
+        }
+
+    private fun requireSingleProvenanceField(text: String) {
+        val provenanceFieldCount = Regex("\"hermes_revision\"\\s*:").findAll(text).count()
         if (provenanceFieldCount != 1) {
             throw JourneyScenarioFormatException(
                 "Journey scenario must declare exactly one hermes_revision provenance field.",
             )
         }
-        val root =
-            runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
-                ?: throw JourneyScenarioFormatException("Journey scenario is not a JSON object.")
-        rejectUnknownKeys(root, allowedTopLevelKeys, "top-level")
-        val scenario =
-            try {
-                JourneyScenario(
-                    name = requiredString(root, "name"),
-                    hermesRevision = requiredString(root, "hermes_revision"),
-                    port = requiredInt(root, "port"),
-                    tls = requiredBoolean(root, "tls"),
-                    capabilities = requiredStringList(root, "capabilities"),
-                    requireBearerCredential = optionalString(root, "require_bearer_credential"),
-                    sessionPageSize = optionalInt(root, "session_page_size"),
-                    sessions = parseSessions(root),
-                    runs = parseRuns(root),
-                    failNextSessionList = optionalBoolean(root, "fail_next_session_list", default = false),
-                )
-            } catch (error: IllegalArgumentException) {
-                throw JourneyScenarioFormatException(error.message ?: "Journey scenario is invalid.")
-            }
-        requireKnownEndpoints(scenario)
-        requireProvenance(scenario, pinnedHermesRevision)
-        return scenario
     }
+
+    private fun requireScenarioRoot(text: String): JsonObject =
+        runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+            ?: throw JourneyScenarioFormatException("Journey scenario is not a JSON object.")
+
+    private fun requireScenarioFields(root: JsonObject): JourneyScenario =
+        try {
+            JourneyScenario(
+                name = JourneyScenarioJson.requiredString(root, "name"),
+                hermesRevision = JourneyScenarioJson.requiredString(root, "hermes_revision"),
+                port = JourneyScenarioJson.requiredInt(root, "port"),
+                tls = JourneyScenarioJson.requiredBoolean(root, "tls"),
+                capabilities = JourneyScenarioJson.requiredStringList(root, "capabilities"),
+                requireBearerCredential = JourneyScenarioJson.optionalString(root, "require_bearer_credential"),
+                sessionPageSize = JourneyScenarioJson.optionalInt(root, "session_page_size"),
+                sessions = parseSessions(root),
+                runs = JourneyScenarioJson.parseRuns(root),
+                failNextSessionList =
+                    JourneyScenarioJson.optionalBoolean(root, "fail_next_session_list", default = false),
+            )
+        } catch (error: IllegalArgumentException) {
+            throw JourneyScenarioFormatException(error.message ?: "Journey scenario is invalid.", error)
+        }
 
     private fun requireKnownEndpoints(scenario: JourneyScenario) {
         val unknown = scenario.capabilities.filterNot(JourneyEndpointCatalog.endpoints::containsKey)
@@ -228,15 +256,17 @@ object JourneyScenarioParser {
             val session = element.jsonObject
             rejectUnknownKeys(session, allowedSessionKeys, "session[$index]")
             JourneySession(
-                id = requiredString(session, "id"),
-                title = optionalString(session, "title"),
-                preview = optionalString(session, "preview"),
-                pinned = optionalBoolean(session, "pinned", default = false),
-                history = parseMessages(session, "history", "session[$index].history"),
+                id = JourneyScenarioJson.requiredString(session, "id"),
+                title = JourneyScenarioJson.optionalString(session, "title"),
+                preview = JourneyScenarioJson.optionalString(session, "preview"),
+                pinned = JourneyScenarioJson.optionalBoolean(session, "pinned", default = false),
+                history = JourneyScenarioJson.parseMessages(session, "history", "session[$index].history"),
             )
         }
+}
 
-    private fun parseMessages(
+private object JourneyScenarioJson {
+    internal fun parseMessages(
         container: JsonObject,
         key: String,
         context: String,
@@ -252,7 +282,7 @@ object JourneyScenarioParser {
             )
         }
 
-    private fun parseRuns(root: JsonObject): List<JourneyRunScript> =
+    internal fun parseRuns(root: JsonObject): List<JourneyRunScript> =
         root["runs"]?.jsonArray.orEmpty().mapIndexed { index, element ->
             val run = element.jsonObject
             rejectUnknownKeys(run, allowedRunKeys, "run[$index]")
@@ -287,20 +317,7 @@ object JourneyScenarioParser {
             )
         }
 
-    private fun rejectUnknownKeys(
-        container: JsonObject,
-        allowed: Set<String>,
-        context: String,
-    ) {
-        val unknown = container.keys - allowed
-        if (unknown.isNotEmpty()) {
-            throw JourneyScenarioFormatException(
-                "Journey scenario $context declares unsupported fields: ${unknown.sorted()}",
-            )
-        }
-    }
-
-    private fun requiredString(
+    internal fun requiredString(
         container: JsonObject,
         key: String,
     ): String {
@@ -309,41 +326,47 @@ object JourneyScenarioParser {
             ?: throw JourneyScenarioFormatException("Field '$key' must not be blank.")
     }
 
-    private fun optionalString(
+    internal fun optionalString(
         container: JsonObject,
         key: String,
     ): String? {
         val value = container[key] ?: return null
-        if (value == JsonNull) return null
-        return (value as? JsonPrimitive)?.content
-            ?: throw JourneyScenarioFormatException("Field '$key' must be a string or null.")
+        return if (value == JsonNull) {
+            null
+        } else {
+            (value as? JsonPrimitive)?.content
+                ?: throw JourneyScenarioFormatException("Field '$key' must be a string or null.")
+        }
     }
 
-    private fun requiredInt(
+    internal fun requiredInt(
         container: JsonObject,
         key: String,
     ): Int =
         (container[key] as? JsonPrimitive)?.intOrNull
             ?: throw JourneyScenarioFormatException("Field '$key' must be an integer.")
 
-    private fun optionalInt(
+    internal fun optionalInt(
         container: JsonObject,
         key: String,
     ): Int? {
         val value = container[key] ?: return null
-        if (value == JsonNull) return null
-        return (value as? JsonPrimitive)?.intOrNull
-            ?: throw JourneyScenarioFormatException("Field '$key' must be an integer or null.")
+        return if (value == JsonNull) {
+            null
+        } else {
+            (value as? JsonPrimitive)?.intOrNull
+                ?: throw JourneyScenarioFormatException("Field '$key' must be an integer or null.")
+        }
     }
 
-    private fun requiredBoolean(
+    internal fun requiredBoolean(
         container: JsonObject,
         key: String,
     ): Boolean =
         (container[key] as? JsonPrimitive)?.booleanOrNull
             ?: throw JourneyScenarioFormatException("Field '$key' must be a boolean.")
 
-    private fun optionalBoolean(
+    internal fun optionalBoolean(
         container: JsonObject,
         key: String,
         default: Boolean,
@@ -353,7 +376,7 @@ object JourneyScenarioParser {
             ?: throw JourneyScenarioFormatException("Field '$key' must be a boolean.")
     }
 
-    private fun requiredStringList(
+    internal fun requiredStringList(
         container: JsonObject,
         key: String,
     ): List<String> =

@@ -296,7 +296,9 @@ class RunObservationStateTest {
             RunEventStateTransition.initial(run)
                 .transition(event(RunEventType.COMPLETED, status = "succeeded", eventId = "settled"))
         val state =
-            settled.transition(RunEvent(RunEventType.MESSAGE_DELTA, run.id, status = "running", eventId = "empty-delta"))
+            settled.transition(
+                RunEvent(RunEventType.MESSAGE_DELTA, run.id, status = "running", eventId = "empty-delta"),
+            )
 
         assertEquals("", state.responseText)
         assertFalse(state.isStreaming)

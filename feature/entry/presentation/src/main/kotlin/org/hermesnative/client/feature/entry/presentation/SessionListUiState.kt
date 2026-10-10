@@ -67,7 +67,9 @@ data class SessionMessageUiState(
     val retryAvailable: Boolean = false,
 ) {
     val isFailedRun: Boolean
-        get() = runState == RunPresentationState.FAILED || runStatus?.toRunPresentationState() == RunPresentationState.FAILED
+        get() =
+            runState == RunPresentationState.FAILED ||
+                runStatus?.toRunPresentationState() == RunPresentationState.FAILED
 }
 
 enum class SessionHistoryErrorCategory(
@@ -212,15 +214,45 @@ internal fun List<SessionMessageUiState>.chronological(): List<SessionMessageUiS
     val timestamped =
         filter { it.timestamp != null }
             .sortedBy { requireNotNull(it.timestamp) }
-    if (timestamped.size == size) return timestamped
-    if (timestamped.isEmpty()) return this
-
-    var timestampedIndex = 0
-    return map { message ->
-        if (message.timestamp == null) {
-            message
-        } else {
-            timestamped[timestampedIndex++]
+    return when {
+        timestamped.size == size -> timestamped
+        timestamped.isEmpty() -> this
+        else -> {
+            var timestampedIndex = 0
+            map { message ->
+                if (message.timestamp == null) {
+                    message
+                } else {
+                    timestamped[timestampedIndex++]
+                }
+            }
         }
     }
 }
+
+internal data class SessionDetailState(
+    val content: OpenSessionUiState,
+    val mutation: SessionMutationUiState?,
+    val actionsEnabled: Boolean,
+    val listRequestActive: Boolean,
+    val listIsStale: Boolean,
+    val listErrorCategory: SessionListErrorCategory?,
+) {
+    fun retryEnabled(canSubmit: Boolean): Boolean =
+        actionsEnabled &&
+            canSubmit &&
+            !content.isRefreshing &&
+            mutation?.pendingAction == null &&
+            !content.isSending &&
+            !content.isReconciliationInProgress &&
+            !content.hasUnresolvedSubmission &&
+            !listRequestActive
+}
+
+internal data class SessionRowUiState(
+    val session: SessionItemUiState,
+    val mutation: SessionMutationUiState?,
+    val selected: Boolean,
+    val enabled: Boolean,
+    val onClick: () -> Unit,
+)

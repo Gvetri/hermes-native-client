@@ -28,8 +28,8 @@ fun main(args: Array<String>) {
     println("journey-gateway-scenario=${scenario.name}")
     println("journey-gateway-provenance=${process.provenanceValue}")
     while (process.isRunning) {
-        Thread.sleep(1_000L)
+        Thread.sleep(STARTUP_POLL_MILLIS)
     }
 }
 
-private const val DEFAULT_KEYSTORE_PASSWORD = "journey-fixture"
+private const val STARTUP_POLL_MILLIS = 1_000L

@@ -1,49 +1,24 @@
 package org.hermesnative.client.feature.entry.presentation
 
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.hermesnative.client.feature.entry.application.EntryState
-import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
-import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.GatewayConnection
-import org.hermesnative.client.feature.entry.domain.GatewayConnectionRepository
 import org.hermesnative.client.feature.entry.domain.GatewayErrorCategory
 import org.hermesnative.client.feature.entry.domain.GatewayException
 import org.hermesnative.client.feature.entry.domain.GatewayHistoryMessage
-import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
-import org.hermesnative.client.feature.entry.domain.Session
-import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionHistory
 import org.hermesnative.client.feature.entry.domain.SessionId
 import org.hermesnative.client.feature.entry.domain.SessionListRequest
 import org.hermesnative.client.feature.entry.domain.SessionPage
-import org.hermesnative.client.feature.entry.domain.SessionPinResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.util.ArrayDeque
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-
-private const val ASYNC_TEST_TIMEOUT_MILLIS = 5_000L
-
-private fun clientManifestCapabilities(): GatewayCapabilities =
-    GatewayCapabilities(
-        PublicBetaGatewayCapabilityManifest.current.requiredEndpoints,
-    )
 
 class EntryStateHolderTest {
     @Test
@@ -299,10 +274,10 @@ class EntryStateHolderTest {
     fun successful_connection_loads_the_first_page_with_pinned_sessions_first() {
         val repository = FakeGatewayConnectionRepository()
         val gateway = FakeSessionGateway()
-        val unpinnedOlder = session("unpinned-older", pinned = false)
-        val pinnedOlder = session("pinned-older", pinned = true)
-        val pinnedNewer = session("pinned-newer", pinned = true)
-        val unpinnedNewer = session("unpinned-newer", pinned = false)
+        val unpinnedOlder = entrySession("unpinned-older", pinned = false)
+        val pinnedOlder = entrySession("pinned-older", pinned = true)
+        val pinnedNewer = entrySession("pinned-newer", pinned = true)
+        val unpinnedNewer = entrySession("unpinned-newer", pinned = false)
         gateway.enqueueList(
             SessionPage(
                 sessions = listOf(unpinnedOlder, pinnedOlder, pinnedNewer, unpinnedNewer),
@@ -335,8 +310,8 @@ class EntryStateHolderTest {
     @Test
     fun refresh_preserves_visible_sessions_when_unavailable_and_reloads_the_first_page_on_retry() {
         val gateway = FakeSessionGateway()
-        val firstSession = session("first", title = "First")
-        val refreshedSession = session("second", title = "Second")
+        val firstSession = entrySession("first", title = "First")
+        val refreshedSession = entrySession("second", title = "Second")
         gateway.enqueueList(SessionPage(listOf(firstSession), 1))
         gateway.enqueueFailure(GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED))
         gateway.enqueueList(SessionPage(listOf(refreshedSession), null))
@@ -373,9 +348,9 @@ class EntryStateHolderTest {
     @Test
     fun search_filters_server_provided_sessions_locally_without_issuing_a_request() {
         val gateway = FakeSessionGateway()
-        val initial = session("initial", title = "Initial")
-        val matching = session("matching", title = "Matching")
-        val other = session("other", title = "Other", pinned = false)
+        val initial = entrySession("initial", title = "Initial")
+        val matching = entrySession("matching", title = "Matching")
+        val other = entrySession("other", title = "Other", pinned = false)
         gateway.enqueueList(SessionPage(listOf(initial, matching, other), nextOffset = 1))
         val holder =
             holder(
@@ -393,7 +368,6 @@ class EntryStateHolderTest {
         assertEquals("matching", searched.searchQuery)
         assertEquals(listOf("initial", "matching", "other"), searched.sessions.map { it.id.value })
         assertEquals(listOf("matching"), searched.visibleSessions.map { it.id.value })
-        // The pinned Session list has no general search parameter: no request is issued.
         assertEquals(listOf(SessionListRequest()), gateway.listRequests)
 
         holder.onEvent(EntryUiEvent.ClearSessionSearchClicked)
@@ -408,7 +382,7 @@ class EntryStateHolderTest {
     @Test
     fun rapid_search_query_changes_never_issue_a_gateway_request() {
         val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(listOf(session("initial")), null))
+        gateway.enqueueList(SessionPage(listOf(entrySession("initial")), null))
         val holder =
             holder(
                 repository = FakeGatewayConnectionRepository(),
@@ -431,10 +405,10 @@ class EntryStateHolderTest {
     @Test
     fun loading_more_uses_the_server_offset_merges_without_duplicates_and_refresh_resets_pagination() {
         val gateway = FakeSessionGateway()
-        val pinned = session("pinned", title = "Pinned", pinned = true)
-        val first = session("first", title = "First")
-        val secondPinned = session("second-pinned", title = "Second pinned", pinned = true)
-        val refreshed = session("refreshed", title = "Refreshed")
+        val pinned = entrySession("pinned", title = "Pinned", pinned = true)
+        val first = entrySession("first", title = "First")
+        val secondPinned = entrySession("second-pinned", title = "Second pinned", pinned = true)
+        val refreshed = entrySession("refreshed", title = "Refreshed")
         gateway.enqueueList(SessionPage(listOf(first, pinned), nextOffset = 2))
         gateway.enqueueList(SessionPage(listOf(secondPinned, first), nextOffset = null))
         gateway.enqueueList(SessionPage(listOf(refreshed), nextOffset = 3))
@@ -471,7 +445,7 @@ class EntryStateHolderTest {
 
     @Test
     fun duplicate_load_more_actions_are_ignored_while_the_page_is_in_flight() {
-        val gateway = SlowSessionGateway(SessionPage(listOf(session("first")), nextOffset = 1))
+        val gateway = SlowSessionGateway(SessionPage(listOf(entrySession("first")), nextOffset = 1))
         val holder = slowHolder(gateway)
         verifySlow(holder, gateway)
 
@@ -485,14 +459,14 @@ class EntryStateHolderTest {
         )
         assertTrue(requireNotNull(holder.uiState.value.sessionList).isLoadingMore)
 
-        gateway.complete(SessionListRequest(offset = 1), SessionPage(listOf(session("second")), null))
+        gateway.complete(SessionListRequest(offset = 1), SessionPage(listOf(entrySession("second")), null))
         awaitSessions(holder, "first", "second")
         holder.close()
     }
 
     @Test
     fun opening_during_refresh_is_rejected_so_the_refresh_state_can_complete() {
-        val gateway = SlowSessionGateway(SessionPage(listOf(session("target")), null))
+        val gateway = SlowSessionGateway(SessionPage(listOf(entrySession("target")), null))
         val holder = slowHolder(gateway)
         verifySlow(holder, gateway)
 
@@ -503,7 +477,7 @@ class EntryStateHolderTest {
         holder.onEvent(EntryUiEvent.SessionClicked(SessionId("target")))
         gateway.complete(
             SessionListRequest(),
-            SessionPage(listOf(session("refreshed")), null),
+            SessionPage(listOf(entrySession("refreshed")), null),
             occurrence = 1,
         )
         awaitSessions(holder, "refreshed")
@@ -520,8 +494,8 @@ class EntryStateHolderTest {
     fun opening_a_session_during_local_search_opens_authoritative_history() {
         val sessionId = SessionId("target")
         val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Target")), null))
-        gateway.openedSession = session(sessionId.value, "Target")
+        gateway.enqueueList(SessionPage(listOf(entrySession(sessionId.value, "Target")), null))
+        gateway.openedSession = entrySession(sessionId.value, "Target")
         gateway.openedHistory =
             SessionHistory(
                 sessionId = sessionId,
@@ -551,8 +525,8 @@ class EntryStateHolderTest {
 
     @Test
     fun search_is_ignored_while_session_creation_is_submitting() {
-        val created = session("created", title = "Created")
-        val gateway = BlockingCreateGateway(session("initial", title = "Initial"), created)
+        val created = entrySession("created", title = "Created")
+        val gateway = BlockingCreateGateway(entrySession("initial", title = "Initial"), created)
         val holder = blockingCreationHolder(gateway)
         verify(holder)
         awaitState(holder, "the initial Session list") {
@@ -581,7 +555,7 @@ class EntryStateHolderTest {
 
     @Test
     fun a_local_query_change_does_not_discard_an_in_flight_refresh_result() {
-        val gateway = SlowSessionGateway(SessionPage(listOf(session("initial")), null))
+        val gateway = SlowSessionGateway(SessionPage(listOf(entrySession("initial")), null))
         val holder = slowHolder(gateway)
         verifySlow(holder, gateway)
 
@@ -590,11 +564,8 @@ class EntryStateHolderTest {
         gateway.beforeReturn(SessionListRequest(), occurrence = 1) {
             holder.onEvent(EntryUiEvent.SessionSearchQueryChanged("final"))
         }
-        gateway.complete(SessionListRequest(), SessionPage(listOf(session("old-refresh")), null), occurrence = 1)
+        gateway.complete(SessionListRequest(), SessionPage(listOf(entrySession("old-refresh")), null), occurrence = 1)
 
-        // Search filters loaded rows locally and never issues a Gateway request, so a query
-        // change cannot invalidate the in-flight refresh: the server page still replaces the
-        // loaded rows and the query then filters them.
         awaitState(holder, "the refresh result after the local query change") {
             val list = it.sessionList
             list?.searchQuery == "final" &&
@@ -609,7 +580,7 @@ class EntryStateHolderTest {
 
     @Test
     fun stale_load_more_results_are_ignored_after_refresh_resets_the_first_page() {
-        val gateway = SlowSessionGateway(SessionPage(listOf(session("initial")), nextOffset = 1))
+        val gateway = SlowSessionGateway(SessionPage(listOf(entrySession("initial")), nextOffset = 1))
         val holder = slowHolder(gateway)
         verifySlow(holder, gateway)
 
@@ -620,12 +591,12 @@ class EntryStateHolderTest {
         gateway.awaitRequest(SessionListRequest(), occurrence = 1)
         gateway.complete(
             SessionListRequest(),
-            SessionPage(listOf(session("refreshed")), nextOffset = 2),
+            SessionPage(listOf(entrySession("refreshed")), nextOffset = 2),
             occurrence = 1,
         )
         awaitSessions(holder, "refreshed")
 
-        gateway.complete(oldRequest, SessionPage(listOf(session("stale-more")), null))
+        gateway.complete(oldRequest, SessionPage(listOf(entrySession("stale-more")), null))
 
         val state = requireNotNull(holder.uiState.value.sessionList)
         assertEquals(listOf("refreshed"), state.sessions.map { it.id.value })
@@ -637,8 +608,8 @@ class EntryStateHolderTest {
     fun selecting_a_session_opens_authoritative_history_and_a_deleted_session_is_recoverable() {
         val sessionId = SessionId("session-one")
         val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Listed title")), null))
-        gateway.openedSession = session(sessionId.value, "Authoritative title")
+        gateway.enqueueList(SessionPage(listOf(entrySession(sessionId.value, "Listed title")), null))
+        gateway.openedSession = entrySession(sessionId.value, "Authoritative title")
         gateway.openedHistory =
             SessionHistory(
                 sessionId = sessionId,
@@ -670,892 +641,5 @@ class EntryStateHolderTest {
         assertTrue(unavailable.isUnavailable)
         assertEquals(listOf("session-one"), unavailable.sessions.map { it.id.value })
         holder.close()
-    }
-
-    @Test
-    fun starting_creation_from_an_open_conversation_replaces_it_with_the_creation_form() {
-        val sessionId = SessionId("session-one")
-        val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Listed title")), null))
-        gateway.openedSession = session(sessionId.value, "Authoritative title")
-        gateway.openedHistory =
-            SessionHistory(
-                sessionId = sessionId,
-                messages = listOf(GatewayHistoryMessage("message-one", "user", "Initial content")),
-            )
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
-        assertNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-
-        val state = requireNotNull(holder.uiState.value.sessionList)
-        assertNotNull(state.createSession)
-        assertNull(state.openedSession)
-        holder.close()
-    }
-
-    @Test
-    fun refreshing_the_session_list_reloads_list_data_and_keeps_the_open_conversation() {
-        val sessionId = SessionId("session-one")
-        val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Listed title")), null))
-        gateway.openedSession = session(sessionId.value, "Authoritative title")
-        gateway.openedHistory =
-            SessionHistory(
-                sessionId = sessionId,
-                messages = listOf(GatewayHistoryMessage("message-one", "user", "Initial content")),
-            )
-        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Reloaded title")), null))
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
-        awaitState(holder, "open conversation") { it.sessionList?.openedSession != null }
-
-        holder.onEvent(EntryUiEvent.RefreshSessionListClicked)
-        awaitState(holder, "reloaded list") {
-            it.sessionList?.sessions?.singleOrNull()?.title == "Reloaded title"
-        }
-
-        val state = requireNotNull(holder.uiState.value.sessionList)
-        assertEquals(sessionId, state.openedSession?.session?.id)
-        assertTrue(requireNotNull(state.openedSession).messages.isNotEmpty())
-        holder.close()
-    }
-
-    @Test
-    fun refreshing_open_history_replaces_only_confirmed_gateway_data_and_preserves_content_on_failure() {
-        val sessionId = SessionId("session-one")
-        val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Listed title")), null))
-        gateway.openedSession = session(sessionId.value, "Authoritative title")
-        gateway.openedHistory =
-            SessionHistory(
-                sessionId = sessionId,
-                messages = listOf(GatewayHistoryMessage("message-one", "user", "Initial content")),
-            )
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
-        holder.onEvent(EntryUiEvent.ComposerTextChanged("Draft"))
-
-        gateway.openedHistory =
-            SessionHistory(
-                sessionId = sessionId,
-                messages = listOf(GatewayHistoryMessage("message-two", "assistant", "Confirmed content")),
-            )
-        holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-
-        val refreshed = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-        assertEquals(listOf("Confirmed content"), refreshed.messages.map { it.content })
-        assertEquals("Draft", refreshed.composerText)
-        assertFalse(refreshed.isRefreshing)
-        assertFalse(refreshed.isStale)
-        assertNull(refreshed.errorCategory)
-
-        gateway.openedHistory = null
-        holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-
-        val failed = requireNotNull(requireNotNull(holder.uiState.value.sessionList).openedSession)
-        assertEquals(listOf("Confirmed content"), failed.messages.map { it.content })
-        assertEquals("Draft", failed.composerText)
-        assertFalse(failed.isRefreshing)
-        assertTrue(failed.isStale)
-        assertEquals(SessionHistoryErrorCategory.GATEWAY_REQUEST_FAILED, failed.errorCategory)
-        holder.close()
-    }
-
-    @Test
-    fun pin_is_rejected_during_history_refresh_and_history_refresh_can_complete() {
-        val gateway = BlockingSessionGateway(blockHistoryRefresh = true)
-        val dispatcher = Executors.newFixedThreadPool(4).asCoroutineDispatcher()
-        val holder = slowHolder(gateway, dispatcher)
-
-        try {
-            verify(holder)
-            awaitState(holder, "initial Session list") {
-                it.sessionList?.sessions?.map { session -> session.id.value } == listOf(gateway.sessionId.value)
-            }
-            holder.onEvent(EntryUiEvent.SessionClicked(gateway.sessionId))
-            awaitState(holder, "opened Session") {
-                it.sessionList?.openedSession != null
-            }
-
-            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-            assertTrue(gateway.refreshStarted.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertTrue(requireNotNull(holder.uiState.value.sessionList).openedSession?.isRefreshing == true)
-
-            holder.onEvent(EntryUiEvent.PinSessionClicked(gateway.sessionId))
-            assertFalse(gateway.pinStarted.await(250, TimeUnit.MILLISECONDS))
-            assertEquals(0, gateway.pinCalls)
-
-            gateway.releaseRefresh.countDown()
-            awaitState(holder, "history refresh completion") {
-                it.sessionList?.openedSession?.isRefreshing == false
-            }
-        } finally {
-            gateway.releaseRefresh.countDown()
-            holder.close()
-            dispatcher.close()
-        }
-    }
-
-    @Test
-    fun list_refresh_is_rejected_while_a_history_refresh_is_in_flight() {
-        val gateway = BlockingSessionGateway(blockHistoryRefresh = true)
-        val dispatcher = Executors.newFixedThreadPool(4).asCoroutineDispatcher()
-        val holder = slowHolder(gateway, dispatcher)
-
-        try {
-            verify(holder)
-            awaitState(holder, "initial Session list") {
-                it.sessionList?.sessions?.map { session -> session.id.value } == listOf(gateway.sessionId.value)
-            }
-            holder.onEvent(EntryUiEvent.SessionClicked(gateway.sessionId))
-            awaitState(holder, "opened Session") {
-                it.sessionList?.openedSession != null
-            }
-
-            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-            assertTrue(gateway.refreshStarted.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertTrue(requireNotNull(holder.uiState.value.sessionList).openedSession?.isRefreshing == true)
-
-            holder.onEvent(EntryUiEvent.RefreshSessionListClicked)
-            assertFalse(gateway.listRefreshStarted.await(250, TimeUnit.MILLISECONDS))
-
-            gateway.releaseRefresh.countDown()
-            awaitState(holder, "history refresh completion") {
-                it.sessionList?.openedSession?.isRefreshing == false
-            }
-        } finally {
-            gateway.releaseRefresh.countDown()
-            holder.close()
-            dispatcher.close()
-        }
-    }
-
-    @Test
-    fun load_more_is_rejected_while_a_history_refresh_is_in_flight() {
-        val gateway =
-            BlockingSessionGateway(
-                blockHistoryRefresh = true,
-                blockListRefresh = true,
-                nextPageOffset = 2,
-            )
-        val dispatcher = Executors.newFixedThreadPool(4).asCoroutineDispatcher()
-        val holder = slowHolder(gateway, dispatcher)
-
-        try {
-            verify(holder)
-            awaitState(holder, "initial Session list") {
-                it.sessionList?.nextOffset == 2
-            }
-            holder.onEvent(EntryUiEvent.SessionClicked(gateway.sessionId))
-            awaitState(holder, "opened Session") {
-                it.sessionList?.openedSession != null
-            }
-
-            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-            assertTrue(gateway.refreshStarted.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertTrue(requireNotNull(holder.uiState.value.sessionList).openedSession?.isRefreshing == true)
-
-            holder.onEvent(EntryUiEvent.LoadMoreSessionsClicked)
-            assertFalse(gateway.listRefreshStarted.await(250, TimeUnit.MILLISECONDS))
-
-            gateway.releaseRefresh.countDown()
-            awaitState(holder, "history refresh completion") {
-                it.sessionList?.openedSession?.isRefreshing == false
-            }
-        } finally {
-            gateway.releaseRefresh.countDown()
-            gateway.releaseListRefresh.countDown()
-            holder.close()
-            dispatcher.close()
-        }
-    }
-
-    @Test
-    fun history_refresh_is_rejected_while_a_list_refresh_is_in_flight() {
-        val gateway = BlockingSessionGateway(blockListRefresh = true)
-        val dispatcher = Executors.newFixedThreadPool(4).asCoroutineDispatcher()
-        val holder = slowHolder(gateway, dispatcher)
-
-        try {
-            verify(holder)
-            awaitState(holder, "initial Session list") {
-                it.sessionList?.sessions?.map { session -> session.id.value } == listOf(gateway.sessionId.value)
-            }
-            holder.onEvent(EntryUiEvent.SessionClicked(gateway.sessionId))
-            awaitState(holder, "opened Session") {
-                it.sessionList?.openedSession != null
-            }
-
-            holder.onEvent(EntryUiEvent.PinSessionClicked(gateway.sessionId))
-            assertTrue(gateway.pinStarted.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertTrue(gateway.listRefreshStarted.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
-            assertTrue(requireNotNull(holder.uiState.value.sessionList).isRefreshing)
-
-            holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-            assertFalse(gateway.historyRefreshStarted.await(250, TimeUnit.MILLISECONDS))
-            gateway.releaseListRefresh.countDown()
-            awaitState(holder, "list refresh completion") {
-                it.sessionList?.isRefreshing == false
-            }
-        } finally {
-            gateway.releaseListRefresh.countDown()
-            holder.close()
-            dispatcher.close()
-        }
-    }
-
-    @Test
-    fun successful_reopen_replaces_stale_session_metadata_and_clears_stale_lifecycle_state() {
-        val sessionId = SessionId("session-one")
-        val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(listOf(session(sessionId.value, "Listed title")), null))
-        gateway.enqueueFailure(GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED))
-        gateway.openedSession = session(sessionId.value, "Authoritative title", pinned = true)
-        gateway.openedHistory = SessionHistory(sessionId, emptyList<GatewayHistoryMessage>())
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-        val stale = requireNotNull(holder.uiState.value.sessionList)
-        assertTrue(stale.isStale)
-        assertFalse(stale.isUnavailable)
-
-        holder.onEvent(EntryUiEvent.SessionClicked(sessionId))
-
-        val reopened = requireNotNull(holder.uiState.value.sessionList)
-        assertFalse(reopened.isStale)
-        assertFalse(reopened.isUnavailable)
-        assertEquals("Authoritative title", reopened.sessions.single().title)
-        assertTrue(reopened.sessions.single().pinned)
-        assertEquals("Authoritative title", reopened.openedSession?.session?.title)
-        holder.close()
-    }
-
-    @Test
-    fun creation_has_no_remote_mutation_until_confirmation_and_opens_the_returned_session_once() {
-        val gateway = FakeSessionGateway()
-        val created = session("created", title = null)
-        gateway.enqueueList(SessionPage(emptyList(), null))
-        gateway.enqueueCreate(created)
-        gateway.enqueueList(SessionPage(listOf(created), null))
-        gateway.openedSession = session("created", title = "Authoritative created")
-        gateway.openedHistory =
-            SessionHistory(
-                sessionId = SessionId("created"),
-                messages = listOf(GatewayHistoryMessage("created-message", "assistant", "Created history")),
-            )
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        assertEquals(0, gateway.createCalls)
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-        holder.onEvent(EntryUiEvent.CreateSessionTitleChanged("Created"))
-        assertEquals("Created", requireNotNull(holder.uiState.value.sessionList).createSession?.titleDraft)
-        assertEquals(0, gateway.createCalls)
-
-        holder.onEvent(EntryUiEvent.ConfirmCreateSessionClicked)
-
-        val state = requireNotNull(holder.uiState.value.sessionList)
-        assertEquals(1, gateway.createCalls)
-        assertEquals(listOf("Created"), gateway.createTitles)
-        assertEquals(listOf("create", "open", "history"), gateway.operations)
-        assertEquals("created", state.openedSession?.session?.id?.value)
-        assertEquals("Authoritative created", state.openedSession?.session?.title)
-        assertEquals(listOf("Created history"), state.openedSession?.messages?.map { it.content })
-        assertNull(state.createSession)
-        holder.close()
-    }
-
-    @Test
-    fun cancelling_or_navigating_away_discards_the_in_memory_creation_draft() {
-        val gateway = FakeSessionGateway()
-        gateway.enqueueList(SessionPage(emptyList(), null))
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-        holder.onEvent(EntryUiEvent.CreateSessionTitleChanged("Discarded"))
-        holder.onEvent(EntryUiEvent.CancelCreateSessionClicked)
-        assertNull(requireNotNull(holder.uiState.value.sessionList).createSession)
-        assertEquals(0, gateway.createCalls)
-
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-        holder.onEvent(EntryUiEvent.CreateSessionTitleChanged("Navigated away"))
-        holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
-        assertNull(requireNotNull(holder.uiState.value.sessionList).createSession)
-        assertEquals(0, gateway.createCalls)
-        holder.close()
-    }
-
-    @Test
-    fun confirmed_creation_failure_preserves_the_draft_and_explicit_retry_can_succeed() {
-        val gateway = FakeSessionGateway()
-        val created = session("created", title = "Retry title")
-        gateway.enqueueList(SessionPage(emptyList(), null))
-        gateway.enqueueCreateFailure(GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED))
-        gateway.enqueueCreate(created)
-        gateway.enqueueList(SessionPage(listOf(created), null))
-        gateway.openedSession = created
-        gateway.openedHistory = SessionHistory(SessionId("created"), emptyList())
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-        holder.onEvent(EntryUiEvent.CreateSessionTitleChanged("Retry title"))
-        holder.onEvent(EntryUiEvent.ConfirmCreateSessionClicked)
-
-        val failed = requireNotNull(holder.uiState.value.sessionList).createSession
-        assertEquals("Retry title", failed?.titleDraft)
-        assertEquals(SessionCreationErrorCategory.GATEWAY_REQUEST_FAILED, failed?.errorCategory)
-        assertEquals(1, gateway.createCalls)
-
-        holder.onEvent(EntryUiEvent.ConfirmCreateSessionClicked)
-
-        assertEquals(2, gateway.createCalls)
-        assertEquals("created", requireNotNull(holder.uiState.value.sessionList).openedSession?.session?.id?.value)
-        holder.close()
-    }
-
-    @Test
-    fun refresh_failure_after_creation_opens_the_returned_session_without_duplicate_creation() {
-        val gateway = FakeSessionGateway()
-        val created = session("created", title = "Created")
-        gateway.enqueueList(SessionPage(emptyList(), null))
-        gateway.enqueueCreate(created)
-        gateway.enqueueFailure(GatewayException(GatewayErrorCategory.GATEWAY_REQUEST_FAILED))
-        gateway.enqueueList(SessionPage(listOf(created), null))
-        gateway.openedSession = created
-        gateway.openedHistory = SessionHistory(SessionId("created"), emptyList())
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-        holder.onEvent(EntryUiEvent.ConfirmCreateSessionClicked)
-
-        val stale = requireNotNull(holder.uiState.value.sessionList)
-        assertEquals(1, gateway.createCalls)
-        assertEquals("created", stale.openedSession?.session?.id?.value)
-        assertTrue(stale.isStale)
-        assertTrue(stale.isUnavailable)
-        assertNull(stale.createSession)
-        assertEquals(listOf("created"), stale.sessions.map { it.id.value })
-
-        holder.onEvent(EntryUiEvent.ReturnToSessionListClicked)
-        holder.onEvent(EntryUiEvent.RefreshSessionsClicked)
-
-        val recovered = requireNotNull(holder.uiState.value.sessionList)
-        assertEquals(1, gateway.createCalls)
-        assertFalse(recovered.isStale)
-        assertFalse(recovered.isUnavailable)
-        assertEquals(listOf("created"), recovered.sessions.map { it.id.value })
-        holder.close()
-    }
-
-    @Test
-    fun blank_creation_title_is_sent_as_null_and_uses_the_untitled_session_fallback() {
-        val gateway = FakeSessionGateway()
-        val created = session("created", title = null)
-        gateway.enqueueList(SessionPage(emptyList(), null))
-        gateway.enqueueCreate(created)
-        gateway.enqueueList(SessionPage(listOf(created), null))
-        gateway.openedSession = created
-        gateway.openedHistory = SessionHistory(SessionId("created"), emptyList())
-        val holder =
-            holder(
-                repository = FakeGatewayConnectionRepository(),
-                verifier = { _, _ ->
-                    clientManifestCapabilities()
-                },
-                gateway = gateway,
-            )
-
-        verify(holder)
-        holder.onEvent(EntryUiEvent.CreateSessionClicked)
-        holder.onEvent(EntryUiEvent.CreateSessionTitleChanged("   "))
-        holder.onEvent(EntryUiEvent.ConfirmCreateSessionClicked)
-
-        assertEquals(listOf(null), gateway.createTitles)
-        assertEquals("Untitled Session", requireNotNull(holder.uiState.value.sessionList).openedSession?.session?.title)
-        holder.close()
-    }
-
-    private fun holder(
-        repository: FakeGatewayConnectionRepository,
-        verifier: (String, String) -> GatewayCapabilities,
-        gateway: SessionGatewayPort? = null,
-        dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-    ): EntryStateHolder =
-        EntryStateHolder(
-            initialState = EntryState(isGatewayConnectionConfigured = false),
-            verifyGatewayConnection = VerifyGatewayConnection(repository, discoverCapabilities = verifier),
-            scope = CoroutineScope(SupervisorJob() + dispatcher),
-            sessionGatewayFactory =
-                gateway?.let { sessionGateway ->
-                    { _, _ -> sessionGateway }
-                },
-        )
-
-    private fun verify(holder: EntryStateHolder) {
-        holder.onEvent(EntryUiEvent.AddGatewayConnectionClicked)
-        holder.onEvent(EntryUiEvent.EndpointChanged("https://gateway.example/profile"))
-        holder.onEvent(EntryUiEvent.BearerCredentialChanged("memory-only-token"))
-        holder.onEvent(EntryUiEvent.VerifyGatewayConnectionClicked)
-    }
-
-    private fun blockingCreationHolder(gateway: BlockingCreateGateway): EntryStateHolder =
-        EntryStateHolder(
-            initialState = EntryState(isGatewayConnectionConfigured = false),
-            verifyGatewayConnection =
-                VerifyGatewayConnection(
-                    FakeGatewayConnectionRepository(),
-                ) { _, _ ->
-                    clientManifestCapabilities()
-                },
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-            sessionGatewayFactory = { _, _ -> gateway },
-        )
-
-    private fun slowHolder(
-        gateway: SessionGatewayPort,
-        dispatcher: CoroutineDispatcher = Dispatchers.Default,
-    ): EntryStateHolder =
-        EntryStateHolder(
-            initialState = EntryState(isGatewayConnectionConfigured = false),
-            verifyGatewayConnection =
-                VerifyGatewayConnection(
-                    FakeGatewayConnectionRepository(),
-                ) { _, _ ->
-                    clientManifestCapabilities()
-                },
-            scope = CoroutineScope(SupervisorJob() + dispatcher),
-            sessionGatewayFactory = { _, _ -> gateway },
-        )
-
-    private fun verifySlow(
-        holder: EntryStateHolder,
-        gateway: SlowSessionGateway,
-    ) {
-        verify(holder)
-        gateway.awaitRequest(SessionListRequest())
-        awaitState(holder, "initial Session list") {
-            it.sessionList?.sessions?.isNotEmpty() == true
-        }
-    }
-
-    private fun awaitSessions(
-        holder: EntryStateHolder,
-        vararg ids: String,
-    ) {
-        awaitState(holder, "Sessions ${ids.toList()}") {
-            it.sessionList?.sessions?.map { session -> session.id.value } == ids.toList()
-        }
-    }
-
-    private fun awaitState(
-        holder: EntryStateHolder,
-        description: String,
-        predicate: (EntryUiState) -> Boolean,
-    ) {
-        try {
-            runBlocking {
-                withTimeout(ASYNC_TEST_TIMEOUT_MILLIS) {
-                    holder.uiState.first(predicate)
-                }
-            }
-        } catch (_: TimeoutCancellationException) {
-            throw AssertionError("Timed out waiting for $description.")
-        }
-    }
-
-    private fun session(
-        id: String,
-        title: String? = null,
-        pinned: Boolean = false,
-    ): Session =
-        Session(
-            id = SessionId(id),
-            title = title,
-            preview = "Server preview",
-            pinned = pinned,
-        )
-
-    private class FakeGatewayConnectionRepository : GatewayConnectionRepository {
-        var saved: GatewayConnection? = null
-        var throwOnSave = false
-
-        override fun load(): GatewayConnection? = saved
-
-        override fun save(connection: GatewayConnection) {
-            if (throwOnSave) error("storage failure")
-            saved = connection
-        }
-    }
-
-    private class FakeSessionGateway : SessionGatewayPort {
-        private val listResults = ArrayDeque<Result<SessionPage>>()
-        private val createResults = ArrayDeque<Result<Session>>()
-        val listRequests = mutableListOf<SessionListRequest>()
-        val operations = mutableListOf<String>()
-        val createTitles = mutableListOf<String?>()
-        var createCalls = 0
-        var openedSession: Session? = null
-        var openedHistory: SessionHistory? = null
-        var openFailure: GatewayException? = null
-
-        fun enqueueList(page: SessionPage) {
-            listResults += Result.success(page)
-        }
-
-        fun enqueueFailure(error: GatewayException) {
-            listResults += Result.failure(error)
-        }
-
-        fun enqueueCreate(session: Session) {
-            createResults += Result.success(session)
-        }
-
-        fun enqueueCreateFailure(error: GatewayException) {
-            createResults += Result.failure(error)
-        }
-
-        override fun listSessions(request: SessionListRequest): SessionPage {
-            listRequests += request
-            return listResults.removeFirst().getOrThrow()
-        }
-
-        override fun createSession(title: String?): Session {
-            createCalls += 1
-            createTitles += title
-            operations += "create"
-            return createResults.removeFirst().getOrThrow()
-        }
-
-        override fun openSession(sessionId: SessionId): Session {
-            operations += "open"
-            openFailure?.let { throw it }
-            return requireNotNull(openedSession)
-        }
-
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory {
-            operations += "history"
-            return requireNotNull(openedHistory)
-        }
-
-        override fun renameSession(
-            sessionId: SessionId,
-            title: String,
-        ): Session = error("not used")
-
-        override fun deleteSession(sessionId: SessionId): Unit = error("not used")
-
-        override fun pinSession(sessionId: SessionId): SessionPinResult = error("not used")
-
-        override fun unpinSession(sessionId: SessionId): SessionPinResult = error("not used")
-    }
-
-    private class BlockingCreateGateway(
-        private val initialSession: Session,
-        private val createdSession: Session,
-    ) : SessionGatewayPort {
-        private val createResult = CompletableFuture<Session>()
-        val createStarted = CountDownLatch(1)
-        val listRequests = CopyOnWriteArrayList<SessionListRequest>()
-        private var created = false
-
-        override fun listSessions(request: SessionListRequest): SessionPage {
-            listRequests += request
-            return SessionPage(listOf(if (created) createdSession else initialSession), null)
-        }
-
-        override fun createSession(title: String?): Session {
-            createStarted.countDown()
-            return createResult.get(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS).also {
-                created = true
-            }
-        }
-
-        override fun openSession(sessionId: SessionId): Session {
-            check(sessionId == createdSession.id) { "Unexpected Session open: $sessionId" }
-            return createdSession
-        }
-
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory =
-            SessionHistory(sessionId, emptyList<GatewayHistoryMessage>())
-
-        override fun renameSession(
-            sessionId: SessionId,
-            title: String,
-        ): Session = error("not used")
-
-        override fun deleteSession(sessionId: SessionId): Unit = error("not used")
-
-        override fun pinSession(sessionId: SessionId): SessionPinResult = error("not used")
-
-        override fun unpinSession(sessionId: SessionId): SessionPinResult = error("not used")
-
-        fun completeCreate() {
-            createResult.complete(createdSession)
-        }
-    }
-
-    private class BlockingSessionGateway(
-        private val blockHistoryRefresh: Boolean = false,
-        private val blockListRefresh: Boolean = false,
-        private val nextPageOffset: Int? = null,
-    ) : SessionGatewayPort {
-        val sessionId = SessionId("session-one")
-        val refreshStarted = CountDownLatch(1)
-        val historyRefreshStarted = CountDownLatch(1)
-        val releaseRefresh = CountDownLatch(1)
-        val listRefreshStarted = CountDownLatch(1)
-        val releaseListRefresh = CountDownLatch(1)
-        val pinStarted = CountDownLatch(1)
-        var pinCalls = 0
-        var historyCalls = 0
-        private var listCalls = 0
-        private val listedSession =
-            Session(
-                id = sessionId,
-                title = "Session",
-                preview = "Preview",
-                pinned = false,
-            )
-
-        override fun listSessions(request: SessionListRequest): SessionPage {
-            val call =
-                synchronized(this) {
-                    listCalls += 1
-                    listCalls
-                }
-            if (blockListRefresh && call > 1) {
-                listRefreshStarted.countDown()
-                awaitRelease(releaseListRefresh, "list refresh")
-            }
-            return SessionPage(listOf(listedSession), nextPageOffset)
-        }
-
-        override fun createSession(title: String?): Session = error("not used")
-
-        override fun openSession(sessionId: SessionId): Session {
-            check(sessionId == this.sessionId) { "Unexpected Session open: $sessionId" }
-            return listedSession
-        }
-
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory {
-            check(sessionId == this.sessionId) { "Unexpected Session history: $sessionId" }
-            val call =
-                synchronized(this) {
-                    historyCalls += 1
-                    historyCalls
-                }
-            if (call > 1) {
-                historyRefreshStarted.countDown()
-            }
-            if (blockHistoryRefresh && call > 1) {
-                refreshStarted.countDown()
-                awaitRelease(releaseRefresh, "history refresh")
-            }
-            return SessionHistory(
-                sessionId = this.sessionId,
-                messages = listOf(GatewayHistoryMessage("message-$call", null, null)),
-            )
-        }
-
-        override fun renameSession(
-            sessionId: SessionId,
-            title: String,
-        ): Session = error("not used")
-
-        override fun deleteSession(sessionId: SessionId): Unit = error("not used")
-
-        override fun pinSession(sessionId: SessionId): SessionPinResult {
-            check(sessionId == this.sessionId) { "Unexpected Session pin: $sessionId" }
-            synchronized(this) {
-                pinCalls += 1
-            }
-            pinStarted.countDown()
-            return SessionPinResult(sessionId, pinned = true)
-        }
-
-        override fun unpinSession(sessionId: SessionId): SessionPinResult = error("not used")
-
-        private fun awaitRelease(
-            latch: CountDownLatch,
-            operation: String,
-        ) {
-            if (!latch.await(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
-                throw AssertionError("Timed out waiting for $operation release.")
-            }
-        }
-    }
-
-    private class SlowSessionGateway(
-        private val initialPage: SessionPage,
-    ) : SessionGatewayPort {
-        val listRequests = CopyOnWriteArrayList<SessionListRequest>()
-        private val requestMonitor = Object()
-        private val requestGates = mutableMapOf<SessionListRequest, MutableList<RequestGate>>()
-        private val beforeReturnActions = mutableMapOf<RequestKey, () -> Unit>()
-
-        override fun listSessions(request: SessionListRequest): SessionPage {
-            val (occurrence, gate) =
-                synchronized(requestMonitor) {
-                    val gates = requestGates.getOrPut(request) { mutableListOf() }
-                    val occurrence = gates.size
-                    val gate = RequestGate()
-                    gates += gate
-                    listRequests += request
-                    requestMonitor.notifyAll()
-                    occurrence to gate
-                }
-            if (request == SessionListRequest() && occurrence == 0) return initialPage
-            val result =
-                try {
-                    gate.result.get(ASYNC_TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
-                } catch (_: java.util.concurrent.TimeoutException) {
-                    throw AssertionError(
-                        "Timed out waiting for SessionPage for request $request occurrence $occurrence.",
-                    )
-                }
-            synchronized(requestMonitor) {
-                beforeReturnActions.remove(RequestKey(request, occurrence))?.invoke()
-            }
-            return result
-        }
-
-        fun awaitRequest(
-            request: SessionListRequest,
-            occurrence: Int = 0,
-        ) {
-            awaitGate(request, occurrence)
-        }
-
-        fun beforeReturn(
-            request: SessionListRequest,
-            occurrence: Int = 0,
-            action: () -> Unit,
-        ) {
-            synchronized(requestMonitor) {
-                beforeReturnActions[RequestKey(request, occurrence)] = action
-            }
-        }
-
-        fun complete(
-            request: SessionListRequest,
-            page: SessionPage,
-            occurrence: Int = 0,
-        ) {
-            val gate = awaitGate(request, occurrence)
-            gate.result.complete(page)
-        }
-
-        private fun awaitGate(
-            request: SessionListRequest,
-            occurrence: Int,
-        ): RequestGate =
-            synchronized(requestMonitor) {
-                val deadline =
-                    System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ASYNC_TEST_TIMEOUT_MILLIS)
-                while (requestGates[request].orEmpty().size <= occurrence) {
-                    val remaining = deadline - System.nanoTime()
-                    if (remaining <= 0) {
-                        throw AssertionError(
-                            "Timed out waiting for request $request occurrence $occurrence.",
-                        )
-                    }
-                    TimeUnit.NANOSECONDS.timedWait(requestMonitor, remaining)
-                }
-                requestGates.getValue(request)[occurrence]
-            }
-
-        private data class RequestKey(
-            val request: SessionListRequest,
-            val occurrence: Int,
-        )
-
-        private class RequestGate {
-            val result = CompletableFuture<SessionPage>()
-        }
-
-        override fun createSession(title: String?): Session = error("not used")
-
-        override fun openSession(sessionId: SessionId): Session = error("not used")
-
-        override fun loadSessionHistory(sessionId: SessionId): SessionHistory = error("not used")
-
-        override fun renameSession(
-            sessionId: SessionId,
-            title: String,
-        ): Session = error("not used")
-
-        override fun deleteSession(sessionId: SessionId): Unit = error("not used")
-
-        override fun pinSession(sessionId: SessionId): SessionPinResult = error("not used")
-
-        override fun unpinSession(sessionId: SessionId): SessionPinResult = error("not used")
     }
 }

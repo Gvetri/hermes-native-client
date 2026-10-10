@@ -45,7 +45,6 @@ class GatewayCapabilityManifestTest {
             ),
             manifest.requirements.map { it.method },
         )
-        // The pinned `_CAPABILITY_ENDPOINTS` paths the client hardcodes its requests to.
         assertEquals(
             listOf(
                 "/api/sessions",
@@ -62,6 +61,10 @@ class GatewayCapabilityManifestTest {
             ),
             manifest.requirements.map { it.path },
         )
+        assertRequiredEndpointMap(manifest)
+    }
+
+    private fun assertRequiredEndpointMap(manifest: GatewayCapabilityManifest) {
         assertEquals(manifest.requirements.map { it.endpoint }.distinct().size, manifest.requiredEndpoints.size)
         assertEquals(GatewayEndpoint("GET", "/api/sessions"), manifest.requiredEndpoints.getValue("sessions"))
         assertEquals(

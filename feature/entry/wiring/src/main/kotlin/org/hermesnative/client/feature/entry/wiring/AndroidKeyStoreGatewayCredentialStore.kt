@@ -9,6 +9,8 @@ import org.hermesnative.client.feature.entry.data.EncryptedGatewayCredentialReco
 import org.hermesnative.client.feature.entry.domain.GatewayConnectionPersistenceException
 import org.hermesnative.client.feature.entry.domain.GatewayCredentialStore
 import java.io.File
+import java.io.IOException
+import java.security.GeneralSecurityException
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -42,14 +44,14 @@ class AndroidKeyStoreGatewayCredentialStore(
             val stream =
                 try {
                     atomicFile.startWrite()
-                } catch (error: Exception) {
+                } catch (error: IOException) {
                     throw GatewayConnectionPersistenceException(error)
                 }
             try {
                 stream.write(encryptedRecord)
                 stream.flush()
                 atomicFile.finishWrite(stream)
-            } catch (error: Exception) {
+            } catch (error: IOException) {
                 runCatching { atomicFile.failWrite(stream) }
                 throw GatewayConnectionPersistenceException(error)
             }
@@ -74,7 +76,9 @@ class AndroidKeyStoreGatewayCredentialStore(
             try {
                 val keyStore = loadKeyStore()
                 if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)
-            } catch (error: Exception) {
+            } catch (error: GeneralSecurityException) {
+                if (hasCredentialRecord) failure = error
+            } catch (error: IOException) {
                 if (hasCredentialRecord) failure = error
             }
             failure?.let { throw GatewayConnectionPersistenceException(it) }
@@ -83,7 +87,7 @@ class AndroidKeyStoreGatewayCredentialStore(
 
     private fun loadKey(): SecretKey =
         loadKeyStore().getKey(KEY_ALIAS, null) as? SecretKey
-            ?: throw IllegalStateException("Gateway credential key is unavailable.")
+            ?: error("Gateway credential key is unavailable.")
 
     private fun loadOrCreateKey(): SecretKey {
         val keyStore = loadKeyStore()
@@ -97,7 +101,7 @@ class AndroidKeyStoreGatewayCredentialStore(
                         .Builder(
                             KEY_ALIAS,
                             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-                        ).setKeySize(256)
+                        ).setKeySize(KEY_SIZE_BITS)
                         .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                         .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                         .setRandomizedEncryptionRequired(true)
@@ -116,6 +120,7 @@ class AndroidKeyStoreGatewayCredentialStore(
         const val KEY_ALIAS = "gateway_credential_key_v1"
 
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val KEY_SIZE_BITS = 256
         private val storageLock = Any()
     }
 }

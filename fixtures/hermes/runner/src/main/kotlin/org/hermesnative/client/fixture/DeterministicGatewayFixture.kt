@@ -5,8 +5,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
+
+private const val READINESS_TIMEOUT_MILLIS = 1_000
+private const val HTTP_SUCCESS_FIRST = 200
+private const val HTTP_SUCCESS_LAST = 399
 
 /** Lifecycle stages exposed to deterministic integration tests. */
 enum class FixtureLifecycleState {
@@ -114,32 +119,32 @@ class DeterministicGatewayFixture(
             }
             requireLocalEndpoint(startedProcess.endpoint)
             lifecycleState = FixtureLifecycleState.STARTED
-        } catch (error: Throwable) {
-            val startupFailure =
-                if (error is FixtureStartupException) {
-                    error
-                } else {
-                    FixtureStartupException("Deterministic Gateway fixture startup failed.", error)
-                }
-            val startedProcess = process
-            if (startedProcess != null) {
-                var stopFailed = false
-                try {
-                    startedProcess.stop()
-                } catch (stopError: Throwable) {
-                    stopFailed = true
-                    startupFailure.addSuppressed(stopError)
-                }
-                if (!stopFailed && !startedProcess.isRunning) {
-                    process = null
-                } else if (startedProcess.isRunning) {
-                    startupFailure.addSuppressed(
-                        IllegalStateException("Deterministic Gateway process did not stop after startup failure."),
-                    )
-                }
-            }
-            throw startupFailure
+        } catch (error: FixtureStartupException) {
+            failStartup(error)
+        } catch (expectedError: Throwable) {
+            failStartup(FixtureStartupException("Deterministic Gateway fixture startup failed.", expectedError))
         }
+    }
+
+    private fun failStartup(startupFailure: FixtureStartupException): Nothing {
+        val startedProcess = process
+        if (startedProcess != null) {
+            var stopFailed = false
+            try {
+                startedProcess.stop()
+            } catch (expectedStopError: Throwable) {
+                stopFailed = true
+                startupFailure.addSuppressed(expectedStopError)
+            }
+            if (!stopFailed && !startedProcess.isRunning) {
+                process = null
+            } else if (startedProcess.isRunning) {
+                startupFailure.addSuppressed(
+                    IllegalStateException("Deterministic Gateway process did not stop after startup failure."),
+                )
+            }
+        }
+        throw startupFailure
     }
 
     fun awaitReady() {
@@ -149,13 +154,12 @@ class DeterministicGatewayFixture(
         try {
             readinessChecker.verify(requireProcess(), requireNotNull(descriptor))
             lifecycleState = FixtureLifecycleState.READY
-        } catch (error: Throwable) {
-            if (error is FixtureReadinessException) {
-                throw error
-            }
+        } catch (error: FixtureReadinessException) {
+            throw error
+        } catch (expectedError: Throwable) {
             throw FixtureReadinessException(
-                "Deterministic Gateway fixture readiness failed: ${error.message}",
-                error,
+                "Deterministic Gateway fixture readiness failed: ${expectedError.message}",
+                expectedError,
             )
         }
     }
@@ -166,67 +170,72 @@ class DeterministicGatewayFixture(
         }
         resetAndVerifySyntheticState()
         lifecycleState = FixtureLifecycleState.TESTING
-        var testFailure: Throwable? = null
-        return try {
-            val activeProcess = requireProcess()
-            block(FixtureTestContext(activeProcess.endpoint, activeProcess.provenanceValue, syntheticState))
-        } catch (error: Throwable) {
-            testFailure = error
-            throw error
-        } finally {
-            var cleanupFailure: FixtureCleanupException? = null
-            try {
-                resetAndVerifySyntheticState()
-            } catch (error: Throwable) {
-                cleanupFailure =
-                    FixtureCleanupException(
-                        "Synthetic state reset after the fixture test failed.",
-                        listOf(error),
-                    )
+        val executed =
+            runCatching {
+                val activeProcess = requireProcess()
+                block(FixtureTestContext(activeProcess.endpoint, activeProcess.provenanceValue, syntheticState))
             }
-            lifecycleState = FixtureLifecycleState.READY
-            if (cleanupFailure != null) {
-                if (testFailure != null) {
-                    testFailure.addSuppressed(cleanupFailure)
-                } else {
-                    throw cleanupFailure
-                }
+        val cleanupFailure = resetSyntheticStateAfterTest()
+        lifecycleState = FixtureLifecycleState.READY
+        return executed
+            .onSuccess { result ->
+                if (cleanupFailure != null) throw cleanupFailure
+                result
             }
-        }
+            .getOrElse { error ->
+                cleanupFailure?.let(error::addSuppressed)
+                throw error
+            }
     }
 
-    fun <T> execute(block: (FixtureTestContext) -> T): T {
-        var testFailure: Throwable? = null
-        return try {
-            setup()
-            awaitReady()
-            runTest(block)
-        } catch (error: Throwable) {
-            testFailure = error
-            throw error
-        } finally {
-            try {
-                teardown()
-            } catch (cleanupFailure: FixtureCleanupException) {
-                if (testFailure != null) {
-                    testFailure.addSuppressed(cleanupFailure)
-                } else {
-                    throw cleanupFailure
-                }
-            }
+    private fun resetSyntheticStateAfterTest(): FixtureCleanupException? =
+        try {
+            resetAndVerifySyntheticState()
+            null
+        } catch (expectedError: Throwable) {
+            FixtureCleanupException(
+                "Synthetic state reset after the fixture test failed.",
+                listOf(expectedError),
+            )
         }
+
+    fun <T> execute(block: (FixtureTestContext) -> T): T {
+        val executed =
+            runCatching {
+                setup()
+                awaitReady()
+                runTest(block)
+            }
+        return executed.fold(
+            onSuccess = { result ->
+                teardown()
+                result
+            },
+            onFailure = { error ->
+                try {
+                    teardown()
+                } catch (cleanupFailure: FixtureCleanupException) {
+                    error.addSuppressed(cleanupFailure)
+                }
+                throw error
+            },
+        )
     }
 
     fun teardown() {
-        if (lifecycleState == FixtureLifecycleState.TORN_DOWN && process == null && syntheticState.snapshot().isEmpty()) {
+        if (
+            lifecycleState == FixtureLifecycleState.TORN_DOWN &&
+            process == null &&
+            syntheticState.snapshot().isEmpty()
+        ) {
             return
         }
 
         val cleanupFailures = mutableListOf<Throwable>()
         try {
             resetAndVerifySyntheticState()
-        } catch (error: Throwable) {
-            cleanupFailures += error
+        } catch (expectedError: Throwable) {
+            cleanupFailures += expectedError
         }
 
         val activeProcess = process
@@ -234,9 +243,9 @@ class DeterministicGatewayFixture(
             var stopFailed = false
             try {
                 activeProcess.stop()
-            } catch (error: Throwable) {
+            } catch (expectedError: Throwable) {
                 stopFailed = true
-                cleanupFailures += error
+                cleanupFailures += expectedError
             }
             if (activeProcess.isRunning) {
                 cleanupFailures += IllegalStateException("Deterministic Gateway process did not stop.")
@@ -252,7 +261,9 @@ class DeterministicGatewayFixture(
         }
     }
 
-    private fun requireProcess(): GatewayProcess = requireNotNull(process) { "Deterministic Gateway fixture is not started." }
+    private fun requireProcess(): GatewayProcess {
+        return requireNotNull(process) { "Deterministic Gateway fixture is not started." }
+    }
 
     private fun resetAndVerifySyntheticState() {
         syntheticState.reset()
@@ -269,7 +280,9 @@ class DeterministicGatewayFixture(
     }
 
     companion object {
-        fun fromDescriptor(descriptorFile: File): DeterministicGatewayFixture = DeterministicGatewayFixture(descriptorFile)
+        fun fromDescriptor(descriptorFile: File): DeterministicGatewayFixture {
+            return DeterministicGatewayFixture(descriptorFile)
+        }
     }
 }
 
@@ -302,7 +315,12 @@ private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
             try {
                 val root = Json.parseToJsonElement(capabilities.body).jsonObject
                 root["endpoints"]?.jsonObject ?: error("capability document has no 'endpoints' object")
-            } catch (error: Exception) {
+            } catch (error: IllegalArgumentException) {
+                throw FixtureReadinessException(
+                    "Capability check response is not a valid capability document.",
+                    error,
+                )
+            } catch (error: IllegalStateException) {
                 throw FixtureReadinessException(
                     "Capability check response is not a valid capability document.",
                     error,
@@ -324,14 +342,19 @@ private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
     private fun get(uri: URI): HttpResponse {
         val connection = uri.toURL().openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
-        connection.connectTimeout = 1_000
-        connection.readTimeout = 1_000
+        connection.connectTimeout = READINESS_TIMEOUT_MILLIS
+        connection.readTimeout = READINESS_TIMEOUT_MILLIS
         return try {
             val status = connection.responseCode
-            val stream = if (status in 200..399) connection.inputStream else connection.errorStream
+            val stream =
+                if (status in HTTP_SUCCESS_FIRST..HTTP_SUCCESS_LAST) {
+                    connection.inputStream
+                } else {
+                    connection.errorStream
+                }
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             HttpResponse(status, body)
-        } catch (error: Exception) {
+        } catch (error: IOException) {
             throw FixtureReadinessException("Readiness request to $uri failed.", error)
         } finally {
             connection.disconnect()

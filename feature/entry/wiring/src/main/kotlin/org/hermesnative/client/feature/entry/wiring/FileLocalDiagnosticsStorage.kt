@@ -19,7 +19,6 @@ class FileLocalDiagnosticsStorage(
 
     override fun read(): List<String> {
         if (!file.isFile) return emptyList()
-        // Everything after the last line terminator is an interrupted write, not a record.
         return file.readText().split('\n').dropLast(1).filter(String::isNotBlank)
     }
 

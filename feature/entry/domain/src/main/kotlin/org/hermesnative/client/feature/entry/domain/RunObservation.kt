@@ -25,8 +25,6 @@ fun String.toRunPresentationState(): RunPresentationState =
         "completing", "finalizing", "stopping" -> RunPresentationState.COMPLETING
         "completed", "complete", "succeeded", "success" -> RunPresentationState.SUCCEEDED
         "failed", "failure", "error" -> RunPresentationState.FAILED
-        // `interrupted` is a pinned terminal Run status: the Gateway restarted before the run
-        // settled, so the run did not complete and is never retried automatically.
         "cancelled", "canceled", "interrupted" -> RunPresentationState.CANCELLED
         else -> RunPresentationState.UNCERTAIN
     }
@@ -65,9 +63,8 @@ object RunEventStateTransition {
         current: RunObservationState,
         event: RunEvent,
     ): RunObservationState {
-        if (event.runId != current.run.id) return current
+        if (event.runId != current.run.id || alreadyProcessed(current, event)) return current
         val eventId = event.eventId?.takeIf(String::isNotBlank)
-        if (eventId != null && eventId in current.processedEventIds) return current
 
         val processedEventIds =
             if (eventId == null) {
@@ -89,10 +86,23 @@ object RunEventStateTransition {
             run = nextRun,
             state = nextState,
             responseText = nextText,
-            isStreaming = if (terminal || nextState == RunPresentationState.UNCERTAIN) false else current.isStreaming || event.text != null,
+            isStreaming =
+                if (terminal || nextState == RunPresentationState.UNCERTAIN) {
+                    false
+                } else {
+                    current.isStreaming || event.text != null
+                },
             isStreamInterrupted = event.type == RunEventType.INTERRUPTED,
             processedEventIds = processedEventIds,
         )
+    }
+
+    private fun alreadyProcessed(
+        current: RunObservationState,
+        event: RunEvent,
+    ): Boolean {
+        val eventId = event.eventId?.takeIf(String::isNotBlank)
+        return eventId != null && eventId in current.processedEventIds
     }
 
     fun interrupted(current: RunObservationState): RunObservationState =

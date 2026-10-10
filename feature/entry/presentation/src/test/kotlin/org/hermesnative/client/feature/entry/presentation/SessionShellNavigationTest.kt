@@ -122,7 +122,8 @@ class SessionShellNavigationTest {
                             session = session("first", "First Session"),
                             messages = listOf(message("message-1", "user", "Conversation message")),
                         ),
-                    sessionMutations = mapOf(sessionId to SessionMutationUiState(rename = SessionRenameUiState("First Session"))),
+                    sessionMutations =
+                        mapOf(sessionId to SessionMutationUiState(rename = SessionRenameUiState("First Session"))),
                 ),
             ),
             events::add,
@@ -186,7 +187,8 @@ class SessionShellNavigationTest {
             entryState(
                 SessionListUiState(
                     sessions = listOf(session("first", "First Session")),
-                    sessionMutations = mapOf(id to SessionMutationUiState(rename = SessionRenameUiState("First Session"))),
+                    sessionMutations =
+                        mapOf(id to SessionMutationUiState(rename = SessionRenameUiState("First Session"))),
                 ),
             ),
             {},
@@ -263,11 +265,13 @@ class SessionShellNavigationTest {
         }
 
         dispatchImeInsets(isVisible = true)
-        val refreshBottomWhileVisible = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
+        val refreshBottomWhileVisible =
+            composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
         assertTrue(refreshBottomWhileVisible <= windowHeight - imeInset + 1f)
 
         dispatchImeInsets(isVisible = false)
-        val refreshBottomAfterHidden = composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
+        val refreshBottomAfterHidden =
+            composeTestRule.onNodeWithText("Refresh").fetchSemanticsNode().boundsInWindow.bottom
         assertTrue(
             "the controls must return to the full pane when the IME is hidden",
             refreshBottomAfterHidden - refreshBottomWhileVisible >= imeInset * 0.75f,

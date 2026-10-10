@@ -76,7 +76,9 @@ class MessageSubmissionStateHolderTest {
                         session.id to
                             SessionHistory(
                                 session.id,
-                                listOf(GatewayHistoryMessage("run-message", "user", "Run this", RunId("run-1"), "running")),
+                                listOf(
+                                    GatewayHistoryMessage("run-message", "user", "Run this", RunId("run-1"), "running"),
+                                ),
                             ),
                     ),
             )
@@ -599,8 +601,6 @@ class MessageSubmissionStateHolderTest {
             assertTrue(gateway.runFinished.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS))
 
             holder.onEvent(EntryUiEvent.SessionClicked(session.id))
-            // The reopened Session appears before the failed submission's restore lands. Wait for the
-            // restored error category so the assertions read the settled state instead of racing it.
             awaitState(holder) {
                 it.sessionList?.openedSession?.let { opened ->
                     opened.session.id == session.id &&
@@ -642,7 +642,8 @@ class MessageSubmissionStateHolderTest {
     private fun holder(
         gateway: FakeGateway,
         dispatcher: CoroutineDispatcher = Dispatchers.Unconfined,
-        repository: GatewayConnectionRepository = DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
+        repository: GatewayConnectionRepository =
+            DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
         uncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
     ): EntryStateHolder =
         EntryStateHolder(
@@ -654,9 +655,7 @@ class MessageSubmissionStateHolderTest {
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
-            removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-            runSubmissionUncertaintyStore = uncertaintyStore,
-            onRunSubmissionSettled = gateway.runFinished::countDown,
+            dependencies = submissionHolderDependencies(repository, uncertaintyStore, gateway.runFinished::countDown),
         )
 
     private fun connect(
@@ -759,7 +758,9 @@ class MessageSubmissionStateHolderTest {
             runRequests += sessionId to input
             if (blockRunCreation) {
                 runStarted.countDown()
-                check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) { "Timed out waiting for Run release." }
+                check(releaseRun.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                    "Timed out waiting for Run release."
+                }
             }
             return runResults.removeFirst().getOrThrow()
         }
@@ -778,7 +779,7 @@ class MessageSubmissionStateHolderTest {
             attemptId: String?,
         ): Boolean {
             addCount += 1
-            if (addCount > 1) throw IllegalStateException("test persistence failure")
+            if (addCount > 1) error("test persistence failure")
             return true
         }
 
@@ -790,3 +791,14 @@ class MessageSubmissionStateHolderTest {
         override fun contains(key: PendingRunSubmissionKey): Boolean = addCount > 0
     }
 }
+
+private fun submissionHolderDependencies(
+    repository: GatewayConnectionRepository,
+    uncertaintyStore: RunSubmissionUncertaintyStore,
+    onRunSubmissionSettled: () -> Unit,
+): EntryStateHolderDependencies =
+    EntryStateHolderDependencies(
+        removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+        runSubmissionUncertaintyStore = uncertaintyStore,
+        onRunSubmissionSettled = onRunSubmissionSettled,
+    )

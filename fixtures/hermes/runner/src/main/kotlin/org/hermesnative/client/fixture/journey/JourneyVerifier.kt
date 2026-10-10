@@ -24,16 +24,16 @@ import javax.net.ssl.TrustManagerFactory
  * Arguments: <telemetry-url> <scenario-name> [keystore-file] [keystore-password]
  */
 fun main(args: Array<String>) {
-    require(args.size in 2..4) { "Usage: JourneyVerifier <telemetry-url> <scenario-name> [keystore-file] [keystore-password]" }
+    require(args.size in MIN_ARGUMENT_COUNT..MAX_ARGUMENT_COUNT) {
+        "Usage: JourneyVerifier <telemetry-url> <scenario-name> [keystore-file] [keystore-password]"
+    }
     val telemetryUrl = URI.create(args[0])
     val scenarioName = args[1]
     val keystoreFile = args.getOrNull(2)?.let(::File)
-    val keystorePassword = args.getOrNull(3) ?: DEFAULT_KEYSTORE_PASSWORD
+    val keystorePassword = args.getOrNull(KEYSTORE_PASSWORD_ARG_INDEX) ?: DEFAULT_KEYSTORE_PASSWORD
     val telemetry = fetchTelemetry(telemetryUrl, keystoreFile, keystorePassword)
     JourneyInvariants.verify(scenarioName, telemetry)
     if (scenarioName == "active-run-isolation") {
-        // The remote Run must still be running after the switch away and back;
-        // the live status is read from the still-running fake Gateway.
         val run =
             fetchTelemetry(
                 telemetryUrl.resolve("/v1/runs/${JourneyInvariants.ACTIVE_RUN_ID}"),
@@ -61,7 +61,8 @@ internal fun fetchTelemetry(
         if (telemetryUrl.scheme == "https") {
             val keyStore =
                 KeyStore.getInstance("PKCS12").apply {
-                    requireNotNull(keystoreFile).inputStream().use { input -> load(input, keystorePassword.toCharArray()) }
+                    requireNotNull(keystoreFile).inputStream()
+                        .use { input -> load(input, keystorePassword.toCharArray()) }
                 }
             val trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
             trustManagerFactory.init(keyStore)
@@ -75,24 +76,67 @@ internal fun fetchTelemetry(
         } else {
             telemetryUrl.toURL().openConnection() as HttpURLConnection
         }
-    connection.connectTimeout = 5_000
-    connection.readTimeout = 5_000
+    connection.connectTimeout = TELEMETRY_TIMEOUT_MILLIS
+    connection.readTimeout = TELEMETRY_TIMEOUT_MILLIS
     connection.requestMethod = "GET"
-    // Telemetry reads are infrastructure probes; the fixture serves them
-    // without recording them as application traffic.
     connection.setRequestProperty("X-Journey-Probe", "verifier")
     if (connection is HttpsURLConnection) {
-        // The journey certificate is fixed to 127.0.0.1/10.0.2.2 loopback SANs.
         connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
     }
     return try {
-        check(connection.responseCode == 200) { "Telemetry endpoint returned HTTP ${connection.responseCode}." }
+        check(connection.responseCode == HTTP_OK) { "Telemetry endpoint returned HTTP ${connection.responseCode}." }
         val body = connection.inputStream.bufferedReader().use { it.readText() }
         Json.parseToJsonElement(body).jsonObject
     } finally {
         connection.disconnect()
     }
 }
+
+private fun sseFor(
+    telemetry: JsonObject,
+    runId: String,
+): RunConnectionTelemetry {
+    val run =
+        telemetry["sse_connections"]?.jsonObject?.get(runId)?.jsonObject
+            ?: error("Telemetry has no SSE connection record for run '$runId'.")
+    return RunConnectionTelemetry(
+        opened = run.getValue("opened").jsonPrimitive.int,
+        closed = run.getValue("closed").jsonPrimitive.int,
+    )
+}
+
+private fun runCreatesFor(
+    telemetry: JsonObject,
+    sessionId: String,
+): Int =
+    telemetry["run_creates"]?.jsonObject?.get(sessionId)?.jsonPrimitive?.int
+        ?: error("Telemetry has no run-create record for session '$sessionId'.")
+
+private fun runStatusRequests(telemetry: JsonObject): Int {
+    return telemetry.getValue("run_status_requests").jsonPrimitive.int
+}
+
+private fun interruptedRunIds(telemetry: JsonObject): Set<String> =
+    telemetry["interrupted_run_ids"]?.jsonArray?.map { it.jsonPrimitive.content }?.toSet().orEmpty()
+
+private fun requireConnectionAttempted(telemetry: JsonObject) {
+    val requests = telemetry["requests"]?.jsonArray.orEmpty()
+    check(requests.isNotEmpty()) { "The journey Gateway recorded no application requests." }
+    val paths = recordedRequestPaths(telemetry)
+    check(paths.any { it.startsWith("/v1/") }) {
+        "The application never issued a Gateway API request."
+    }
+}
+
+private fun recordedRequestPaths(telemetry: JsonObject): List<String> =
+    telemetry["requests"]?.jsonArray.orEmpty().mapNotNull { request ->
+        request.jsonObject["path"]?.jsonPrimitive?.content
+    }
+
+private fun recordedRequestMethods(telemetry: JsonObject): List<String> =
+    telemetry["requests"]?.jsonArray.orEmpty().mapNotNull { request ->
+        request.jsonObject["method"]?.jsonPrimitive?.content
+    }
 
 internal object JourneyInvariants {
     fun verify(
@@ -103,66 +147,31 @@ internal object JourneyInvariants {
             "connection" -> verifyConnection(telemetry)
             "session-list-first" -> verifySessionListFirst(telemetry)
             "empty-sessions" -> verifySessionListFirst(telemetry)
-            "session-lifecycle" -> verifySessionLifecycle(telemetry)
+            "session-lifecycle" -> JourneySessionLifecycleInvariants.verifySessionLifecycle(telemetry)
             "pagination-search" -> verifyPaginationSearch(telemetry)
-            "active-run-isolation" -> verifyActiveRunIsolation(telemetry)
-            "streaming" -> verifyStreaming(telemetry)
-            "interrupted-sse-refetch" -> verifyInterruptedSseRefetch(telemetry)
-            "terminal-success" -> verifyTerminal(telemetry)
-            "terminal-failure" -> verifyTerminal(telemetry)
-            "explicit-retry" -> verifyExplicitRetry(telemetry)
             "stale-recoverable" -> verifyStaleRecoverable(telemetry)
             "markdown-links" -> verifyMarkdownLinks(telemetry)
+            "accessibility-controls" -> verifyAccessibilityControls(telemetry)
             "capabilities-additive" -> verifyCapabilitiesAdditive(telemetry)
             "capabilities-missing-required" -> verifyCapabilitiesBoundary(telemetry)
-            "accessibility-controls" -> verifyAccessibilityControls(telemetry)
+            else -> verifyAdditionalScenario(scenarioName, telemetry)
+        }
+    }
+
+    private fun verifyAdditionalScenario(
+        scenarioName: String,
+        telemetry: JsonObject,
+    ) {
+        when (scenarioName) {
+            "active-run-isolation" -> JourneyRunInvariants.verifyActiveRunIsolation(telemetry)
+            "streaming" -> JourneyRunInvariants.verifyStreaming(telemetry)
+            "interrupted-sse-refetch" -> JourneyRunInvariants.verifyInterruptedSseRefetch(telemetry)
+            "terminal-success" -> JourneyRunInvariants.verifyTerminal(telemetry)
+            "terminal-failure" -> JourneyRunInvariants.verifyTerminal(telemetry)
+            "explicit-retry" -> JourneyRunInvariants.verifyExplicitRetry(telemetry)
             else -> error("No journey invariants declared for scenario '$scenarioName'.")
         }
     }
-
-    private fun sseFor(
-        telemetry: JsonObject,
-        runId: String,
-    ): RunConnectionTelemetry {
-        val run =
-            telemetry["sse_connections"]?.jsonObject?.get(runId)?.jsonObject
-                ?: error("Telemetry has no SSE connection record for run '$runId'.")
-        return RunConnectionTelemetry(
-            opened = run.getValue("opened").jsonPrimitive.int,
-            closed = run.getValue("closed").jsonPrimitive.int,
-        )
-    }
-
-    private fun runCreatesFor(
-        telemetry: JsonObject,
-        sessionId: String,
-    ): Int =
-        telemetry["run_creates"]?.jsonObject?.get(sessionId)?.jsonPrimitive?.int
-            ?: error("Telemetry has no run-create record for session '$sessionId'.")
-
-    private fun runStatusRequests(telemetry: JsonObject): Int = telemetry.getValue("run_status_requests").jsonPrimitive.int
-
-    private fun interruptedRunIds(telemetry: JsonObject): Set<String> =
-        telemetry["interrupted_run_ids"]?.jsonArray?.map { it.jsonPrimitive.content }?.toSet().orEmpty()
-
-    private fun requireConnectionAttempted(telemetry: JsonObject) {
-        val requests = telemetry["requests"]?.jsonArray.orEmpty()
-        check(requests.isNotEmpty()) { "The journey Gateway recorded no application requests." }
-        val paths = recordedRequestPaths(telemetry)
-        check(paths.any { it.startsWith("/v1/") }) {
-            "The application never issued a Gateway API request."
-        }
-    }
-
-    private fun recordedRequestPaths(telemetry: JsonObject): List<String> =
-        telemetry["requests"]?.jsonArray.orEmpty().mapNotNull { request ->
-            request.jsonObject["path"]?.jsonPrimitive?.content
-        }
-
-    private fun recordedRequestMethods(telemetry: JsonObject): List<String> =
-        telemetry["requests"]?.jsonArray.orEmpty().mapNotNull { request ->
-            request.jsonObject["method"]?.jsonPrimitive?.content
-        }
 
     private fun verifyConnection(telemetry: JsonObject) {
         requireConnectionAttempted(telemetry)
@@ -172,144 +181,8 @@ internal object JourneyInvariants {
         requireConnectionAttempted(telemetry)
     }
 
-    private fun verifySessionLifecycle(telemetry: JsonObject) {
-        requireConnectionAttempted(telemetry)
-        val requests =
-            telemetry.getValue("requests").jsonArray.map { request ->
-                val fields = request.jsonObject
-                fields.getValue("method").jsonPrimitive.content to fields.getValue("path").jsonPrimitive.content
-            }
-        val mutations = requests.filter { (method, _) -> method != "GET" }
-        // Create once, then explicitly rename/pin/unpin/delete from the conversation
-        // and from the list. Menu dismissal and cancelled confirmations add no writes.
-        val expected =
-            listOf(
-                "POST" to "/api/sessions",
-                "PATCH" to "/api/sessions/synthetic-created-session-1",
-                "PATCH" to "/api/sessions/synthetic-created-session-1",
-                "PATCH" to "/api/sessions/synthetic-created-session-1",
-                "DELETE" to "/api/sessions/synthetic-created-session-1",
-                "PATCH" to "/api/sessions/session-alpha",
-                "PATCH" to "/api/sessions/session-alpha",
-                "PATCH" to "/api/sessions/session-alpha",
-                "DELETE" to "/api/sessions/session-alpha",
-            )
-        check(mutations == expected) {
-            "Session management writes did not match the explicitly confirmed journey actions: $mutations"
-        }
-        val operations =
-            telemetry.getValue("session_mutations").jsonArray.map { entry ->
-                val fields = entry.jsonObject
-                fields.getValue("operation").jsonPrimitive.content to fields.getValue("session_id").jsonPrimitive.content
-            }
-        val expectedOperations =
-            listOf(
-                "create" to "synthetic-created-session-1",
-                "rename" to "synthetic-created-session-1",
-                "pin" to "synthetic-created-session-1",
-                "unpin" to "synthetic-created-session-1",
-                "delete" to "synthetic-created-session-1",
-                "rename" to "session-alpha",
-                "pin" to "session-alpha",
-                "unpin" to "session-alpha",
-                "delete" to "session-alpha",
-            )
-        check(operations == expectedOperations) { "The confirmed Session operation types or targets did not match the journey." }
-        // Read-only refreshes after the two cancellation groups prove that no write
-        // happened during menu dismissal or cancellation, before confirmed actions.
-        var writesSeen = 0
-        val checkpoints =
-            buildList {
-                requests.forEach { (method, path) ->
-                    if (method != "GET") {
-                        writesSeen += 1
-                    } else {
-                        when (path) {
-                            "/api/sessions" -> add("list" to writesSeen)
-                            "/api/sessions/synthetic-created-session-1/messages" -> add("history" to writesSeen)
-                        }
-                    }
-                }
-            }
-        check(
-            checkpoints ==
-                listOf(
-                    "list" to 0,
-                    "history" to 1,
-                    "list" to 1,
-                    "history" to 1,
-                    "list" to 3,
-                    "list" to 4,
-                    "list" to 5,
-                    "list" to 7,
-                    "list" to 8,
-                ),
-        ) { "Session cancellation checkpoints recorded missing reads or premature writes: $checkpoints" }
-    }
-
     private fun verifyPaginationSearch(telemetry: JsonObject) {
         requireConnectionAttempted(telemetry)
-    }
-
-    private fun verifyActiveRunIsolation(telemetry: JsonObject) {
-        // The journey observes the active Run once, refreshes history (which
-        // must not open a duplicate SSE observation), switches to another
-        // Session (which must not cancel the Run), and returns (re-observing
-        // exactly once). Opened == 2 proves the refresh added no duplicate;
-        // closed == 1 proves only the Session switch closed the stream.
-        val sse = sseFor(telemetry, ACTIVE_RUN_ID)
-        check(sse.opened == 2) {
-            "Active Run was observed ${sse.opened} times; expected 2 (initial plus re-open, no refresh duplicate)."
-        }
-        check(sse.closed == 1) { "Active Run observation closed ${sse.closed} times; expected exactly 1 (Session switch)." }
-        check(runStatusRequests(telemetry) >= 1) { "The client did not re-check the active Run status." }
-        check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
-            "The client submitted the active Run more than once."
-        }
-        check(recordedRequestPaths(telemetry).none { it.contains("cancel", ignoreCase = true) }) {
-            "The client attempted to cancel the active Run while switching Sessions."
-        }
-        check(recordedRequestMethods(telemetry).none { it.equals("DELETE", ignoreCase = true) }) {
-            "The client issued a DELETE request while switching Sessions."
-        }
-    }
-
-    private fun verifyStreaming(telemetry: JsonObject) {
-        val sse = sseFor(telemetry, STREAMING_RUN_ID)
-        check(sse.opened == 1) { "Streaming Run was observed ${sse.opened} times; expected exactly 1." }
-        check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
-            "The client submitted the streaming Run more than once."
-        }
-    }
-
-    private fun verifyInterruptedSseRefetch(telemetry: JsonObject) {
-        val sse = sseFor(telemetry, INTERRUPTED_RUN_ID)
-        check(sse.opened == 1) { "Interrupted Run was observed ${sse.opened} times; expected exactly 1." }
-        check(INTERRUPTED_RUN_ID in interruptedRunIds(telemetry)) { "The Gateway did not record the interrupted Run." }
-        check(runStatusRequests(telemetry) >= 1) { "The client did not refetch authoritative Run status." }
-        check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
-            "The client re-submitted the interrupted Run."
-        }
-    }
-
-    private fun verifyTerminal(telemetry: JsonObject) {
-        requireConnectionAttempted(telemetry)
-        check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile the terminal Run." }
-        val submissions = runCreatesFor(telemetry, ACTIVE_SESSION_ID)
-        check(submissions == 1) {
-            "The client submitted the terminal Run $submissions times; expected exactly 1 (no duplicate retry submissions)."
-        }
-    }
-
-    private fun verifyExplicitRetry(telemetry: JsonObject) {
-        // The pinned Gateway's history carries no Run linkage, so the client
-        // retries only the failed Run it created itself, reusing the original
-        // input it still holds in memory. The journey proves exactly one
-        // explicit retry submission over the Run resource.
-        check(runCreatesFor(telemetry, RETRY_SESSION_ID) == 2) {
-            "The client did not submit exactly two Run creations (initial run plus one explicit retry)."
-        }
-        check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile Run status." }
     }
 
     private fun verifyStaleRecoverable(telemetry: JsonObject) {
@@ -325,8 +198,6 @@ internal object JourneyInvariants {
     }
 
     private fun verifyCapabilitiesAdditive(telemetry: JsonObject) {
-        // The additive journey reaches a succeeded terminal state, so its Run
-        // submission is counted exactly like every other terminal journey.
         requireConnectionAttempted(telemetry)
         check(runCreatesFor(telemetry, ACTIVE_SESSION_ID) == 1) {
             "The client submitted the additive Run more than once."
@@ -344,4 +215,158 @@ internal object JourneyInvariants {
     const val RETRY_SESSION_ID = "session-retry"
 }
 
-private const val DEFAULT_KEYSTORE_PASSWORD = "journey-fixture"
+private object JourneySessionLifecycleInvariants {
+    private val expectedSessionMutations =
+        listOf(
+            "POST" to "/api/sessions",
+            "PATCH" to "/api/sessions/synthetic-created-session-1",
+            "PATCH" to "/api/sessions/synthetic-created-session-1",
+            "PATCH" to "/api/sessions/synthetic-created-session-1",
+            "DELETE" to "/api/sessions/synthetic-created-session-1",
+            "PATCH" to "/api/sessions/session-alpha",
+            "PATCH" to "/api/sessions/session-alpha",
+            "PATCH" to "/api/sessions/session-alpha",
+            "DELETE" to "/api/sessions/session-alpha",
+        )
+
+    private val expectedSessionOperations =
+        listOf(
+            "create" to "synthetic-created-session-1",
+            "rename" to "synthetic-created-session-1",
+            "pin" to "synthetic-created-session-1",
+            "unpin" to "synthetic-created-session-1",
+            "delete" to "synthetic-created-session-1",
+            "rename" to "session-alpha",
+            "pin" to "session-alpha",
+            "unpin" to "session-alpha",
+            "delete" to "session-alpha",
+        )
+
+    private val expectedSessionCheckpoints =
+        listOf(
+            "list" to 0,
+            "history" to 1,
+            "list" to 1,
+            "history" to 1,
+            "list" to LIST_CHECKPOINT_AFTER_CREATED_SESSION_PIN,
+            "list" to LIST_CHECKPOINT_AFTER_CREATED_SESSION_UNPIN,
+            "list" to LIST_CHECKPOINT_AFTER_CREATED_SESSION_DELETE,
+            "list" to LIST_CHECKPOINT_AFTER_ALPHA_SESSION_PIN,
+            "list" to LIST_CHECKPOINT_AFTER_ALPHA_SESSION_UNPIN,
+        )
+
+    internal fun verifySessionLifecycle(telemetry: JsonObject) {
+        requireConnectionAttempted(telemetry)
+        val requests = recordedRequests(telemetry)
+        val mutations = requests.filter { (method, _) -> method != "GET" }
+        check(mutations == expectedSessionMutations) {
+            "Session management writes did not match the explicitly confirmed journey actions: $mutations"
+        }
+        val operations = recordedSessionOperations(telemetry)
+        check(operations == expectedSessionOperations) {
+            "The confirmed Session operation types or targets did not match the journey."
+        }
+        val checkpoints = sessionReadCheckpoints(requests)
+        check(checkpoints == expectedSessionCheckpoints) {
+            "Session cancellation checkpoints recorded missing reads or premature writes: $checkpoints"
+        }
+    }
+
+    private fun recordedRequests(telemetry: JsonObject): List<Pair<String, String>> =
+        telemetry.getValue("requests").jsonArray.map { request ->
+            val fields = request.jsonObject
+            fields.getValue("method").jsonPrimitive.content to fields.getValue("path").jsonPrimitive.content
+        }
+
+    private fun recordedSessionOperations(telemetry: JsonObject): List<Pair<String, String>> =
+        telemetry.getValue("session_mutations").jsonArray.map { entry ->
+            val fields = entry.jsonObject
+            fields.getValue("operation").jsonPrimitive.content to fields.getValue("session_id").jsonPrimitive.content
+        }
+
+    private fun sessionReadCheckpoints(requests: List<Pair<String, String>>): List<Pair<String, Int>> {
+        var writesSeen = 0
+        return buildList {
+            requests.forEach { (method, path) ->
+                if (method != "GET") {
+                    writesSeen += 1
+                } else {
+                    when (path) {
+                        "/api/sessions" -> add("list" to writesSeen)
+                        "/api/sessions/synthetic-created-session-1/messages" -> add("history" to writesSeen)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private object JourneyRunInvariants {
+    internal fun verifyActiveRunIsolation(telemetry: JsonObject) {
+        val sse = sseFor(telemetry, JourneyInvariants.ACTIVE_RUN_ID)
+        check(sse.opened == 2) {
+            "Active Run was observed ${sse.opened} times; expected 2 (initial plus re-open, no refresh duplicate)."
+        }
+        check(sse.closed == 1) {
+            "Active Run observation closed ${sse.closed} times; expected exactly 1 (Session switch)."
+        }
+        check(runStatusRequests(telemetry) >= 1) { "The client did not re-check the active Run status." }
+        check(runCreatesFor(telemetry, JourneyInvariants.ACTIVE_SESSION_ID) == 1) {
+            "The client submitted the active Run more than once."
+        }
+        check(recordedRequestPaths(telemetry).none { it.contains("cancel", ignoreCase = true) }) {
+            "The client attempted to cancel the active Run while switching Sessions."
+        }
+        check(recordedRequestMethods(telemetry).none { it.equals("DELETE", ignoreCase = true) }) {
+            "The client issued a DELETE request while switching Sessions."
+        }
+    }
+
+    internal fun verifyStreaming(telemetry: JsonObject) {
+        val sse = sseFor(telemetry, JourneyInvariants.STREAMING_RUN_ID)
+        check(sse.opened == 1) { "Streaming Run was observed ${sse.opened} times; expected exactly 1." }
+        check(runCreatesFor(telemetry, JourneyInvariants.ACTIVE_SESSION_ID) == 1) {
+            "The client submitted the streaming Run more than once."
+        }
+    }
+
+    internal fun verifyInterruptedSseRefetch(telemetry: JsonObject) {
+        val sse = sseFor(telemetry, JourneyInvariants.INTERRUPTED_RUN_ID)
+        check(sse.opened == 1) { "Interrupted Run was observed ${sse.opened} times; expected exactly 1." }
+        check(JourneyInvariants.INTERRUPTED_RUN_ID in interruptedRunIds(telemetry)) {
+            "The Gateway did not record the interrupted Run."
+        }
+        check(runStatusRequests(telemetry) >= 1) { "The client did not refetch authoritative Run status." }
+        check(runCreatesFor(telemetry, JourneyInvariants.ACTIVE_SESSION_ID) == 1) {
+            "The client re-submitted the interrupted Run."
+        }
+    }
+
+    internal fun verifyTerminal(telemetry: JsonObject) {
+        requireConnectionAttempted(telemetry)
+        check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile the terminal Run." }
+        val submissions = runCreatesFor(telemetry, JourneyInvariants.ACTIVE_SESSION_ID)
+        check(submissions == 1) {
+            "The client submitted the terminal Run $submissions times; " +
+                "expected exactly 1 (no duplicate retry submissions)."
+        }
+    }
+
+    internal fun verifyExplicitRetry(telemetry: JsonObject) {
+        check(runCreatesFor(telemetry, JourneyInvariants.RETRY_SESSION_ID) == 2) {
+            "The client did not submit exactly two Run creations (initial run plus one explicit retry)."
+        }
+        check(runStatusRequests(telemetry) >= 1) { "The client did not reconcile Run status." }
+    }
+}
+
+private const val MIN_ARGUMENT_COUNT = 2
+private const val MAX_ARGUMENT_COUNT = 4
+private const val KEYSTORE_PASSWORD_ARG_INDEX = 3
+private const val TELEMETRY_TIMEOUT_MILLIS = 5_000
+private const val HTTP_OK = 200
+private const val LIST_CHECKPOINT_AFTER_CREATED_SESSION_PIN = 3
+private const val LIST_CHECKPOINT_AFTER_CREATED_SESSION_UNPIN = 4
+private const val LIST_CHECKPOINT_AFTER_CREATED_SESSION_DELETE = 5
+private const val LIST_CHECKPOINT_AFTER_ALPHA_SESSION_PIN = 7
+private const val LIST_CHECKPOINT_AFTER_ALPHA_SESSION_UNPIN = 8

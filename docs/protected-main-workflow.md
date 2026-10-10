@@ -43,11 +43,11 @@ run publishes the required status. Results are published per check, and only the
 
 | Run | Checks that execute | Checks that stay skipped |
 | --- | --- | --- |
-| Ready in-repository pull request | The complete gate: `formatting`, `static-analysis`, `unit-tests`, `fixture-descriptor`, `fixture-lifecycle`, `fixture-contract`, `android-build`, `architecture-check`, `coverage-mutation`, `compose-jvm-tests`, `conformance`, `commit-message`, `draft-validation`, `fork-guard` | `api24-instrumentation`, `maestro-journeys`, unless the pull request carries the `run-maestro` label (next row) |
+| Ready in-repository pull request | The complete gate: `formatting`, `static-analysis`, `detekt`, `unit-tests`, `fixture-descriptor`, `fixture-lifecycle`, `fixture-contract`, `android-build`, `architecture-check`, `coverage-mutation`, `compose-jvm-tests`, `conformance`, `commit-message`, `draft-validation`, `fork-guard` | `api24-instrumentation`, `maestro-journeys`, unless the pull request carries the `run-maestro` label (next row) |
 | Ready in-repository pull request labeled `run-maestro` | The complete gate plus `api24-instrumentation` and, only after it passes, `maestro-journeys` | None |
 | Draft in-repository pull request | `draft-validation` (`formatCheck` and `:app:lintDebug` only), `fork-guard` | Every other check |
 | External-fork pull request | `fork-guard` | Every other check |
-| Push to `main` | JVM, static, fixture, architecture, coverage/mutation and conformance validation; `android-build` compiles debug/release Kotlin without packaging the application | `api24-instrumentation`, `maestro-journeys`, `draft-validation`, `commit-message`, `fork-guard` |
+| Push to `main` | JVM, static detekt, fixture, architecture, coverage/mutation and conformance validation; `android-build` compiles debug/release Kotlin without packaging the application | `api24-instrumentation`, `maestro-journeys`, `draft-validation`, `commit-message`, `fork-guard` |
 | Nightly validation, manual validation | The complete gate plus `api24-instrumentation` and, only after it passes, `maestro-journeys` | `draft-validation`, `commit-message`, `fork-guard` |
 
 The emulator suites are opt-in on pull requests. A ready in-repository pull request runs them only

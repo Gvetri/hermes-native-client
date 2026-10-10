@@ -40,7 +40,6 @@ class GatewayHistoryMapperTest {
         assertEquals("user", message.role)
         assertEquals("Run this", message.content)
         assertEquals("2026-09-08T20:00:00Z", message.timestamp)
-        // The pinned message projection never carries run identity metadata.
         assertNull(message.runId)
         assertNull(message.runStatus)
         assertNull(message.runResult)

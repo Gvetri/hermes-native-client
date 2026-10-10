@@ -18,18 +18,15 @@ class DefaultGatewayConnectionRepository(
         val credential = connection.bearerCredential
         when {
             credential != null -> credentialStore.save(credential)
-            // Only discard stored material when a credential was actually
-            // persisted, so an endpoint-only save does not churn the
-            // AndroidKeyStore key that protects the record.
             previousCredential != null -> credentialStore.clear()
         }
         try {
             dataSource.saveEndpoint(connection.endpoint)
-        } catch (error: Exception) {
+        } catch (expectedError: Exception) {
             runCatching {
                 previousCredential?.let(credentialStore::save) ?: credentialStore.clear()
             }
-            throw error
+            throw expectedError
         }
     }
 
@@ -37,13 +34,13 @@ class DefaultGatewayConnectionRepository(
         var failure: Exception? = null
         try {
             credentialStore.clear()
-        } catch (error: Exception) {
-            failure = error
+        } catch (expectedError: Exception) {
+            failure = expectedError
         }
         try {
             dataSource.clearEndpoint()
-        } catch (error: Exception) {
-            failure = failure ?: error
+        } catch (expectedError: Exception) {
+            failure = failure ?: expectedError
         }
         failure?.let { throw it }
     }

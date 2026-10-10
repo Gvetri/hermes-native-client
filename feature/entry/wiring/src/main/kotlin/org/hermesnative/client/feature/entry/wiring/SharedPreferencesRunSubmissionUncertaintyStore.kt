@@ -15,7 +15,8 @@ import java.security.MessageDigest
 /** Persists response-loss markers without storing prompts, responses, or transcript data. */
 class SharedPreferencesRunSubmissionUncertaintyStore(
     context: Context,
-) : RunSubmissionUncertaintyStore by DefaultRunSubmissionUncertaintyStore(SharedPreferencesRunSubmissionUncertaintyStorage(context))
+) : RunSubmissionUncertaintyStore by
+    DefaultRunSubmissionUncertaintyStore(SharedPreferencesRunSubmissionUncertaintyStorage(context))
 
 private class SharedPreferencesRunSubmissionUncertaintyStorage(
     context: Context,
@@ -68,8 +69,8 @@ private class SharedPreferencesRunSubmissionUncertaintyStorage(
 
     private fun decode(value: String): RunSubmissionUncertaintySnapshot? {
         val parts = value.split('|', limit = 6)
-        val isCurrentFormat = parts.size == 6 && parts[0] == FORMAT_VERSION
-        val isLegacyFormat = parts.size == 5 && parts[0] == LEGACY_FORMAT_VERSION
+        val isCurrentFormat = parts.size == CURRENT_PART_COUNT && parts[0] == FORMAT_VERSION
+        val isLegacyFormat = parts.size == LEGACY_PART_COUNT && parts[0] == LEGACY_FORMAT_VERSION
         if (!isCurrentFormat && !isLegacyFormat) return null
         return runCatching {
             RunSubmissionUncertaintySnapshot(
@@ -95,16 +96,20 @@ private class SharedPreferencesRunSubmissionUncertaintyStorage(
     private fun recordKey(key: PendingRunSubmissionKey): String =
         "$RECORDS_KEY.${endpointNamespace(key.endpoint)}.${encodePart(key.sessionId.value)}"
 
-    private fun encodePart(value: String): String = Base64.encodeToString(value.toByteArray(StandardCharsets.UTF_8), Base64.NO_WRAP)
+    private fun encodePart(value: String): String {
+        return Base64.encodeToString(value.toByteArray(StandardCharsets.UTF_8), Base64.NO_WRAP)
+    }
 
-    private fun decodePart(value: String): String = Base64.decode(value, Base64.NO_WRAP).toString(StandardCharsets.UTF_8)
+    private fun decodePart(value: String): String {
+        return Base64.decode(value, Base64.NO_WRAP).toString(StandardCharsets.UTF_8)
+    }
 
     private fun endpointNamespace(endpoint: String): String {
         val canonicalEndpoint = runCatching { normalizeGatewayEndpoint(endpoint) }.getOrDefault(endpoint.trim())
         return MessageDigest
             .getInstance("SHA-256")
             .digest(canonicalEndpoint.toByteArray(StandardCharsets.UTF_8))
-            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+            .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and BYTE_MASK) }
     }
 
     private companion object {
@@ -113,5 +118,8 @@ private class SharedPreferencesRunSubmissionUncertaintyStorage(
         const val FORMAT_VERSION = "2"
         const val LEGACY_FORMAT_VERSION = "1"
         const val LEGACY_ATTEMPT_ID = "legacy"
+        private const val CURRENT_PART_COUNT = 6
+        private const val LEGACY_PART_COUNT = 5
+        private const val BYTE_MASK = 0xFF
     }
 }

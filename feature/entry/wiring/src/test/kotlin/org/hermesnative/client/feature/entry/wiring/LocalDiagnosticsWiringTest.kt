@@ -40,9 +40,6 @@ class LocalDiagnosticsWiringTest {
 
     @Before
     fun resetFileProviderPathCache() {
-        // Every test method runs with its own data directory, while FileProvider caches the
-        // resolved provider paths per authority for the whole process. Clearing the cache makes
-        // each method resolve its own cache directory instead of a previous method's.
         val cacheField = FileProvider::class.java.getDeclaredField("sCache")
         cacheField.isAccessible = true
         (cacheField.get(null) as MutableMap<*, *>).clear()
@@ -63,7 +60,6 @@ class LocalDiagnosticsWiringTest {
         assertEquals(context.noBackupFilesDir, requireNotNull(file).parentFile)
         assertFalse(requireNotNull(file).path.startsWith(context.filesDir.path))
 
-        // A separate storage instance sees the same private records.
         assertEquals(1, buffer().recordCount())
     }
 
@@ -111,19 +107,22 @@ class LocalDiagnosticsWiringTest {
         val lines = snapshot.readText().trimEnd('\n').split("\n")
         assertEquals(3, lines.size)
         assertEquals(
-            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0","exported_at":"2026-09-28T11:00:00Z"}""",
+            """{"schema_version":1,"record_type":"metadata","client_version":"0.1.0",""" +
+                """"exported_at":"2026-09-28T11:00:00Z"}""",
             lines.first(),
         )
         assertEquals(buffer.records(), lines.drop(1))
         assertTrue(lines.all(LocalDiagnosticsRecords::isValidRecord))
 
-        // The export never clears, mutates, or appends a second copy to the buffer.
         assertEquals(2, buffer.recordCount())
         assertEquals(buffer.records(), FileLocalDiagnosticsStorage(context).read())
 
         val chooser = shadowOf(context).nextStartedActivity
         assertEquals(Intent.ACTION_CHOOSER, chooser.action)
-        assertEquals(AndroidLocalDiagnosticsExporter.EXPORT_CHOOSER_TITLE, chooser.getCharSequenceExtra(Intent.EXTRA_TITLE))
+        assertEquals(
+            AndroidLocalDiagnosticsExporter.EXPORT_CHOOSER_TITLE,
+            chooser.getCharSequenceExtra(Intent.EXTRA_TITLE),
+        )
         val share = requireNotNull(chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java))
         assertEquals(Intent.ACTION_SEND, share.action)
         val uri = requireNotNull(share.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java))
@@ -220,7 +219,6 @@ class LocalDiagnosticsWiringTest {
             ),
             snapshots.map(File::getName).toSet(),
         )
-        // A snapshot another app may still be reading is never rewritten.
         assertEquals(firstContent, firstSnapshot.readText())
     }
 
@@ -232,7 +230,10 @@ class LocalDiagnosticsWiringTest {
         val holder =
             EntryWiring.createEntryStateHolder(
                 context = context,
-                coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                overrides =
+                    EntryWiringOverrides(
+                        coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                    ),
                 clientVersion = "0.1.0",
             )
         holders += holder
@@ -250,7 +251,9 @@ class LocalDiagnosticsWiringTest {
         assertTrue(clientVersion.isNotBlank())
     }
 
-    private fun buffer(): RollingLocalDiagnosticsBuffer = RollingLocalDiagnosticsBuffer(FileLocalDiagnosticsStorage(context))
+    private fun buffer(): RollingLocalDiagnosticsBuffer {
+        return RollingLocalDiagnosticsBuffer(FileLocalDiagnosticsStorage(context))
+    }
 
     private fun storedFile(create: Boolean = false): File? {
         val file = File(context.noBackupFilesDir, "local-diagnostics.jsonl")

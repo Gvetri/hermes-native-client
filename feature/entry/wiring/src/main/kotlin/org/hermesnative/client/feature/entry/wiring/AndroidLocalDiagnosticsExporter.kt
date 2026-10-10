@@ -30,28 +30,25 @@ class AndroidLocalDiagnosticsExporter(
 
     override fun export(): LocalDiagnosticsExportResult {
         val exportedAt = clock()
-        val encoded =
-            when (
-                val encoding =
-                    LocalDiagnosticsSnapshot.encode(
-                        records = buffer.records(),
-                        clientVersion = clientVersion,
-                        exportedAt = exportedAt,
-                        // The supported Gateway contract exposes no Gateway revision, so the
-                        // client never records one it has not safely verified.
-                        gatewayRevision = null,
-                    )
-            ) {
-                LocalDiagnosticsSnapshotEncoding.NoRecords -> return LocalDiagnosticsExportResult.EMPTY
-                LocalDiagnosticsSnapshotEncoding.Rejected -> return LocalDiagnosticsExportResult.FAILED
-                is LocalDiagnosticsSnapshotEncoding.Encoded -> encoding
-            }
-        return try {
-            val snapshotFile = writeSnapshot(encoded.text, exportedAt)
-            context.startActivity(shareIntent(snapshotFile))
-            LocalDiagnosticsExportResult.SHARED
-        } catch (_: Exception) {
-            LocalDiagnosticsExportResult.FAILED
+        return when (
+            val encoding =
+                LocalDiagnosticsSnapshot.encode(
+                    records = buffer.records(),
+                    clientVersion = clientVersion,
+                    exportedAt = exportedAt,
+                    gatewayRevision = null,
+                )
+        ) {
+            LocalDiagnosticsSnapshotEncoding.NoRecords -> LocalDiagnosticsExportResult.EMPTY
+            LocalDiagnosticsSnapshotEncoding.Rejected -> LocalDiagnosticsExportResult.FAILED
+            is LocalDiagnosticsSnapshotEncoding.Encoded ->
+                try {
+                    val snapshotFile = writeSnapshot(encoding.text, exportedAt)
+                    context.startActivity(shareIntent(snapshotFile))
+                    LocalDiagnosticsExportResult.SHARED
+                } catch (_: Exception) {
+                    LocalDiagnosticsExportResult.FAILED
+                }
         }
     }
 
@@ -67,13 +64,6 @@ class AndroidLocalDiagnosticsExporter(
         return snapshotFile
     }
 
-    /**
-     * Reclaims snapshots older than the retention window.
-     *
-     * A snapshot stays in the app's cache so another app can read the URI it was handed, and the
-     * export sweep bounds what the app itself leaves behind: the platform may reclaim a cache file
-     * at any time, so a snapshot is a short-lived artifact by design, never stored evidence.
-     */
     private fun removeSnapshotsOlderThan(
         directory: File,
         oldestRetained: Instant,
@@ -88,12 +78,6 @@ class AndroidLocalDiagnosticsExporter(
         }
     }
 
-    /**
-     * First free snapshot name for [exportedAt].
-     *
-     * A second export inside the same second keeps its own file, so a URI handed to another app
-     * is never rewritten while that app may still be reading it.
-     */
     private fun availableSnapshotFile(
         directory: File,
         exportedAt: Instant,
@@ -130,7 +114,6 @@ class AndroidLocalDiagnosticsExporter(
         const val EXPORT_CHOOSER_TITLE = "Export diagnostics"
         const val EXPORT_DIRECTORY_NAME = "diagnostics"
 
-        /** How long an exported snapshot stays in the app's cache before the next export reclaims it. */
         private val SNAPSHOT_RETENTION = Duration.ofDays(1)
     }
 }

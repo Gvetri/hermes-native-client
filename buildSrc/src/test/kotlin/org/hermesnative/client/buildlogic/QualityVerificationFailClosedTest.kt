@@ -1,6 +1,7 @@
 package org.hermesnative.client.buildlogic
 
 import java.io.File
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -55,9 +56,6 @@ class QualityVerificationFailClosedTest {
                                 "GatewayConnectionRepository.kt",
                         appended = unreachedProductionFixture(),
                     ),
-                    // The mutation task's own threshold is disabled here on purpose: the declared policy
-                    // must still fail the run through the report verification, so weakening the tool
-                    // configuration cannot make unreached production code pass the gate.
                     InjectedFixture(
                         relativePath = "feature/entry/domain/build.gradle.kts",
                         appended =
@@ -140,6 +138,123 @@ class QualityVerificationFailClosedTest {
         )
     }
 
+    @Test
+    fun quality_gate_rejects_a_skipped_detekt_verification() {
+        val result = runGradle(listOf("qualityGate") + excludedGateTasks + listOf("-x", "detektVerify"))
+
+        assertNotEquals("qualityGate accepted a run without its detekt verification:\n${result.output}", 0, result.exitCode)
+        assertTrue(
+            "qualityGate did not require its detekt verification to execute:\n${result.output}",
+            result.output.contains("qualityGate requires detektVerify to execute in this invocation."),
+        )
+    }
+
+    @Test
+    fun detekt_return_count_violation_fails_the_real_analysis_task() {
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektReturnCountFixture.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "internal fun detektFixtureGuardedTotal(input: Int, other: Int): Int {\n" +
+                    "    if (input < 0) return 0\n" +
+                    "    if (other < 0) return 1\n" +
+                    "    return input + other\n" +
+                    "}\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[ReturnCount]",
+        )
+    }
+
+    @Test
+    fun detekt_else_case_violation_fails_the_real_analysis_with_type_resolution() {
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektFixtureState.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "internal enum class DetektFixtureState {\n" +
+                    "    READY,\n" +
+                    "    STOPPED,\n" +
+                    "}\n\n" +
+                    "internal fun detektFixtureDescribe(state: DetektFixtureState): Int =\n" +
+                    "    when (state) {\n" +
+                    "        DetektFixtureState.READY -> 1\n" +
+                    "        else -> 2\n" +
+                    "    }\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[ElseCaseInsteadOfExhaustiveWhen]",
+        )
+    }
+
+    @Test
+    fun detekt_comment_over_private_function_fails_the_real_analysis() {
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektCommentFixture.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "/**\n" +
+                    " * The documentation over this private function must be reported.\n" +
+                    " */\n" +
+                    "private fun detektFixturePrivateHelper(input: Int): Int = input + 1\n\n" +
+                    "internal fun detektFixtureUseHelper(): Int = detektFixturePrivateHelper(1)\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[CommentOverPrivateFunction]",
+        )
+    }
+
+    @Test
+    fun detekt_comment_over_private_property_fails_the_real_analysis() {
+        assertNewFixtureFails(
+            relativePath = "feature/entry/domain/src/main/kotlin/org/hermesnative/client/feature/entry/domain/DetektFixtureCommentHolder.kt",
+            content =
+                "package org.hermesnative.client.feature.entry.domain\n\n" +
+                    "internal object DetektFixtureCommentHolder {\n" +
+                    "    /**\n" +
+                    "     * The documentation over this private property must be reported.\n" +
+                    "     */\n" +
+                    "    private val detektFixturePrivateProperty = 1\n\n" +
+                    "    fun read(): Int = detektFixturePrivateProperty\n" +
+                    "}\n",
+            tasks = listOf(":feature:entry:domain:detektMain"),
+            expected = "[CommentOverPrivateProperty]",
+        )
+    }
+
+    @Test
+    fun detekt_verification_passes_on_a_clean_tree() {
+        val result = runGradle(listOf("detekt", "detektVerify"))
+
+        assertEquals("The detekt verification rejected a clean tree:\n${result.output}", 0, result.exitCode)
+    }
+
+    @Test
+    fun detekt_verification_rejects_a_committed_baseline() {
+        val baseline = repositoryRoot.resolve("config/detekt/baseline.xml")
+        check(!baseline.exists()) { "config/detekt/baseline.xml must not exist before the fixture is written." }
+        try {
+            baseline.writeText(
+                "<?xml version=\"1.0\" ?>\n" +
+                    "<SmellBaseline>\n" +
+                    "  <ManuallySuppressedIssues/>\n" +
+                    "  <CurrentIssues>\n" +
+                    "  </CurrentIssues>\n" +
+                    "</SmellBaseline>\n",
+            )
+            val result = runGradle(listOf("detektVerify"))
+
+            assertNotEquals(
+                "The detekt verification accepted a committed baseline:\n${result.output}",
+                0,
+                result.exitCode,
+            )
+            assertTrue(
+                "The detekt verification did not report the baseline file:\n${result.output}",
+                result.output.contains("Detekt verification found baseline files"),
+            )
+        } finally {
+            baseline.delete()
+        }
+    }
+
     private fun assertInjectedFixturesFail(
         fixtures: List<InjectedFixture>,
         tasks: List<String>,
@@ -199,11 +314,6 @@ class QualityVerificationFailClosedTest {
         return ProcessResult(process.waitFor(), output)
     }
 
-    /**
-     * The fixture is deliberately large enough to fail the declared thresholds from a high measured
-     * baseline: production code no test reaches must still be rejected when the module's measured
-     * coverage sits well above its declared minimums.
-     */
     private fun unreachedProductionFixture(): String {
         val lines =
             mutableListOf(
@@ -241,6 +351,10 @@ class QualityVerificationFailClosedTest {
         /** The gate tasks that cost minutes; the verification contracts are what these tests exercise. */
         val excludedGateTasks =
             listOf(
+                "-x",
+                "detekt",
+                "-x",
+                "detektVerify",
                 "-x",
                 "formatCheck",
                 "-x",

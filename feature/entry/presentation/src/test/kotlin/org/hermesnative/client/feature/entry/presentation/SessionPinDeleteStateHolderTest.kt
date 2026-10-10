@@ -72,7 +72,10 @@ class SessionPinDeleteStateHolderTest {
         holder.onEvent(EntryUiEvent.PinSessionClicked(target.id))
         val failed = requireNotNull(holder.uiState.value.sessionList)
         assertFalse(failed.sessions.single().pinned)
-        assertEquals(SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED, failed.sessionMutations[target.id]?.errorCategory)
+        assertEquals(
+            SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED,
+            failed.sessionMutations[target.id]?.errorCategory,
+        )
         assertEquals(SessionMutationAction.PIN, failed.sessionMutations[target.id]?.retryAction)
         assertFalse(failed.sessionMutations[target.id]?.pendingAction != null)
 
@@ -207,7 +210,10 @@ class SessionPinDeleteStateHolderTest {
 
         val failed = requireNotNull(holder.uiState.value.sessionList)
         assertEquals(listOf("target"), failed.sessions.map { it.id.value })
-        assertEquals(SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED, failed.sessionMutations[target.id]?.errorCategory)
+        assertEquals(
+            SessionMutationErrorCategory.GATEWAY_REQUEST_FAILED,
+            failed.sessionMutations[target.id]?.errorCategory,
+        )
         assertEquals(SessionMutationAction.DELETE, failed.sessionMutations[target.id]?.retryAction)
 
         holder.onEvent(EntryUiEvent.ConfirmDeleteSessionClicked(target.id))

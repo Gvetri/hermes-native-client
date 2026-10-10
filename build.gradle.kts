@@ -1,3 +1,4 @@
+import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import org.hermesnative.client.buildlogic.BoundaryDoubleVerifier
 import org.hermesnative.client.buildlogic.CoverageEvidenceVerifier
 import org.hermesnative.client.buildlogic.FixtureDescriptorValidator
@@ -17,7 +18,25 @@ plugins {
     alias(libs.plugins.kotlinJvm) apply false
     alias(libs.plugins.composeCompiler) apply false
     alias(libs.plugins.ktlint) apply false
+    alias(libs.plugins.detekt) apply false
     alias(libs.plugins.roborazzi) apply false
+}
+
+// The detekt analysis is declared once: every Kotlin module applies the pinned plugin, and this
+// block supplies the strict configuration and the shared config file, so a module build script
+// cannot drift from the declared policy.
+subprojects {
+    plugins.withId("io.gitlab.arturbosch.detekt") {
+        extensions.configure(DetektExtension::class.java) {
+            buildUponDefaultConfig = true
+            config.setFrom(rootProject.file("config/detekt/detekt.yml"))
+        }
+        // The plain per-module `detekt` task runs without type resolution, so it is disabled: the
+        // gate analyzes through the type-resolution tasks (`detektMain`/`detektTest`), and an
+        // unqualified `./gradlew detekt` must not run a second, weaker analysis beside the
+        // aggregate task.
+        tasks.matching { task -> task.name == "detekt" }.configureEach { enabled = false }
+    }
 }
 
 subprojects {
@@ -320,6 +339,7 @@ tasks.register("architectureRuleTests") {
 // not execute in the invocation.
 var coverageVerified = false
 var mutationVerified = false
+var detektVerified = false
 var mocksVerified = false
 var boundaryDoublesVerified = false
 
@@ -419,6 +439,63 @@ tasks.register("mutationVerify") {
         MutationEvidenceVerifier.requireCoveredByCoverage(mutations, coverages)
         mutations.forEach { logger.lifecycle("Mutation verified. ${it.describe()}") }
         mutationVerified = true
+    }
+}
+
+val detektModules =
+    listOf(
+        ":app",
+        ":feature:entry:domain",
+        ":feature:entry:application",
+        ":feature:entry:data",
+        ":feature:entry:presentation",
+        ":feature:entry:wiring",
+        ":fixtures:hermes:runner",
+    )
+
+// The gate analyzes through the type-resolution tasks: `detektMain` and `detektTest` carry the
+// compile classpath, so every enabled rule that needs binding executes instead of silently
+// skipping.
+val detektAnalysisTasks =
+    detektModules.flatMap { module -> listOf("$module:detektMain", "$module:detektTest") }
+
+tasks.register("detekt") {
+    group = "verification"
+    description = "Runs the type-resolution detekt analysis for every Kotlin module."
+    dependsOn(detektAnalysisTasks)
+}
+
+tasks.register("detektVerify") {
+    group = "verification"
+    description = "Verifies that the detekt analysis ran fail-closed and that no baseline can absorb findings."
+    dependsOn("detekt")
+    doLast {
+        requireTasksInInvocation(
+            label = "Detekt verification",
+            requiredTasks = detektAnalysisTasks,
+            invocationTasks = gradle.taskGraph.allTasks.map { task -> task.path }.toSet(),
+        )
+        val disabled =
+            gradle.taskGraph.allTasks.filter { task -> task.path in detektAnalysisTasks.toSet() && !task.enabled }
+        check(disabled.isEmpty()) {
+            "Detekt verification requires its analysis tasks to be enabled in this invocation: " +
+                "${disabled.map { task -> task.path }}"
+        }
+        // The committed baseline was burnt to zero and removed, so every reported finding must fail
+        // the build. A baseline file that returns would absorb findings again, which is an error.
+        val baselines =
+            file("config/detekt").listFiles().orEmpty()
+                .filter { candidate ->
+                    candidate.isFile && candidate.name.startsWith("baseline") && candidate.name.endsWith(".xml")
+                }
+                .map { candidate -> candidate.name }
+                .sorted()
+        check(baselines.isEmpty()) {
+            "Detekt verification found baseline files that would absorb findings: $baselines. " +
+                "A finding must be fixed, not baselined."
+        }
+        logger.lifecycle("Detekt verified: no baseline exists, so every reported finding fails the analysis.")
+        detektVerified = true
     }
 }
 
@@ -586,6 +663,8 @@ tasks.register("qualityGate") {
         "verifyDeterministicFakes",
         "coverageVerify",
         "mutationVerify",
+        "detekt",
+        "detektVerify",
         "fixtureDescriptorTests",
         "fixtureLifecycleTests",
         "fixtureContractTests",
@@ -602,6 +681,9 @@ tasks.register("qualityGate") {
         }
         check(mutationVerified) {
             "qualityGate requires mutationVerify to execute in this invocation."
+        }
+        check(detektVerified) {
+            "qualityGate requires detektVerify to execute in this invocation."
         }
         check(mocksVerified) {
             "qualityGate requires verifyNoMocks to execute in this invocation."

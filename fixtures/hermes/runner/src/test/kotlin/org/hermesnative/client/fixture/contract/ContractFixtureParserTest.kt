@@ -62,7 +62,10 @@ class ContractFixtureParserTest {
             assertTrue("Missing required endpoint '$endpoint'", successEndpoints.containsKey(endpoint))
         }
         assertEquals("GET", successEndpoints.getValue("sessions").jsonObject.getValue("method").jsonPrimitive.content)
-        assertEquals("PATCH", successEndpoints.getValue("session_update").jsonObject.getValue("method").jsonPrimitive.content)
+        assertEquals(
+            "PATCH",
+            successEndpoints.getValue("session_update").jsonObject.getValue("method").jsonPrimitive.content,
+        )
         assertEquals("POST", successEndpoints.getValue("runs").jsonObject.getValue("method").jsonPrimitive.content)
         assertEquals("GET", successEndpoints.getValue("run_events").jsonObject.getValue("method").jsonPrimitive.content)
 
@@ -71,7 +74,10 @@ class ContractFixtureParserTest {
 
         val additiveEndpoints = additive.requiredObject("response.body.endpoints")
         SupportedGatewayCapabilities.required.forEach { endpoint ->
-            assertTrue("Additive fixture dropped required endpoint '$endpoint'", additiveEndpoints.containsKey(endpoint))
+            assertTrue(
+                "Additive fixture dropped required endpoint '$endpoint'",
+                additiveEndpoints.containsKey(endpoint),
+            )
         }
         assertTrue(additiveEndpoints.containsKey("gateway_future_endpoint"))
         assertEquals("additive-value", additive.requiredString("future_additive_field"))
@@ -110,6 +116,25 @@ class ContractFixtureParserTest {
         val unpinRequest = parseJson("sessions/unpin-request.json")
         val unpinResponse = parseJson("sessions/unpin-response.json")
 
+        assertSessionListFixtures(listRequest, firstPage, secondPage)
+        assertSessionCreateFixtures(createRequest, createResponse)
+        assertSessionOpenAndHistoryFixtures(
+            openRequest,
+            openResponse,
+            historyRequest,
+            historyResponse,
+            populatedHistoryResponse,
+        )
+        assertSessionRenameFixtures(renameRequest, renameResponse)
+        assertSessionDeleteFixtures(deleteRequest, deleteResponse)
+        assertSessionPinFixtures(pinRequest, pinResponse, unpinRequest, unpinResponse)
+    }
+
+    private fun assertSessionListFixtures(
+        listRequest: ContractJsonFixture,
+        firstPage: ContractJsonFixture,
+        secondPage: ContractJsonFixture,
+    ) {
         assertRequest(listRequest, "GET", "/api/sessions")
         assertEquals(20, listRequest.requiredInt("request.query.limit"))
         assertEquals(0, listRequest.requiredInt("request.query.offset"))
@@ -126,13 +151,26 @@ class ContractFixtureParserTest {
         assertEquals(0, secondPage.requiredArray("response.body.data").size)
         assertEquals(20, secondPage.requiredInt("response.body.offset"))
         assertFalse(secondPage.requiredBoolean("response.body.has_more"))
+    }
 
+    private fun assertSessionCreateFixtures(
+        createRequest: ContractJsonFixture,
+        createResponse: ContractJsonFixture,
+    ) {
         assertRequest(createRequest, "POST", "/api/sessions")
         assertEquals(null, createRequest.requiredNullableString("request.body.title"))
         assertEquals(201, createResponse.requiredInt("response.status"))
         assertEquals("hermes.session", createResponse.requiredString("response.body.object"))
         assertEquals(CREATED_SESSION_ID, createResponse.requiredString("response.body.session.id"))
+    }
 
+    private fun assertSessionOpenAndHistoryFixtures(
+        openRequest: ContractJsonFixture,
+        openResponse: ContractJsonFixture,
+        historyRequest: ContractJsonFixture,
+        historyResponse: ContractJsonFixture,
+        populatedHistoryResponse: ContractJsonFixture,
+    ) {
         assertRequest(openRequest, "GET", "/api/sessions/$SESSION_ID")
         assertEquals(200, openResponse.requiredInt("response.status"))
         assertEquals(SESSION_ID, openResponse.requiredString("response.body.session.id"))
@@ -152,24 +190,40 @@ class ContractFixtureParserTest {
         assertEquals("Run this", firstMessage["content"]!!.jsonPrimitive.content)
         assertEquals("1788897540.0", firstMessage["timestamp"]!!.jsonPrimitive.content)
         assertFalse(firstMessage["timestamp"]!!.jsonPrimitive.isString)
-        // The pinned message projection never carries run identity metadata.
         assertFalse(firstMessage.containsKey("run_id"))
         assertFalse(firstMessage.containsKey("run_status"))
         assertFalse(firstMessage.containsKey("run_result"))
         assertEquals("assistant", populatedMessages[1].jsonObject["role"]!!.jsonPrimitive.content)
         assertEquals("Authoritative result", populatedMessages[1].jsonObject["content"]!!.jsonPrimitive.content)
+    }
 
+    private fun assertSessionRenameFixtures(
+        renameRequest: ContractJsonFixture,
+        renameResponse: ContractJsonFixture,
+    ) {
         assertRequest(renameRequest, "PATCH", "/api/sessions/$SESSION_ID")
         assertEquals("Renamed session", renameRequest.requiredString("request.body.title"))
         assertEquals(200, renameResponse.requiredInt("response.status"))
         assertEquals(SESSION_ID, renameResponse.requiredString("response.body.session.id"))
+    }
 
+    private fun assertSessionDeleteFixtures(
+        deleteRequest: ContractJsonFixture,
+        deleteResponse: ContractJsonFixture,
+    ) {
         assertRequest(deleteRequest, "DELETE", "/api/sessions/$SESSION_ID")
         assertEquals(200, deleteResponse.requiredInt("response.status"))
         assertEquals("hermes.session.deleted", deleteResponse.requiredString("response.body.object"))
         assertEquals(SESSION_ID, deleteResponse.requiredString("response.body.id"))
         assertTrue(deleteResponse.requiredBoolean("response.body.deleted"))
+    }
 
+    private fun assertSessionPinFixtures(
+        pinRequest: ContractJsonFixture,
+        pinResponse: ContractJsonFixture,
+        unpinRequest: ContractJsonFixture,
+        unpinResponse: ContractJsonFixture,
+    ) {
         assertRequest(pinRequest, "PATCH", "/api/sessions/$SESSION_ID")
         assertTrue(pinRequest.requiredBoolean("request.body.pinned"))
         assertEquals(200, pinResponse.requiredInt("response.status"))
@@ -194,7 +248,10 @@ class ContractFixtureParserTest {
         assertEquals(202, createResponse.requiredInt("response.status"))
         assertEquals(RUN_ID, createResponse.requiredString("response.body.run_id"))
         assertEquals("started", createResponse.requiredString("response.body.status"))
-        assertFalse(createResponse.root.getValue("response").jsonObject.getValue("body").jsonObject.containsKey("session_id"))
+        assertFalse(
+            createResponse.root.getValue("response").jsonObject
+                .getValue("body").jsonObject.containsKey("session_id"),
+        )
         assertRequest(statusRequest, "GET", "/v1/runs/$RUN_ID")
         assertEquals(200, statusResponse.requiredInt("response.status"))
         assertEquals("hermes.run", statusResponse.requiredString("response.body.object"))

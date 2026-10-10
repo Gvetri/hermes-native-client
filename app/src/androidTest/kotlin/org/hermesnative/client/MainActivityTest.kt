@@ -38,7 +38,8 @@ class MainActivityTest {
     fun window_delivers_keyboard_insets_without_panning_the_compose_screen() {
         assertEquals(
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
-            composeTestRule.activity.window.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST,
+            composeTestRule.activity.window.attributes.softInputMode and
+                WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST,
         )
     }
 }

@@ -29,9 +29,9 @@ internal class GatewayRunEventObservation(
             } catch (error: GatewayException) {
                 synchronized(lifecycleLock) { closed = true }
                 throw error
-            } catch (error: Exception) {
+            } catch (expectedError: Exception) {
                 synchronized(lifecycleLock) { closed = true }
-                throw mapTransportFailure(error)
+                throw mapTransportFailure(expectedError)
             }
         val published =
             synchronized(lifecycleLock) {
@@ -44,45 +44,42 @@ internal class GatewayRunEventObservation(
             }
         if (!published) {
             openedStream.close()
-            throw IllegalStateException("Gateway run observation is closed.")
+            error("Gateway run observation is closed.")
         }
-        val frames = GatewaySseParser.frames(openedStream.lines, operation).iterator()
+        val seenFrames = mutableSetOf<String>()
+        val events =
+            GatewaySseParser.frames(openedStream.lines, operation)
+                .filter { frame -> seenFrames.add(frame.data) }
+                .mapNotNull { frame -> parseFrame(frame) }
+                .iterator()
         return object : Iterator<RunEvent> {
-            private var buffered: RunEvent? = null
-            private var hasBuffered = false
-
-            // The pinned Run stream carries no SSE `id:` values, so byte-identical payloads are
-            // the only observable repeated deliveries; distinct lifecycle events carry distinct
-            // timestamps and are never collapsed.
-            private val seenFrames = mutableSetOf<String>()
-
             override fun hasNext(): Boolean {
                 if (closed) return false
-                if (hasBuffered) return true
-                try {
-                    while (frames.hasNext()) {
-                        val frame = frames.next()
-                        if (!seenFrames.add(frame.data)) continue
-                        val event = parseFrame(frame) ?: continue
-                        buffered = event
-                        hasBuffered = true
-                        return true
+                val available =
+                    try {
+                        events.hasNext()
+                    } catch (error: GatewayException) {
+                        close()
+                        throw error
+                    } catch (expectedError: Exception) {
+                        close()
+                        throw mapTransportFailure(expectedError)
                     }
-                    close()
-                    return false
-                } catch (error: GatewayException) {
-                    close()
-                    throw error
-                } catch (error: Exception) {
-                    close()
-                    throw mapTransportFailure(error)
-                }
+                if (!available) close()
+                return available
             }
 
             override fun next(): RunEvent {
                 if (!hasNext()) throw NoSuchElementException()
-                hasBuffered = false
-                return requireNotNull(buffered).also { buffered = null }
+                return try {
+                    events.next()
+                } catch (error: GatewayException) {
+                    close()
+                    throw error
+                } catch (expectedError: Exception) {
+                    close()
+                    throw mapTransportFailure(expectedError)
+                }
             }
         }
     }

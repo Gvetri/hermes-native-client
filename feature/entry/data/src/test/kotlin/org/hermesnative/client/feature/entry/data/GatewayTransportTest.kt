@@ -98,21 +98,7 @@ class GatewayTransportTest {
                 )
             val firstLinesRead = CountDownLatch(1)
             val readerResult = AtomicReference<Result<Unit>>()
-            val reader =
-                Thread {
-                    readerResult.set(
-                        runCatching {
-                            val lines = stream.lines.iterator()
-                            lines.next()
-                            lines.next()
-                            firstLinesRead.countDown()
-                            lines.next()
-                            Unit
-                        },
-                    )
-                }
-            reader.isDaemon = true
-            reader.start()
+            val reader = startLineReader(stream, firstLinesRead, readerResult)
             assertTrue(
                 "reader must consume the buffered event lines",
                 firstLinesRead.await(5, TimeUnit.SECONDS),
@@ -142,5 +128,28 @@ class GatewayTransportTest {
             releaseBody.countDown()
             server.stop(0)
         }
+    }
+
+    private fun startLineReader(
+        stream: GatewayEventStream,
+        firstLinesRead: CountDownLatch,
+        result: AtomicReference<Result<Unit>>,
+    ): Thread {
+        val reader =
+            Thread {
+                result.set(
+                    runCatching {
+                        val lines = stream.lines.iterator()
+                        lines.next()
+                        lines.next()
+                        firstLinesRead.countDown()
+                        lines.next()
+                        Unit
+                    },
+                )
+            }
+        reader.isDaemon = true
+        reader.start()
+        return reader
     }
 }

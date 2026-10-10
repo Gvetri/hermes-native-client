@@ -309,12 +309,20 @@ class SessionMutationScreenTest {
 
     @Test
     fun pin_retry_preserves_the_original_action_after_the_server_has_pinned_the_session() {
-        assertPinRetryAction(SessionMutationAction.PIN, pinned = true, EntryUiEvent.PinSessionClicked(SessionId("session-one")))
+        assertPinRetryAction(
+            SessionMutationAction.PIN,
+            pinned = true,
+            EntryUiEvent.PinSessionClicked(SessionId("session-one")),
+        )
     }
 
     @Test
     fun unpin_retry_preserves_the_original_action_after_the_server_has_unpinned_the_session() {
-        assertPinRetryAction(SessionMutationAction.UNPIN, pinned = false, EntryUiEvent.UnpinSessionClicked(SessionId("session-one")))
+        assertPinRetryAction(
+            SessionMutationAction.UNPIN,
+            pinned = false,
+            EntryUiEvent.UnpinSessionClicked(SessionId("session-one")),
+        )
     }
 
     private fun assertPinRetryAction(

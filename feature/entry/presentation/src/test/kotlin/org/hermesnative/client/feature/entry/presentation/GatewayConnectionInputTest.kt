@@ -61,7 +61,11 @@ class GatewayConnectionInputTest {
         assertEquals(
             0,
             info.inputType and
-                (InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES),
+                (
+                    InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or
+                        InputType.TYPE_TEXT_FLAG_CAP_WORDS or
+                        InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                ),
         )
     }
 
@@ -211,11 +215,8 @@ class GatewayConnectionInputTest {
 
     private fun View.findInputEditor(): View? {
         if (onCheckIsTextEditor()) return this
-        if (this is ViewGroup) {
-            for (index in 0 until childCount) {
-                getChildAt(index).findInputEditor()?.let { return it }
-            }
+        return (this as? ViewGroup)?.let { group ->
+            (0 until group.childCount).firstNotNullOfOrNull { index -> group.getChildAt(index).findInputEditor() }
         }
-        return null
     }
 }

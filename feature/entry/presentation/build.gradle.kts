@@ -8,6 +8,7 @@ plugins {
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.roborazzi)
     alias(libs.plugins.ktlint)
+    alias(libs.plugins.detekt)
 }
 
 @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)

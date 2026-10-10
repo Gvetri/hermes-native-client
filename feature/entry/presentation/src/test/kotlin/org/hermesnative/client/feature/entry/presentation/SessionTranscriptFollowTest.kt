@@ -38,8 +38,6 @@ class SessionTranscriptFollowTest {
         setTranscriptContent { streamingState(activeResponse = streamedResponse(transcriptBody(48))) }
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
-        // The message's last line sits at the viewport's end, so the end is pinned, not merely
-        // near the fold.
         composeTestRule.onNodeWithText("Streaming response…").assertIsDisplayed()
         composeTestRule.onNodeWithText("Paragraph 1").assertIsNotDisplayed()
     }
@@ -124,8 +122,6 @@ class SessionTranscriptFollowTest {
         }
         composeTestRule.onNodeWithText("Paragraph 48").assertIsNotDisplayed()
 
-        // Settle back at the newest content: the swipes overshoot the end, so the transcript
-        // clamps there regardless of how far the away drag carried.
         repeat(3) {
             composeTestRule.onNode(hasScrollToIndexAction()).performTouchInput {
                 swipeUp(startY = centerY + 240f, endY = centerY - 240f, durationMillis = 200)
@@ -180,8 +176,6 @@ class SessionTranscriptFollowTest {
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
 
-        // Two chunks arrive before the next idle, so the follow has to coalesce or re-anchor
-        // instead of fighting an in-flight scroll.
         composeTestRule.runOnUiThread {
             state.value = streamingState(activeResponse = streamedResponse(transcriptBody(60)))
         }
@@ -200,8 +194,6 @@ class SessionTranscriptFollowTest {
 
         composeTestRule.onNodeWithText("Paragraph 48").assertIsDisplayed()
 
-        // The second chunk lands while the follow of the first one has not settled, so the follow
-        // must re-anchor instead of cancelling into a stalled position.
         composeTestRule.runOnUiThread {
             state.value = streamingState(activeResponse = streamedResponse(transcriptBody(60)))
         }
@@ -248,10 +240,6 @@ class SessionTranscriptFollowTest {
             isStreaming = true,
         )
 
-    /**
-     * One Markdown paragraph per sentence, so a message is a single LazyColumn item that can grow
-     * in place exactly as later chunks arrive.
-     */
     private fun transcriptBody(
         paragraphCount: Int,
         label: String = "Paragraph",

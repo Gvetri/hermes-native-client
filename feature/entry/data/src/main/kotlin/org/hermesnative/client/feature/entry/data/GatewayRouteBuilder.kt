@@ -39,14 +39,14 @@ internal class GatewayRouteBuilder(
             } catch (_: Exception) {
                 throw invalidAddress()
             }
-        if (
+        val hasRejectedComponent =
             uri.isOpaque ||
-            uri.scheme?.lowercase() != "https" ||
-            uri.host.isNullOrBlank() ||
-            uri.userInfo != null ||
-            uri.query != null ||
-            uri.fragment != null
-        ) {
+                uri.scheme?.lowercase() != "https" ||
+                uri.host.isNullOrBlank() ||
+                uri.userInfo != null ||
+                uri.query != null ||
+                uri.fragment != null
+        if (hasRejectedComponent) {
             throw invalidAddress()
         }
         return uri

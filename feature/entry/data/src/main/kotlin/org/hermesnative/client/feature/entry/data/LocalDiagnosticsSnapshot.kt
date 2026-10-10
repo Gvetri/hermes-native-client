@@ -57,21 +57,21 @@ object LocalDiagnosticsSnapshot {
         clientVersion: String,
         exportedAt: Instant,
         gatewayRevision: String?,
-    ): LocalDiagnosticsSnapshotEncoding {
-        if (records.isEmpty()) return LocalDiagnosticsSnapshotEncoding.NoRecords
-        if (!records.all(LocalDiagnosticsRecords::isValidRecord)) {
-            return LocalDiagnosticsSnapshotEncoding.Rejected
+    ): LocalDiagnosticsSnapshotEncoding =
+        when {
+            records.isEmpty() -> LocalDiagnosticsSnapshotEncoding.NoRecords
+            !records.all(LocalDiagnosticsRecords::isValidRecord) -> LocalDiagnosticsSnapshotEncoding.Rejected
+            else ->
+                LocalDiagnosticsRecords.encodeMetadataRecord(
+                    clientVersion = clientVersion,
+                    exportedAt = exportedAt,
+                    gatewayRevision = gatewayRevision,
+                )?.let { metadata ->
+                    LocalDiagnosticsSnapshotEncoding.Encoded(
+                        (listOf(metadata) + records).joinToString(separator = "\n", postfix = "\n"),
+                    )
+                } ?: LocalDiagnosticsSnapshotEncoding.Rejected
         }
-        val metadata =
-            LocalDiagnosticsRecords.encodeMetadataRecord(
-                clientVersion = clientVersion,
-                exportedAt = exportedAt,
-                gatewayRevision = gatewayRevision,
-            ) ?: return LocalDiagnosticsSnapshotEncoding.Rejected
-        return LocalDiagnosticsSnapshotEncoding.Encoded(
-            (listOf(metadata) + records).joinToString(separator = "\n", postfix = "\n"),
-        )
-    }
 
     private val FILE_NAME_FORMAT =
         DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)

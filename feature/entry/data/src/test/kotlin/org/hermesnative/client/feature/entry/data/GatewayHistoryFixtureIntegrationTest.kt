@@ -51,7 +51,6 @@ class GatewayHistoryFixtureIntegrationTest {
             assertEquals("assistant", message.role)
             assertEquals("Stable history", message.content)
             assertEquals("2026-09-08T20:00:00Z", message.timestamp)
-            // The pinned message projection carries no run metadata.
             assertNull(message.runId)
             assertNull(message.runStatus)
             assertNull(message.runResult)
