@@ -2,14 +2,5 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-<ID>TooGenericExceptionCaught:DefaultGatewayConnectionRepository.kt$DefaultGatewayConnectionRepository$error: Exception</ID>
-<ID>TooGenericExceptionCaught:DeterministicGatewayFixture.kt$DeterministicGatewayFixture$error: Throwable</ID>
-<ID>TooGenericExceptionCaught:DeterministicGatewayFixture.kt$DeterministicGatewayFixture$stopError: Throwable</ID>
-<ID>TooGenericExceptionCaught:EndpointScopedRunRecoveryRegistry.kt$EndpointScopedRunRecoveryRegistry$error: Exception</ID>
-<ID>TooGenericExceptionCaught:GatewayClientOperations.kt$GatewayClientCalls$error: Exception</ID>
-<ID>TooGenericExceptionCaught:GatewayRunEventObservation.kt$GatewayRunEventObservation$error: Exception</ID>
-<ID>TooGenericExceptionCaught:GatewayRunEventObservation.kt$GatewayRunEventObservation.&lt;no name provided&gt;$error: Exception</ID>
-<ID>TooGenericExceptionCaught:RemoveGatewayConnection.kt$RemoveGatewayConnection$error: Exception</ID>
-<ID>TooGenericExceptionCaught:VerifyGatewayConnection.kt$VerifyGatewayConnection$error: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>
