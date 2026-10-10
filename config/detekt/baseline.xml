@@ -14,16 +14,12 @@
 <ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$connectionGeneration != requestConnectionGeneration || sessionRequestGeneration != requestSessionGeneration || sessionGateway == null || runGateway == null</ID>
 <ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$current == null || requestGeneration != sessionRequestGeneration || (offset != null &amp;&amp; current.nextOffset != offset)</ID>
 <ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$decision == RunReconciliationDecision.CONFIRMED &amp;&amp; !run.isActive() &amp;&amp; authoritativeSessionRuns[sessionId].orEmpty().any { knownRun -&gt; knownRun.id == run.id &amp;&amp; !knownRun.isActive() }</ID>
-<ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$mutation.rename == null &amp;&amp; mutation.delete == null &amp;&amp; mutation.pendingAction == null &amp;&amp; mutation.errorCategory == null &amp;&amp; mutation.retryAction == null</ID>
+<ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$mutation == null || delete == null || mutation.pendingAction != null || delete.isSubmitting</ID>
+<ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$mutation == null || rename == null || mutation.pendingAction != null || rename.isSubmitting</ID>
 <ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$opened == null || opened.session.id != sessionId || !run.isActive() || scope.coroutineContext[Job]?.isActive == false || sessionGateway == null || runGateway == null</ID>
 <ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$reconciledRun?.isActive() == true || (reconciledRun == null &amp;&amp; activeRunToObserve == null &amp;&amp; run.isActive())</ID>
 <ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$run.isActive() &amp;&amp; persistBeforeApply &amp;&amp; recoveryEntryPersisted &amp;&amp; submissionBindingSucceeded</ID>
-<ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$sessionId in connectionRecoverySessionCounts || sessionId in recoverySessionCounts || sessionId in reconcilingSessions || recoveryLoadPending</ID>
-<ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$sessionList.isLoading || sessionList.isRefreshing || sessionList.isLoadingMore || sessionList.openingSessionId != null || sessionList.isUnavailable || sessionList.createSession != null || sessionList.sessionMutations.isNotEmpty()</ID>
-<ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$sessionList.isLoading || sessionList.isRefreshing || sessionList.isSearching || sessionList.isLoadingMore || sessionList.isUnavailable || sessionList.openedSession?.isRefreshing == true || sessionList.openedSession?.isReconciliationInProgress == true || sessionList.openingSessionId != null || sessionList.createSession != null || sessionList.sessionMutations.isNotEmpty()</ID>
 <ID>ComplexCondition:EntryStateHolder.kt$EntryStateHolder$sessionList.isLoading || sessionList.isRefreshing || sessionList.isSearching || sessionList.isUnavailable || sessionList.isLoadingMore || sessionList.hasPendingMutation || sessionList.openingSessionId != null || sessionList.createSession != null</ID>
-<ID>ComplexCondition:EntryStateHolder.kt$ProcessRunSubmissionUncertaintyStore$current == null || (attemptId != null &amp;&amp; current.attemptId != attemptId) || current.knownRunIds.toSet() != knownRunIds</ID>
-<ID>ComplexCondition:EntryStateHolder.kt$ProcessRunSubmissionUncertaintyStore$current.attemptId != snapshot.attemptId || current.knownRunIds.toSet() != snapshot.knownRunIds || current.boundRunId != snapshot.boundRunId || current.settled != snapshot.settled || current.requiresRunMatch != snapshot.requiresRunMatch</ID>
 <ID>ComplexCondition:GatewayRouteBuilder.kt$GatewayRouteBuilder$uri.isOpaque || uri.scheme?.lowercase() != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || uri.query != null || uri.fragment != null</ID>
 <ID>ComplexCondition:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$runId.isEmpty() || segments.size !in 1..2 || (segments.size == 2 &amp;&amp; segments[1] != "events")</ID>
 <ID>ComplexCondition:SessionListScreen.kt$state.visibleSessions.isEmpty() &amp;&amp; !state.isLoading &amp;&amp; !state.isSearching &amp;&amp; state.nextOffset != null</ID>
@@ -34,7 +30,6 @@
 <ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun applySubmittedRun( sessionId: SessionId, run: Run, requestConnectionGeneration: Long, requestEndpoint: String, attemptId: String, ): Boolean</ID>
 <ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun applyTimedOutSendReconciliation( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, reconciliation: SessionReconciliation, resolveWhenNoNewRun: Boolean, ): TimedOutSendReconciliationOutcome</ID>
 <ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun launchRunSubmission( input: String, recordDraft: Boolean, rejectRunId: RunId? = null, )</ID>
-<ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun loadMoreSessions()</ID>
 <ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun openSession(sessionId: SessionId)</ID>
 <ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun reconcilePersistedRecoveryEntryIfConnected( endpoint: String, entry: RunRecoveryEntry, )</ID>
 <ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private fun startRunObservation( sessionId: SessionId, run: Run, expectedConnectionGeneration: Long? = null, expectedSessionGeneration: Long? = null, expectedHistoryGeneration: Long? = null, )</ID>
@@ -46,7 +41,6 @@
 <ID>CyclomaticComplexMethod:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileTimedOutSendNow( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, knownRunIds: Set&lt;RunId&gt;, resolveWhenNoNewRun: Boolean = false, requestEndpoint: String = _uiState.value.endpoint, ): Boolean</ID>
 <ID>CyclomaticComplexMethod:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionResource( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
 <ID>CyclomaticComplexMethod:JourneyVerifier.kt$JourneyInvariants$fun verify( scenarioName: String, telemetry: JsonObject, )</ID>
-<ID>CyclomaticComplexMethod:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun handleSessionResourceRequest( exchange: HttpExchange, behavior: SyntheticGatewayBehavior, )</ID>
 <ID>CyclomaticComplexMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun send_timeout_applies_authoritative_history_while_preserving_the_uncertain_draft()</ID>
 <ID>CyclomaticComplexMethod:SafeMarkdown.kt$internal fun parseSafeMarkdown(content: String): List&lt;MarkdownBlock&gt;</ID>
 <ID>CyclomaticComplexMethod:SessionListScreen.kt$@Composable internal fun SessionMessageContent( message: SessionMessageUiState, retryEnabled: Boolean, onRetry: (RunId) -&gt; Unit, actions: MessageActions = rememberMessageActions(), )</ID>
@@ -71,10 +65,8 @@
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun applyRunEvent( sessionId: SessionId, event: RunEvent, observationJob: Job, )</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun applySubmittedRun( sessionId: SessionId, run: Run, requestConnectionGeneration: Long, requestEndpoint: String, attemptId: String, ): Boolean</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun applyTimedOutSendReconciliation( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, reconciliation: SessionReconciliation, resolveWhenNoNewRun: Boolean, ): TimedOutSendReconciliationOutcome</ID>
-<ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun confirmRenameSession(sessionId: SessionId)</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun createSessionJob( gateway: SessionGatewayPort, request: CreateSessionRequest, ): Job</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun launchRunSubmission( input: String, recordDraft: Boolean, rejectRunId: RunId? = null, )</ID>
-<ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun loadMoreSessions()</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun openSession(sessionId: SessionId)</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun reconcilePersistedRecoveryEntryIfConnected( endpoint: String, entry: RunRecoveryEntry, )</ID>
 <ID>LongMethod:EntryStateHolder.kt$EntryStateHolder$private fun removeGatewayConnection()</ID>
@@ -94,7 +86,6 @@
 <ID>LongMethod:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionResource( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
 <ID>LongMethod:JourneyVerifier.kt$JourneyInvariants$private fun verifySessionLifecycle(telemetry: JsonObject)</ID>
 <ID>LongMethod:LocalDiagnosticsScreen.kt$@Composable internal fun LocalDiagnosticsContent( state: LocalDiagnosticsUiState, onEvent: (EntryUiEvent) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
-<ID>LongMethod:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun handleSessionResourceRequest( exchange: HttpExchange, behavior: SyntheticGatewayBehavior, )</ID>
 <ID>LongMethod:PinnedFixtureDescriptor.kt$PinnedFixtureDescriptor.Companion$private fun parse(content: String): PinnedFixtureDescriptor</ID>
 <ID>LongMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun an_old_same_text_message_does_not_resolve_an_unrelated_new_run()</ID>
 <ID>LongMethod:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest$@Test fun history_run_selection_is_atomic_with_unresolved_submission_state()</ID>
@@ -131,48 +122,18 @@
 <ID>NestedBlockDepth:ContractFixtureParser.kt$ContractFixtureParser$internal fun countJsonMember( content: String, field: String, ): Int</ID>
 <ID>NestedBlockDepth:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileTimedOutSendNow( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, knownRunIds: Set&lt;RunId&gt;, resolveWhenNoNewRun: Boolean = false, requestEndpoint: String = _uiState.value.endpoint, ): Boolean</ID>
 <ID>NestedBlockDepth:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun streamRunEvents( exchange: HttpExchange, behavior: JourneyGatewayBehavior, runId: String, )</ID>
-<ID>NestedBlockDepth:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun handleSessionResourceRequest( exchange: HttpExchange, behavior: SyntheticGatewayBehavior, )</ID>
 <ID>NestedBlockDepth:RunReconciliationStateHolderTest.kt$RunReconciliationStateHolderTest.FakeGateway$override fun observeRun(runId: RunId): RunEventObservation</ID>
 <ID>NestedBlockDepth:SafeMarkdown.kt$internal fun parseSafeMarkdown(content: String): List&lt;MarkdownBlock&gt;</ID>
 <ID>RedundantSuspendModifier:EntryStateHolder.kt$EntryStateHolder$suspend</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun applyConfirmedSession( session: Session, request: SessionMutationRequest, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun applyRunEvent( sessionId: SessionId, event: RunEvent, observationJob: Job, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun cancelDeleteSession(sessionId: SessionId)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun cancelRenameSession(sessionId: SessionId)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun changeSessionPin( sessionId: SessionId, pinned: Boolean, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun claimRecoveryEntry( endpoint: String, entry: RunRecoveryEntry, expectedConnectionGeneration: Long, ): RecoveryClaim?</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun clearRecoveryUiIfIdle(sessionId: SessionId)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun confirmClearLocalDiagnostics()</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun confirmCreateSession()</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun confirmDeleteSession(sessionId: SessionId)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun confirmRenameSession(sessionId: SessionId)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun finishReconciliation( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun loadMoreSessions()</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun markRecoveryUnavailable( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun markRunObservationUncertain( sessionId: SessionId, runId: RunId, observationJob: Job, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun openSession(sessionId: SessionId)</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun reconcilePersistedRecoveryEntryIfConnected( endpoint: String, entry: RunRecoveryEntry, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun restoredRunStatusNotificationState(): RunStatusNotificationsUiState</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showCreateSession()</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showDeleteFailure(request: SessionMutationRequest)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showDeleteSession(sessionId: SessionId)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showPinFailure( request: SessionMutationRequest, action: SessionMutationAction, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showRenameFailure(request: SessionMutationRequest)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showRenameSession(sessionId: SessionId)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showRunReconciliationFailure( sessionId: SessionId, runId: RunId, requestConnectionGeneration: Long, requestSessionGeneration: Long, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun showTimedOutSendFailure( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun startRunObservation( sessionId: SessionId, run: Run, expectedConnectionGeneration: Long? = null, expectedSessionGeneration: Long? = null, expectedHistoryGeneration: Long? = null, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun startRunRecovery(expectedConnectionGeneration: Long)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun toggleRunStatusNotifications()</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun updateCreateSessionTitle(value: String)</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun updateRenameSessionTitle( sessionId: SessionId, value: String, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private fun updateSearchQuery(value: String)</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun observeRun( sessionId: SessionId, run: Run, )</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileOpenedRun( sessionId: SessionId, requestSessionGeneration: Long, requestConnectionGeneration: Long, sessionGateway: SessionGatewayPort, restartObservation: Boolean, runIdToReconcile: RunId? = null, clearRefreshWhenNoRun: Boolean = false, )</ID>
-<ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileTimedOutSend( sessionId: SessionId, requestConnectionGeneration: Long, knownRunIds: Set&lt;RunId&gt;, attemptId: String, resolveWhenNoNewRun: Boolean = false, uncertaintyErrorCategory: MessageSendErrorCategory = MessageSendErrorCategory.UNCERTAIN, ): Boolean</ID>
 <ID>ReturnCount:EntryStateHolder.kt$EntryStateHolder$private suspend fun reconcileTimedOutSendNow( sessionId: SessionId, requestConnectionGeneration: Long, requestSessionGeneration: Long, knownRunIds: Set&lt;RunId&gt;, resolveWhenNoNewRun: Boolean = false, requestEndpoint: String = _uiState.value.endpoint, ): Boolean</ID>
-<ID>ReturnCount:JourneyGatewayProcess.kt$JourneyGatewayProcess.Companion$private fun handleSessionList( exchange: HttpExchange, behavior: JourneyGatewayBehavior, )</ID>
-<ID>ReturnCount:LocalSyntheticGatewayProcess.kt$LocalSyntheticGatewayProcess.Companion$private fun handleSessionResourceRequest( exchange: HttpExchange, behavior: SyntheticGatewayBehavior, )</ID>
 <ID>TooGenericExceptionCaught:AndroidKeyStoreGatewayCredentialStore.kt$AndroidKeyStoreGatewayCredentialStore$error: Exception</ID>
 <ID>TooGenericExceptionCaught:ContractFixtureParser.kt$ContractFixtureParser$error: Exception</ID>
 <ID>TooGenericExceptionCaught:DefaultGatewayClient.kt$DefaultGatewayClient$error: Exception</ID>
