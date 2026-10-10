@@ -882,7 +882,7 @@ class EntryStateHolderFixtureIntegrationTest {
                 ),
             sessionGatewayFactory = { _, _ -> client },
             runGatewayFactory = runGateway?.let { gateway -> { _, _ -> gateway } },
-            runRecoveryRegistry = recoveryRegistry,
+            dependencies = EntryStateHolderDependencies(runRecoveryRegistry = recoveryRegistry),
         )
 
     private fun connect(holder: EntryStateHolder) {

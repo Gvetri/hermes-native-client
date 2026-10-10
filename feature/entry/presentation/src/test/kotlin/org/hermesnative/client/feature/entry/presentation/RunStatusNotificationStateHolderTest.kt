@@ -719,11 +719,14 @@ class RunStatusNotificationStateHolderTest {
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
-            runRecoveryRegistry = recoveryRegistry,
-            removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-            runStatusNotificationSettingsStore = store,
-            runStatusNotificationPermission = permission,
-            runStatusNotifier = notifier,
+            dependencies =
+                EntryStateHolderDependencies(
+                    runRecoveryRegistry = recoveryRegistry,
+                    removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+                    runStatusNotificationSettingsStore = store,
+                    runStatusNotificationPermission = permission,
+                    runStatusNotifier = notifier,
+                ),
         ).also { holder -> holder.requestRunStatusNotificationPermission = { permissionRequests.incrementAndGet() } }
     }
 

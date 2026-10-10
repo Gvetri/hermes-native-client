@@ -483,26 +483,44 @@ private data class ReleasedConnectionState(
     val observations: List<RunEventObservation>,
 )
 
+data class EntryStateHolderDependencies(
+    val runRecoveryRegistry: RunRecoveryRegistry? = null,
+    val updateRunRecoveryEndpoint: ((String?) -> Unit)? = null,
+    val persistRunRecoveryEntry: ((String, RunRecoveryEntry) -> Unit)? = null,
+    val removeRunRecoveryEntry: ((String, RunRecoveryEntry) -> Unit)? = null,
+    val removeGatewayConnectionUseCase: RemoveGatewayConnection? = null,
+    val runSubmissionUncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
+    val onRunSubmissionCompleted: (() -> Unit)? = null,
+    val onRunSubmissionSettled: (() -> Unit)? = null,
+    val runStatusNotificationSettingsStore: RunStatusNotificationSettingsStore? = null,
+    val runStatusNotificationPermission: RunStatusNotificationPermission? = null,
+    val runStatusNotifier: RunStatusNotifier? = null,
+    val localDiagnostics: LocalDiagnosticsPorts? = null,
+    val sendTimeoutMillis: Long = DEFAULT_SEND_TIMEOUT_MILLIS,
+)
+
 class EntryStateHolder(
     initialState: EntryState,
     private val verifyGatewayConnection: VerifyGatewayConnection? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val sessionGatewayFactory: ((endpoint: String, bearerCredential: String) -> SessionGatewayPort)? = null,
     private val runGatewayFactory: ((endpoint: String, bearerCredential: String) -> RunGatewayPort)? = null,
-    private val runRecoveryRegistry: RunRecoveryRegistry? = null,
-    private val updateRunRecoveryEndpoint: ((String?) -> Unit)? = null,
-    private val persistRunRecoveryEntry: ((String, RunRecoveryEntry) -> Unit)? = null,
-    private val removeRunRecoveryEntry: ((String, RunRecoveryEntry) -> Unit)? = null,
-    private val removeGatewayConnectionUseCase: RemoveGatewayConnection? = null,
-    private val runSubmissionUncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
-    private val onRunSubmissionCompleted: (() -> Unit)? = null,
-    private val onRunSubmissionSettled: (() -> Unit)? = null,
-    private val runStatusNotificationSettingsStore: RunStatusNotificationSettingsStore? = null,
-    private val runStatusNotificationPermission: RunStatusNotificationPermission? = null,
-    private val runStatusNotifier: RunStatusNotifier? = null,
-    private val localDiagnostics: LocalDiagnosticsPorts? = null,
-    private val sendTimeoutMillis: Long = DEFAULT_SEND_TIMEOUT_MILLIS,
+    dependencies: EntryStateHolderDependencies = EntryStateHolderDependencies(),
 ) {
+    private val runRecoveryRegistry = dependencies.runRecoveryRegistry
+    private val updateRunRecoveryEndpoint = dependencies.updateRunRecoveryEndpoint
+    private val persistRunRecoveryEntry = dependencies.persistRunRecoveryEntry
+    private val removeRunRecoveryEntry = dependencies.removeRunRecoveryEntry
+    private val removeGatewayConnectionUseCase = dependencies.removeGatewayConnectionUseCase
+    private val runSubmissionUncertaintyStore = dependencies.runSubmissionUncertaintyStore
+    private val onRunSubmissionCompleted = dependencies.onRunSubmissionCompleted
+    private val onRunSubmissionSettled = dependencies.onRunSubmissionSettled
+    private val runStatusNotificationSettingsStore = dependencies.runStatusNotificationSettingsStore
+    private val runStatusNotificationPermission = dependencies.runStatusNotificationPermission
+    private val runStatusNotifier = dependencies.runStatusNotifier
+    private val localDiagnostics = dependencies.localDiagnostics
+    private val sendTimeoutMillis = dependencies.sendTimeoutMillis
+
     /**
      * Requests the Android notification permission. Assigned by the app
      * composition root before the Settings control is reachable.
@@ -1583,10 +1601,13 @@ class EntryStateHolder(
         val recoveredRun =
             recoverRun(
                 entry = entry,
-                sessionGateway = recoveryContext.sessionGateway,
-                runGateway = recoveryContext.runGateway,
-                expectedConnectionGeneration = expectedConnectionGeneration,
-                expectedHistoryGeneration = expectedHistoryGeneration,
+                context =
+                    RecoveryRunContext(
+                        sessionGateway = recoveryContext.sessionGateway,
+                        runGateway = recoveryContext.runGateway,
+                        connectionGeneration = expectedConnectionGeneration,
+                        historyGeneration = expectedHistoryGeneration,
+                    ),
             )
         synchronized(sessionRequestLock) {
             if (connectionGeneration == expectedConnectionGeneration) {
@@ -1634,16 +1655,13 @@ class EntryStateHolder(
 
     private suspend fun recoverRun(
         entry: RunRecoveryEntry,
-        sessionGateway: SessionGatewayPort,
-        runGateway: RunGatewayPort,
-        expectedConnectionGeneration: Long,
-        expectedHistoryGeneration: Long,
-        requestSessionGeneration: Long? = null,
-        updateVisibleUi: Boolean = false,
+        context: RecoveryRunContext,
     ): Run? {
         val reconciliation =
             try {
-                runInterruptible { ReconcileRun(runGateway, sessionGateway).execute(entry.runId, entry.sessionId) }
+                runInterruptible {
+                    ReconcileRun(context.runGateway, context.sessionGateway).execute(entry.runId, entry.sessionId)
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -1653,10 +1671,10 @@ class EntryStateHolder(
             request =
                 AuthoritativeReconciliationRequest(
                     sessionId = entry.sessionId,
-                    connectionGeneration = expectedConnectionGeneration,
-                    sessionGeneration = requestSessionGeneration,
-                    historyGeneration = expectedHistoryGeneration,
-                    updateVisibleUi = updateVisibleUi,
+                    connectionGeneration = context.connectionGeneration,
+                    sessionGeneration = context.sessionGeneration,
+                    historyGeneration = context.historyGeneration,
+                    updateVisibleUi = context.updateVisibleUi,
                 ),
             reconciliation = reconciliation,
         )
@@ -1960,22 +1978,24 @@ class EntryStateHolder(
                     .orderedSessions(),
             openedSession =
                 openedSession.toOpenSessionUiState(
-                    messages = openedSession.history.toMessageUiStates(),
-                    composerText = sessionDrafts[sessionId] ?: previous.composerText,
-                    sendErrorCategory = sendErrorCategoryFor(sessionId),
-                    hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
-                    latestRun = latestRun,
-                    activeRuns = knownRuns.activeRuns(),
-                    isSending = previous.isSending || runJobs.containsKey(sessionId),
-                    latestRunState =
-                        latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                    latestRunRetryAvailable =
-                        latestRunRetryAvailable(
-                            knownRuns,
+                    OpenSessionOverlay(
+                        messages = openedSession.history.toMessageUiStates(),
+                        composerText = sessionDrafts[sessionId] ?: previous.composerText,
+                        sendErrorCategory = sendErrorCategoryFor(sessionId),
+                        hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
+                        latestRun = latestRun,
+                        activeRuns = knownRuns.activeRuns(),
+                        isSending = previous.isSending || runJobs.containsKey(sessionId),
+                        latestRunState =
                             latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                        ),
-                    activeResponse = observedMessageUiState(latestObservation),
-                    isRefreshing = previous.isRefreshing,
+                        latestRunRetryAvailable =
+                            latestRunRetryAvailable(
+                                knownRuns,
+                                latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                            ),
+                        activeResponse = observedMessageUiState(latestObservation),
+                        isRefreshing = previous.isRefreshing,
+                    ),
                 ).copy(
                     isReconciliationInProgress =
                         previous.isReconciliationInProgress ||
@@ -2006,40 +2026,32 @@ class EntryStateHolder(
         if (pendingTimeoutRecovery != null) {
             reconcileTimedOutSendNow(
                 sessionId = sessionId,
-                requestConnectionGeneration = requestConnectionGeneration,
-                requestSessionGeneration = request.generation,
+                request = ReconciliationRequest(requestConnectionGeneration, request.generation),
                 knownRunIds = pendingTimeoutRecovery.knownRunIds,
             )
         } else if (pendingSettledRecovery != null) {
             reconcileTimedOutSendNow(
                 sessionId = sessionId,
-                requestConnectionGeneration = requestConnectionGeneration,
-                requestSessionGeneration = request.generation,
+                request = ReconciliationRequest(requestConnectionGeneration, request.generation),
                 knownRunIds = pendingSettledRecovery.knownRunIds,
                 resolveWhenNoNewRun = true,
             )
         } else {
             reconcileOpenedRun(
-                sessionId = sessionId,
-                requestSessionGeneration = request.generation,
-                requestConnectionGeneration = requestConnectionGeneration,
-                sessionGateway = gateway,
-                restartObservation = true,
-                runIdToReconcile = runIdToReconcile ?: historyRunIdToReconcile(sessionId, openedSession),
-                clearRefreshWhenNoRun = true,
+                OpenedRunReconcileContext(
+                    sessionId = sessionId,
+                    requestSessionGeneration = request.generation,
+                    requestConnectionGeneration = requestConnectionGeneration,
+                    sessionGateway = gateway,
+                    runIdToReconcile = runIdToReconcile ?: historyRunIdToReconcile(sessionId, openedSession),
+                    restartObservation = true,
+                    clearRefreshWhenNoRun = true,
+                ),
             )
         }
     }
 
-    private fun reconcileOpenedRun(
-        sessionId: SessionId,
-        requestSessionGeneration: Long,
-        requestConnectionGeneration: Long,
-        sessionGateway: SessionGatewayPort,
-        restartObservation: Boolean,
-        runIdToReconcile: RunId? = null,
-        clearRefreshWhenNoRun: Boolean = false,
-    ) {
+    private fun reconcileOpenedRun(context: OpenedRunReconcileContext) {
         val recoveryEntries =
             try {
                 runRecoveryRegistry?.load().orEmpty()
@@ -2047,22 +2059,23 @@ class EntryStateHolder(
                 null
             }
         val recoveryEntriesLoadFailed = recoveryEntries == null
-        val sessionRecoveryEntries = recoveryEntries.orEmpty().filter { entry -> entry.sessionId == sessionId }
-        val context =
-            OpenedRunReconcileContext(
-                sessionId = sessionId,
-                requestSessionGeneration = requestSessionGeneration,
-                requestConnectionGeneration = requestConnectionGeneration,
-                sessionGateway = sessionGateway,
-                runIdToReconcile = runIdToReconcile,
-            )
+        val sessionRecoveryEntries =
+            recoveryEntries.orEmpty().filter { entry -> entry.sessionId == context.sessionId }
         val runIds = reconciliationRunIds(context, sessionRecoveryEntries, recoveryEntriesLoadFailed) ?: return
         if (runIds.isEmpty()) {
-            if (clearRefreshWhenNoRun) {
-                finishReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)
+            if (context.clearRefreshWhenNoRun) {
+                finishReconciliation(
+                    context.sessionId,
+                    context.requestConnectionGeneration,
+                    context.requestSessionGeneration,
+                )
             }
             if (recoveryLoadFailed) {
-                markRecoveryUnavailable(sessionId, requestConnectionGeneration, requestSessionGeneration)
+                markRecoveryUnavailable(
+                    context.sessionId,
+                    context.requestConnectionGeneration,
+                    context.requestSessionGeneration,
+                )
             }
             return
         }
@@ -2073,19 +2086,27 @@ class EntryStateHolder(
         }
         val runToObserve = activeRunToObserve
         if (
-            restartObservation &&
+            context.restartObservation &&
             runToObserve != null &&
-            shouldReconcileCurrentSession(requestConnectionGeneration, requestSessionGeneration, sessionId)
+            shouldReconcileCurrentSession(
+                context.requestConnectionGeneration,
+                context.requestSessionGeneration,
+                context.sessionId,
+            )
         ) {
             startRunObservation(
-                sessionId = sessionId,
+                sessionId = context.sessionId,
                 run = runToObserve,
-                expectedConnectionGeneration = requestConnectionGeneration,
-                expectedSessionGeneration = requestSessionGeneration,
+                expectedConnectionGeneration = context.requestConnectionGeneration,
+                expectedSessionGeneration = context.requestSessionGeneration,
             )
         }
         if (recoveryLoadFailed) {
-            markRecoveryUnavailable(sessionId, requestConnectionGeneration, requestSessionGeneration)
+            markRecoveryUnavailable(
+                context.sessionId,
+                context.requestConnectionGeneration,
+                context.requestSessionGeneration,
+            )
         }
     }
 
@@ -2268,12 +2289,12 @@ class EntryStateHolder(
     ): Boolean =
         synchronized(sessionRequestLock) {
             val opened = _uiState.value.sessionList?.openedSession
-            if (
+            val reconciliationIsSuperseded =
                 connectionGeneration != requestConnectionGeneration ||
-                sessionRequestGeneration != requestSessionGeneration ||
-                opened?.session?.id != sessionId ||
-                reconcilingSessions[sessionId] == requestSessionGeneration
-            ) {
+                    sessionRequestGeneration != requestSessionGeneration ||
+                    opened?.session?.id != sessionId ||
+                    reconcilingSessions[sessionId] == requestSessionGeneration
+            if (reconciliationIsSuperseded) {
                 false
             } else {
                 reconcilingSessions[sessionId] = requestSessionGeneration
@@ -2744,10 +2765,7 @@ class EntryStateHolder(
 
     private fun markTimedOutSendUncertain(
         sessionId: SessionId,
-        current: SessionListUiState,
-        opened: OpenSessionUiState,
-        recoveryDraft: PendingDraft? = null,
-        authoritativeMessages: List<SessionMessageUiState>? = null,
+        ui: TimedOutSendUiContext,
         errorCategory: MessageSendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
     ): Boolean {
         unresolvedSubmissionSessions += sessionId
@@ -2760,16 +2778,16 @@ class EntryStateHolder(
                     ?: LEGACY_ATTEMPT_ID
         }
         pendingRunDrafts.remove(sessionId)?.let { uncertainSendDrafts[sessionId] = it }
-            ?: recoveryDraft?.let { uncertainSendDrafts[sessionId] = it }
+            ?: ui.recoveryDraft?.let { uncertainSendDrafts[sessionId] = it }
         val knownRuns = visibleSessionRuns(sessionId)
         val latestObservation = latestObservationState(sessionId, knownRuns)
         _uiState.value =
             _uiState.value.copy(
                 sessionList =
-                    current.copy(
+                    ui.current.copy(
                         openedSession =
-                            opened.copy(
-                                messages = authoritativeMessages ?: opened.messages,
+                            ui.opened.copy(
+                                messages = ui.authoritativeMessages ?: ui.opened.messages,
                                 isSending = false,
                                 latestRun = knownRuns.latestRun(),
                                 activeRuns = knownRuns.activeRuns(),
@@ -3597,7 +3615,9 @@ class EntryStateHolder(
                         null
                     }
                 val openedSessionUiState =
-                    openedSession.toOpenSessionUiState(messages = openedSession.history.toMessageUiStates())
+                    openedSession.toOpenSessionUiState(
+                        OpenSessionOverlay(messages = openedSession.history.toMessageUiStates()),
+                    )
                 updateCurrentSessionRequest(request.context.generation) { current ->
                     current.copy(
                         sessions =
@@ -3631,19 +3651,22 @@ class EntryStateHolder(
             } catch (error: CancellationException) {
                 throw error
             } catch (_: GatewayException) {
-                if (createdSession == null) {
-                    showCreateSessionFailure(request.context.generation)
-                } else {
-                    showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
-                }
+                handleCreateSessionFailure(request.context, createdSession)
             } catch (_: Exception) {
-                if (createdSession == null) {
-                    showCreateSessionFailure(request.context.generation)
-                } else {
-                    showCreatedSessionFailure(request.context.generation, request.context.query, createdSession)
-                }
+                handleCreateSessionFailure(request.context, createdSession)
             }
         }
+
+    private fun handleCreateSessionFailure(
+        context: SessionRequestContext,
+        createdSession: Session?,
+    ) {
+        if (createdSession == null) {
+            showCreateSessionFailure(context.generation)
+        } else {
+            showCreatedSessionFailure(context.generation, context.query, createdSession)
+        }
+    }
 
     private fun showCreateSessionFailure(requestGeneration: Long) {
         updateCurrentSessionRequest(requestGeneration) { current ->
@@ -3929,22 +3952,24 @@ class EntryStateHolder(
             isUnavailable = false,
             openedSession =
                 openedSession.toOpenSessionUiState(
-                    messages = openedSession.history.toMessageUiStates(),
-                    composerText = sessionDrafts[sessionId].orEmpty(),
-                    sendErrorCategory = sendErrorCategoryFor(sessionId),
-                    hasUnresolvedSubmission =
-                        hasUnresolvedSubmission(sessionId) || recoveryLoadBlocksSession,
-                    latestRun = latestRun,
-                    activeRuns = knownRuns.activeRuns(),
-                    isSending = runJobs.containsKey(sessionId),
-                    latestRunState =
-                        latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                    latestRunRetryAvailable =
-                        latestRunRetryAvailable(
-                            knownRuns,
+                    OpenSessionOverlay(
+                        messages = openedSession.history.toMessageUiStates(),
+                        composerText = sessionDrafts[sessionId].orEmpty(),
+                        sendErrorCategory = sendErrorCategoryFor(sessionId),
+                        hasUnresolvedSubmission =
+                            hasUnresolvedSubmission(sessionId) || recoveryLoadBlocksSession,
+                        latestRun = latestRun,
+                        activeRuns = knownRuns.activeRuns(),
+                        isSending = runJobs.containsKey(sessionId),
+                        latestRunState =
                             latestObservation?.state ?: latestRun?.toRunPresentationState(),
-                        ),
-                    activeResponse = observedMessageUiState(latestObservation),
+                        latestRunRetryAvailable =
+                            latestRunRetryAvailable(
+                                knownRuns,
+                                latestObservation?.state ?: latestRun?.toRunPresentationState(),
+                            ),
+                        activeResponse = observedMessageUiState(latestObservation),
+                    ),
                 ).copy(
                     isRefreshing = recoveryLoadBlocksSession,
                     isReconciliationInProgress =
@@ -3975,8 +4000,7 @@ class EntryStateHolder(
         if (pendingTimeoutRecovery != null) {
             reconcileTimedOutSendNow(
                 sessionId = sessionId,
-                requestConnectionGeneration = requestConnectionGeneration,
-                requestSessionGeneration = request.generation,
+                request = ReconciliationRequest(requestConnectionGeneration, request.generation),
                 knownRunIds = pendingTimeoutRecovery.knownRunIds,
             )
         } else {
@@ -3984,20 +4008,21 @@ class EntryStateHolder(
             if (pendingSettledRecovery != null) {
                 reconcileTimedOutSendNow(
                     sessionId = sessionId,
-                    requestConnectionGeneration = requestConnectionGeneration,
-                    requestSessionGeneration = request.generation,
+                    request = ReconciliationRequest(requestConnectionGeneration, request.generation),
                     knownRunIds = pendingSettledRecovery.knownRunIds,
                     resolveWhenNoNewRun = true,
                 )
             } else {
                 reconcileOpenedRun(
-                    sessionId = sessionId,
-                    requestSessionGeneration = request.generation,
-                    requestConnectionGeneration = requestConnectionGeneration,
-                    sessionGateway = gateway,
-                    restartObservation = true,
-                    runIdToReconcile = historyRunIdToReconcile(sessionId, openedSession),
-                    clearRefreshWhenNoRun = true,
+                    OpenedRunReconcileContext(
+                        sessionId = sessionId,
+                        requestSessionGeneration = request.generation,
+                        requestConnectionGeneration = requestConnectionGeneration,
+                        sessionGateway = gateway,
+                        runIdToReconcile = historyRunIdToReconcile(sessionId, openedSession),
+                        restartObservation = true,
+                        clearRefreshWhenNoRun = true,
+                    ),
                 )
             }
         }
@@ -4126,11 +4151,13 @@ class EntryStateHolder(
         scope.launch {
             val reconciled =
                 reconcileTimedOutSend(
-                    sessionId = sessionId,
-                    requestConnectionGeneration = requestConnectionGeneration,
-                    knownRunIds = knownRunIds,
-                    attemptId = attemptId,
-                    resolveWhenNoNewRun = true,
+                    TimedOutSendReconciliationRequest(
+                        sessionId = sessionId,
+                        connectionGeneration = requestConnectionGeneration,
+                        knownRunIds = knownRunIds,
+                        attemptId = attemptId,
+                        resolveWhenNoNewRun = true,
+                    ),
                 )
             if (reconciled) {
                 val canRetry =
@@ -4439,11 +4466,13 @@ class EntryStateHolder(
         }
         forgetPendingCreate(work.recoverySessionKey, work.pendingCreate)
         return reconcileTimedOutSend(
-            work.sessionId,
-            work.requestConnectionGeneration,
-            work.knownRunIds,
-            work.attemptId,
-            uncertaintyErrorCategory = uncertaintyErrorCategory,
+            TimedOutSendReconciliationRequest(
+                sessionId = work.sessionId,
+                connectionGeneration = work.requestConnectionGeneration,
+                knownRunIds = work.knownRunIds,
+                attemptId = work.attemptId,
+                uncertaintyErrorCategory = uncertaintyErrorCategory,
+            ),
         )
     }
 
@@ -4494,32 +4523,25 @@ class EntryStateHolder(
         }
     }
 
-    private suspend fun reconcileTimedOutSend(
-        sessionId: SessionId,
-        requestConnectionGeneration: Long,
-        knownRunIds: Set<RunId>,
-        attemptId: String,
-        resolveWhenNoNewRun: Boolean = false,
-        uncertaintyErrorCategory: MessageSendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
-    ): Boolean {
+    private suspend fun reconcileTimedOutSend(request: TimedOutSendReconciliationRequest): Boolean {
         var requestEndpoint = ""
         val connectionIsCurrent =
             synchronized(sessionRequestLock) {
-                if (connectionGeneration != requestConnectionGeneration) {
+                if (connectionGeneration != request.connectionGeneration) {
                     false
                 } else {
                     requestEndpoint = _uiState.value.endpoint
-                    pendingTimedOutSends[sessionId] =
+                    pendingTimedOutSends[request.sessionId] =
                         TimedOutSendRecovery(
-                            knownRunIds = knownRunIds,
-                            attemptId = attemptId,
+                            knownRunIds = request.knownRunIds,
+                            attemptId = request.attemptId,
                             draft =
-                                pendingRunDrafts[sessionId]
+                                pendingRunDrafts[request.sessionId]
                                     ?: PendingDraft(
-                                        text = sessionDrafts[sessionId].orEmpty(),
-                                        revision = sessionDraftRevisions[sessionId] ?: 0L,
+                                        text = sessionDrafts[request.sessionId].orEmpty(),
+                                        revision = sessionDraftRevisions[request.sessionId] ?: 0L,
                                     ),
-                            errorCategory = uncertaintyErrorCategory,
+                            errorCategory = request.uncertaintyErrorCategory,
                         )
                     true
                 }
@@ -4528,16 +4550,15 @@ class EntryStateHolder(
         val currentSessionGeneration =
             synchronized(sessionRequestLock) {
                 _uiState.value.sessionList?.openedSession
-                    ?.takeIf { it.session.id == sessionId }
+                    ?.takeIf { it.session.id == request.sessionId }
                     ?.let { sessionRequestGeneration }
             }
         return currentSessionGeneration?.let { generation ->
             reconcileTimedOutSendNow(
-                sessionId = sessionId,
-                requestConnectionGeneration = requestConnectionGeneration,
-                requestSessionGeneration = generation,
-                knownRunIds = knownRunIds,
-                resolveWhenNoNewRun = resolveWhenNoNewRun,
+                sessionId = request.sessionId,
+                request = ReconciliationRequest(request.connectionGeneration, generation),
+                knownRunIds = request.knownRunIds,
+                resolveWhenNoNewRun = request.resolveWhenNoNewRun,
                 requestEndpoint = requestEndpoint,
             )
         } ?: true
@@ -4545,17 +4566,16 @@ class EntryStateHolder(
 
     private suspend fun reconcileTimedOutSendNow(
         sessionId: SessionId,
-        requestConnectionGeneration: Long,
-        requestSessionGeneration: Long,
+        request: ReconciliationRequest,
         knownRunIds: Set<RunId>,
         resolveWhenNoNewRun: Boolean = false,
         requestEndpoint: String = _uiState.value.endpoint,
     ): Boolean {
-        if (!awaitReconciliationClaim(sessionId, requestConnectionGeneration, requestSessionGeneration)) return false
+        if (!awaitReconciliationClaim(sessionId, request.connectionGeneration, request.sessionGeneration)) return false
         return try {
-            val gateways = timedOutSendGateways(requestConnectionGeneration, requestSessionGeneration)
+            val gateways = timedOutSendGateways(request.connectionGeneration, request.sessionGeneration)
             if (gateways == null) {
-                showTimedOutSendFailure(sessionId, requestConnectionGeneration, requestSessionGeneration)
+                showTimedOutSendFailure(sessionId, request.connectionGeneration, request.sessionGeneration)
                 true
             } else {
                 runTimedOutSendReconciliation(
@@ -4564,7 +4584,7 @@ class EntryStateHolder(
                         gateways = gateways,
                         knownRunIds = knownRunIds,
                         requestEndpoint = requestEndpoint,
-                        request = ReconciliationRequest(requestConnectionGeneration, requestSessionGeneration),
+                        request = request,
                         resolveWhenNoNewRun = resolveWhenNoNewRun,
                     ),
                 )
@@ -4572,13 +4592,13 @@ class EntryStateHolder(
         } catch (error: CancellationException) {
             throw error
         } catch (_: GatewayException) {
-            showTimedOutSendFailure(sessionId, requestConnectionGeneration, requestSessionGeneration)
+            showTimedOutSendFailure(sessionId, request.connectionGeneration, request.sessionGeneration)
             true
         } catch (_: Exception) {
-            showTimedOutSendFailure(sessionId, requestConnectionGeneration, requestSessionGeneration)
+            showTimedOutSendFailure(sessionId, request.connectionGeneration, request.sessionGeneration)
             true
         } finally {
-            finishReconciliation(sessionId, requestConnectionGeneration, requestSessionGeneration)
+            finishReconciliation(sessionId, request.connectionGeneration, request.sessionGeneration)
         }
     }
 
@@ -4714,10 +4734,13 @@ class EntryStateHolder(
             } else {
                 markTimedOutSendUncertain(
                     sessionId = sessionId,
-                    current = current,
-                    opened = opened,
-                    recoveryDraft = evaluation.recoveryDraft,
-                    authoritativeMessages = evaluation.authoritativeMessages,
+                    ui =
+                        TimedOutSendUiContext(
+                            current = current,
+                            opened = opened,
+                            recoveryDraft = evaluation.recoveryDraft,
+                            authoritativeMessages = evaluation.authoritativeMessages,
+                        ),
                     errorCategory = evaluation.pendingRecovery?.errorCategory ?: MessageSendErrorCategory.UNCERTAIN,
                 )
             }
@@ -5001,9 +5024,7 @@ class EntryStateHolder(
             val recoveryDraft = pendingTimedOutSends[sessionId]?.draft
             markTimedOutSendUncertain(
                 sessionId,
-                current,
-                opened,
-                recoveryDraft,
+                TimedOutSendUiContext(current, opened, recoveryDraft),
                 errorCategory = pendingTimedOutSends[sessionId]?.errorCategory ?: MessageSendErrorCategory.UNCERTAIN,
             )
             pendingTimedOutSends.remove(sessionId)
@@ -5145,12 +5166,7 @@ class EntryStateHolder(
                     val recoveredRun =
                         recoverRun(
                             entry = entry,
-                            sessionGateway = recoveryContext.sessionGateway,
-                            runGateway = recoveryContext.runGateway,
-                            expectedConnectionGeneration = recoveryContext.connectionGeneration,
-                            expectedHistoryGeneration = recoveryContext.historyGeneration,
-                            requestSessionGeneration = recoveryContext.sessionGeneration,
-                            updateVisibleUi = recoveryContext.updateVisibleUi,
+                            context = recoveryContext,
                         )
                     recoveryFinished = true
                     recoveryCompleted = recoveredRun != null
@@ -6192,32 +6208,34 @@ class EntryStateHolder(
     }
 }
 
-private fun OpenedSession.toOpenSessionUiState(
-    composerText: String = "",
-    sendErrorCategory: MessageSendErrorCategory? = null,
-    hasUnresolvedSubmission: Boolean = false,
-    latestRun: Run? = null,
-    activeRuns: List<Run> = history.runs().activeRuns(),
-    isSending: Boolean = false,
-    latestRunState: RunPresentationState? = null,
-    latestRunRetryAvailable: Boolean = false,
-    activeResponse: SessionMessageUiState? = null,
-    isRefreshing: Boolean = false,
-    messages: List<SessionMessageUiState> = history.messages.map { it.toSessionMessageUiState() }.chronological(),
-): OpenSessionUiState =
+private data class OpenSessionOverlay(
+    val composerText: String = "",
+    val sendErrorCategory: MessageSendErrorCategory? = null,
+    val hasUnresolvedSubmission: Boolean = false,
+    val latestRun: Run? = null,
+    val activeRuns: List<Run>? = null,
+    val isSending: Boolean = false,
+    val latestRunState: RunPresentationState? = null,
+    val latestRunRetryAvailable: Boolean = false,
+    val activeResponse: SessionMessageUiState? = null,
+    val isRefreshing: Boolean = false,
+    val messages: List<SessionMessageUiState>? = null,
+)
+
+private fun OpenedSession.toOpenSessionUiState(overlay: OpenSessionOverlay = OpenSessionOverlay()): OpenSessionUiState =
     OpenSessionUiState(
         session = session.toSessionItemUiState(),
-        messages = messages,
-        composerText = composerText,
-        sendErrorCategory = sendErrorCategory,
-        hasUnresolvedSubmission = hasUnresolvedSubmission,
-        latestRun = latestRun ?: history.latestRun(),
-        activeRuns = activeRuns,
-        isSending = isSending,
-        latestRunState = latestRunState,
-        latestRunRetryAvailable = latestRunRetryAvailable,
-        activeResponse = activeResponse,
-        isRefreshing = isRefreshing,
+        messages = overlay.messages ?: history.messages.map { it.toSessionMessageUiState() }.chronological(),
+        composerText = overlay.composerText,
+        sendErrorCategory = overlay.sendErrorCategory,
+        hasUnresolvedSubmission = overlay.hasUnresolvedSubmission,
+        latestRun = overlay.latestRun ?: history.latestRun(),
+        activeRuns = overlay.activeRuns ?: history.runs().activeRuns(),
+        isSending = overlay.isSending,
+        latestRunState = overlay.latestRunState,
+        latestRunRetryAvailable = overlay.latestRunRetryAvailable,
+        activeResponse = overlay.activeResponse,
+        isRefreshing = overlay.isRefreshing,
     )
 
 private fun RunObservationState.toSessionMessageUiState(retryInput: String? = null): SessionMessageUiState =
@@ -6260,8 +6278,8 @@ private data class RecoveryRunContext(
     val runGateway: RunGatewayPort,
     val connectionGeneration: Long,
     val historyGeneration: Long,
-    val sessionGeneration: Long?,
-    val updateVisibleUi: Boolean,
+    val sessionGeneration: Long? = null,
+    val updateVisibleUi: Boolean = false,
 )
 
 private data class RecoveryGatewayContext(
@@ -6338,7 +6356,9 @@ private data class OpenedRunReconcileContext(
     val requestSessionGeneration: Long,
     val requestConnectionGeneration: Long,
     val sessionGateway: SessionGatewayPort,
-    val runIdToReconcile: RunId?,
+    val runIdToReconcile: RunId? = null,
+    val restartObservation: Boolean = false,
+    val clearRefreshWhenNoRun: Boolean = false,
 )
 
 private data class RunSubmissionWork(
@@ -6441,6 +6461,22 @@ private data class TimedOutSendRecovery(
     val attemptId: String,
     val draft: PendingDraft,
     val errorCategory: MessageSendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
+)
+
+private data class TimedOutSendUiContext(
+    val current: SessionListUiState,
+    val opened: OpenSessionUiState,
+    val recoveryDraft: PendingDraft? = null,
+    val authoritativeMessages: List<SessionMessageUiState>? = null,
+)
+
+private data class TimedOutSendReconciliationRequest(
+    val sessionId: SessionId,
+    val connectionGeneration: Long,
+    val knownRunIds: Set<RunId>,
+    val attemptId: String,
+    val resolveWhenNoNewRun: Boolean = false,
+    val uncertaintyErrorCategory: MessageSendErrorCategory = MessageSendErrorCategory.UNCERTAIN,
 )
 
 private data class TimedOutSendReconciliationOutcome(

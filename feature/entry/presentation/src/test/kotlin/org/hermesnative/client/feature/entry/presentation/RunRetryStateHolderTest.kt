@@ -659,15 +659,18 @@ class RunRetryStateHolderTest {
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
-            runRecoveryRegistry = recoveryRegistry,
-            removeGatewayConnectionUseCase =
-                RemoveGatewayConnection(
-                    DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
+            dependencies =
+                EntryStateHolderDependencies(
+                    runRecoveryRegistry = recoveryRegistry,
+                    removeGatewayConnectionUseCase =
+                        RemoveGatewayConnection(
+                            DefaultGatewayConnectionRepository(InMemoryGatewayConnectionDataSource()),
+                        ),
+                    runSubmissionUncertaintyStore = uncertaintyStore,
+                    persistRunRecoveryEntry = persistRunRecoveryEntry,
+                    removeRunRecoveryEntry = removeRunRecoveryEntry,
+                    onRunSubmissionSettled = onRunSubmissionSettled,
                 ),
-            runSubmissionUncertaintyStore = uncertaintyStore,
-            persistRunRecoveryEntry = persistRunRecoveryEntry,
-            removeRunRecoveryEntry = removeRunRecoveryEntry,
-            onRunSubmissionSettled = onRunSubmissionSettled,
         )
 
     private fun persistentRetryHolder(

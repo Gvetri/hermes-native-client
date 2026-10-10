@@ -2483,20 +2483,27 @@ class RunReconciliationStateHolderTest {
             scope = scope,
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
-            runRecoveryRegistry = recoveryRegistry,
-            runSubmissionUncertaintyStore = uncertaintyStore,
-            persistRunRecoveryEntry = recoveryRegistry?.let { registry -> { _, entry -> registry.save(entry) } },
-            removeRunRecoveryEntry = recoveryRegistry?.let { registry -> { _, entry -> registry.remove(entry) } },
-            removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-            onRunSubmissionCompleted = {
-                gateway.submissionCompleted.countDown()
-                if (gateway.blockSubmissionCompletion) {
-                    check(gateway.releaseSubmissionCompletion.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
-                        "Submission completion was not released."
-                    }
-                }
-            },
-            sendTimeoutMillis = sendTimeoutMillis,
+            dependencies =
+                EntryStateHolderDependencies(
+                    runRecoveryRegistry = recoveryRegistry,
+                    runSubmissionUncertaintyStore = uncertaintyStore,
+                    persistRunRecoveryEntry =
+                        recoveryRegistry?.let { registry -> { _, entry -> registry.save(entry) } },
+                    removeRunRecoveryEntry =
+                        recoveryRegistry?.let { registry -> { _, entry -> registry.remove(entry) } },
+                    removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+                    onRunSubmissionCompleted = {
+                        gateway.submissionCompleted.countDown()
+                        if (gateway.blockSubmissionCompletion) {
+                            check(
+                                gateway.releaseSubmissionCompletion.await(TEST_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS),
+                            ) {
+                                "Submission completion was not released."
+                            }
+                        }
+                    },
+                    sendTimeoutMillis = sendTimeoutMillis,
+                ),
         )
     }
 

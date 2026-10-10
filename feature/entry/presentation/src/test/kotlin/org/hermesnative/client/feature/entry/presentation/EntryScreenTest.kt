@@ -203,9 +203,12 @@ class EntryScreenTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
                 sessionGatewayFactory = { _, _ -> gateway },
                 runGatewayFactory = { _, _ -> gateway },
-                runRecoveryRegistry = recoveryRegistry,
-                persistRunRecoveryEntry = { _, entry -> recoveryRegistry.save(entry) },
-                removeRunRecoveryEntry = { _, entry -> recoveryRegistry.remove(entry) },
+                dependencies =
+                    EntryStateHolderDependencies(
+                        runRecoveryRegistry = recoveryRegistry,
+                        persistRunRecoveryEntry = { _, entry -> recoveryRegistry.save(entry) },
+                        removeRunRecoveryEntry = { _, entry -> recoveryRegistry.remove(entry) },
+                    ),
             )
 
         composeTestRule.setContent {

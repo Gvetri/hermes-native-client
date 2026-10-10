@@ -829,9 +829,12 @@ class RunObservationStateHolderTest {
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
-            runRecoveryRegistry = recoveryRegistry,
-            persistRunRecoveryEntry = persistRunRecoveryEntry,
-            removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+            dependencies =
+                EntryStateHolderDependencies(
+                    runRecoveryRegistry = recoveryRegistry,
+                    persistRunRecoveryEntry = persistRunRecoveryEntry,
+                    removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+                ),
         )
     }
 

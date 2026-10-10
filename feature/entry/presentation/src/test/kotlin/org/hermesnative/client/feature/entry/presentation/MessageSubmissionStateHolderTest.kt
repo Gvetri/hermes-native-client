@@ -655,9 +655,7 @@ class MessageSubmissionStateHolderTest {
             scope = CoroutineScope(SupervisorJob() + dispatcher),
             sessionGatewayFactory = { _, _ -> gateway },
             runGatewayFactory = { _, _ -> gateway },
-            removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
-            runSubmissionUncertaintyStore = uncertaintyStore,
-            onRunSubmissionSettled = gateway.runFinished::countDown,
+            dependencies = submissionHolderDependencies(repository, uncertaintyStore, gateway.runFinished::countDown),
         )
 
     private fun connect(
@@ -793,3 +791,14 @@ class MessageSubmissionStateHolderTest {
         override fun contains(key: PendingRunSubmissionKey): Boolean = addCount > 0
     }
 }
+
+private fun submissionHolderDependencies(
+    repository: GatewayConnectionRepository,
+    uncertaintyStore: RunSubmissionUncertaintyStore,
+    onRunSubmissionSettled: () -> Unit,
+): EntryStateHolderDependencies =
+    EntryStateHolderDependencies(
+        removeGatewayConnectionUseCase = RemoveGatewayConnection(repository),
+        runSubmissionUncertaintyStore = uncertaintyStore,
+        onRunSubmissionSettled = onRunSubmissionSettled,
+    )

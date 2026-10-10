@@ -16,6 +16,7 @@ import org.hermesnative.client.feature.entry.domain.GatewayCapabilities
 import org.hermesnative.client.feature.entry.domain.RunGatewayPort
 import org.hermesnative.client.feature.entry.domain.SessionGatewayPort
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
+import org.hermesnative.client.feature.entry.presentation.EntryStateHolderDependencies
 import org.hermesnative.client.feature.entry.presentation.LocalDiagnosticsPorts
 import java.util.concurrent.atomic.AtomicReference
 
@@ -60,36 +61,39 @@ object EntryWiring {
                 runGatewayFactory ?: { endpoint, bearerCredential ->
                     DefaultGatewayClient(endpoint, bearerCredential)
                 },
-            runRecoveryRegistry = runRecoveryRegistry,
-            updateRunRecoveryEndpoint = recoveryEndpoint::set,
-            persistRunRecoveryEntry = { endpoint, entry ->
-                runRecoveryRegistry.saveForEndpoint(endpoint, entry)
-            },
-            removeRunRecoveryEntry = { endpoint, entry ->
-                runRecoveryRegistry.removeForEndpoint(endpoint, entry)
-            },
-            removeGatewayConnectionUseCase =
-                RemoveGatewayConnection(repository) { endpoint ->
-                    runRecoveryRegistry.clearForEndpoint(endpoint)
-                    endpoint?.let(runSubmissionUncertaintyStore::clearEndpoint)
-                    localDiagnosticsBuffer.clear()
-                },
-            localDiagnostics =
-                LocalDiagnosticsPorts(
-                    recorder = localDiagnosticsBuffer,
-                    store = localDiagnosticsBuffer,
-                    exporter =
-                        AndroidLocalDiagnosticsExporter(
-                            context = context,
-                            buffer = localDiagnosticsBuffer,
-                            clientVersion = clientVersion,
+            dependencies =
+                EntryStateHolderDependencies(
+                    runRecoveryRegistry = runRecoveryRegistry,
+                    updateRunRecoveryEndpoint = recoveryEndpoint::set,
+                    persistRunRecoveryEntry = { endpoint, entry ->
+                        runRecoveryRegistry.saveForEndpoint(endpoint, entry)
+                    },
+                    removeRunRecoveryEntry = { endpoint, entry ->
+                        runRecoveryRegistry.removeForEndpoint(endpoint, entry)
+                    },
+                    removeGatewayConnectionUseCase =
+                        RemoveGatewayConnection(repository) { endpoint ->
+                            runRecoveryRegistry.clearForEndpoint(endpoint)
+                            endpoint?.let(runSubmissionUncertaintyStore::clearEndpoint)
+                            localDiagnosticsBuffer.clear()
+                        },
+                    localDiagnostics =
+                        LocalDiagnosticsPorts(
+                            recorder = localDiagnosticsBuffer,
+                            store = localDiagnosticsBuffer,
+                            exporter =
+                                AndroidLocalDiagnosticsExporter(
+                                    context = context,
+                                    buffer = localDiagnosticsBuffer,
+                                    clientVersion = clientVersion,
+                                ),
                         ),
+                    runSubmissionUncertaintyStore = runSubmissionUncertaintyStore,
+                    runStatusNotificationSettingsStore =
+                        SharedPreferencesRunStatusNotificationSettingsStore(context),
+                    runStatusNotificationPermission = AndroidRunStatusNotificationPermission(context),
+                    runStatusNotifier = SystemRunStatusNotifier(context),
                 ),
-            runSubmissionUncertaintyStore = runSubmissionUncertaintyStore,
-            runStatusNotificationSettingsStore =
-                SharedPreferencesRunStatusNotificationSettingsStore(context),
-            runStatusNotificationPermission = AndroidRunStatusNotificationPermission(context),
-            runStatusNotifier = SystemRunStatusNotifier(context),
         )
     }
 

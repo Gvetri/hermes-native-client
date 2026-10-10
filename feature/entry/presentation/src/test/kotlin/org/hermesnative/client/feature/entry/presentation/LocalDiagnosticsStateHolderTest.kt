@@ -404,12 +404,15 @@ class LocalDiagnosticsStateHolderTest {
             initialState = EntryState(),
             verifyGatewayConnection = verifyGatewayConnection,
             scope = scope,
-            removeGatewayConnectionUseCase = removeGatewayConnectionUseCase,
-            localDiagnostics =
-                LocalDiagnosticsPorts(
-                    recorder = diagnostics,
-                    store = diagnostics,
-                    exporter = diagnostics,
+            dependencies =
+                EntryStateHolderDependencies(
+                    removeGatewayConnectionUseCase = removeGatewayConnectionUseCase,
+                    localDiagnostics =
+                        LocalDiagnosticsPorts(
+                            recorder = diagnostics,
+                            store = diagnostics,
+                            exporter = diagnostics,
+                        ),
                 ),
         )
 
