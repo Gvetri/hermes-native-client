@@ -5,6 +5,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.hermesnative.client.feature.entry.domain.PublicBetaGatewayCapabilityManifest
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 
@@ -314,7 +315,12 @@ private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
             try {
                 val root = Json.parseToJsonElement(capabilities.body).jsonObject
                 root["endpoints"]?.jsonObject ?: error("capability document has no 'endpoints' object")
-            } catch (error: Exception) {
+            } catch (error: IllegalArgumentException) {
+                throw FixtureReadinessException(
+                    "Capability check response is not a valid capability document.",
+                    error,
+                )
+            } catch (error: IllegalStateException) {
                 throw FixtureReadinessException(
                     "Capability check response is not a valid capability document.",
                     error,
@@ -348,7 +354,7 @@ private object HttpFixtureReadinessChecker : FixtureReadinessChecker {
                 }
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             HttpResponse(status, body)
-        } catch (error: Exception) {
+        } catch (error: IOException) {
             throw FixtureReadinessException("Readiness request to $uri failed.", error)
         } finally {
             connection.disconnect()

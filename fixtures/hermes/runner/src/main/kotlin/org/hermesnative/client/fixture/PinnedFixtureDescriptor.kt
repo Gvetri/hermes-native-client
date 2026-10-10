@@ -56,6 +56,22 @@ class PinnedFixtureDescriptor internal constructor(
         }
 
         private fun parse(content: String): PinnedFixtureDescriptor {
+            val fields = collectFields(content)
+            require(fields.isNotEmpty()) { "Descriptor must contain fields." }
+            val provenanceFields = fields.keys.filter { it == "hermes_revision" || it == "image_digest" }
+            require(provenanceFields.size == 1) {
+                "Descriptor must define exactly one immutable provenance field: hermes_revision or image_digest."
+            }
+            requireSupportedFields(fields)
+            requireSchemaAndName(fields)
+            val provenanceField = provenanceFields.single()
+            val provenanceValue = fields.getValue(provenanceField)
+            requireProvenanceFormat(provenanceField, provenanceValue)
+            requirePinnedValues(fields)
+            return PinnedFixtureDescriptor(fields, provenanceField, provenanceValue)
+        }
+
+        private fun collectFields(content: String): LinkedHashMap<String, String> {
             val fields = linkedMapOf<String, String>()
             content.lineSequence().forEachIndexed { index, rawLine ->
                 val line = rawLine.trim()
@@ -77,12 +93,10 @@ class PinnedFixtureDescriptor internal constructor(
                 }
                 fields[key] = value
             }
+            return fields
+        }
 
-            require(fields.isNotEmpty()) { "Descriptor must contain fields." }
-            val provenanceFields = fields.keys.filter { it == "hermes_revision" || it == "image_digest" }
-            require(provenanceFields.size == 1) {
-                "Descriptor must define exactly one immutable provenance field: hermes_revision or image_digest."
-            }
+        private fun requireSupportedFields(fields: Map<String, String>) {
             val missingFields = requiredFields.filterNot(fields::containsKey)
             require(missingFields.isEmpty()) {
                 "Descriptor is missing required lifecycle fields: ${missingFields.joinToString(", ")}."
@@ -93,16 +107,21 @@ class PinnedFixtureDescriptor internal constructor(
             }
             val blankField = fields.keys.firstOrNull { fields.getValue(it).isBlank() }
             require(blankField == null) { "Descriptor field '$blankField' must not be empty." }
+        }
 
+        private fun requireSchemaAndName(fields: Map<String, String>) {
             require(fields.getValue("schema_version") == "1") {
                 "Descriptor schema_version must be 1."
             }
             require(fields.getValue("name").matches(Regex("[a-z][a-z0-9-]*"))) {
                 "Descriptor name must use lowercase kebab-case."
             }
+        }
 
-            val provenanceField = provenanceFields.single()
-            val provenanceValue = fields.getValue(provenanceField)
+        private fun requireProvenanceFormat(
+            provenanceField: String,
+            provenanceValue: String,
+        ) {
             when (provenanceField) {
                 "hermes_revision" ->
                     require(gitRevisionPattern.matches(provenanceValue)) {
@@ -114,7 +133,9 @@ class PinnedFixtureDescriptor internal constructor(
                         "image_digest must be an immutable sha256 digest."
                     }
             }
+        }
 
+        private fun requirePinnedValues(fields: Map<String, String>) {
             requireValue(fields, "startup.command", "build-and-run-pinned-hermes")
             requireValue(fields, "startup.mode", "ephemeral")
             requireValue(fields, "startup.network", "isolated")
@@ -133,8 +154,6 @@ class PinnedFixtureDescriptor internal constructor(
             requireTrue(fields, "synthetic_test_data.reset_after_test")
             requireTrue(fields, "teardown.verify_process_exit")
             requireTrue(fields, "teardown.verify_state_reset")
-
-            return PinnedFixtureDescriptor(fields, provenanceField, provenanceValue)
         }
 
         private fun requireValue(

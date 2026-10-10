@@ -1,5 +1,6 @@
 package org.hermesnative.client.fixture.contract
 
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -67,7 +68,7 @@ object ContractFixtureParser {
                     )
             } catch (error: ContractFixtureException) {
                 throw error
-            } catch (error: Exception) {
+            } catch (error: SerializationException) {
                 throw ContractFixtureException(
                     ContractFixtureFailureCategory.INVALID_JSON,
                     "$sourceName is not valid JSON.",
@@ -146,7 +147,7 @@ object ContractFixtureParser {
                     )
             } catch (error: ContractFixtureException) {
                 throw error
-            } catch (error: Exception) {
+            } catch (error: SerializationException) {
                 throw ContractFixtureException(
                     ContractFixtureFailureCategory.INVALID_JSON,
                     "$sourceName SSE payload is not valid JSON.",
@@ -219,14 +220,7 @@ object ContractFixtureParser {
             when (content[index]) {
                 '"' -> {
                     val end = jsonStringEnd(content, index)
-                    val next = skipWhitespace(content, end)
-                    if (objectDepth == 1 && next < content.length && content[next] == ':') {
-                        val memberName =
-                            runCatching {
-                                (json.parseToJsonElement(content.substring(index, end)) as JsonPrimitive).content
-                            }.getOrNull()
-                        if (memberName == field) count++
-                    }
+                    count += countMemberAt(content, index, end, objectDepth, field)
                     index = end
                 }
                 '{' -> {
@@ -241,6 +235,23 @@ object ContractFixtureParser {
             }
         }
         return count
+    }
+
+    private fun countMemberAt(
+        content: String,
+        start: Int,
+        end: Int,
+        objectDepth: Int,
+        field: String,
+    ): Int {
+        val next = skipWhitespace(content, end)
+        val isMemberCandidate = objectDepth == 1 && next < content.length && content[next] == ':'
+        if (!isMemberCandidate) return 0
+        val memberName =
+            runCatching {
+                (json.parseToJsonElement(content.substring(start, end)) as JsonPrimitive).content
+            }.getOrNull()
+        return if (memberName == field) 1 else 0
     }
 
     private fun jsonStringEnd(
