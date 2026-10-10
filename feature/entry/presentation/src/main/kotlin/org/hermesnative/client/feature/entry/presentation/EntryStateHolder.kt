@@ -33,122 +33,134 @@ import org.hermesnative.client.feature.entry.domain.SessionId
 import java.util.concurrent.atomic.AtomicBoolean
 
 sealed interface EntryUiEvent {
-    data object AddGatewayConnectionClicked : EntryUiEvent
+    sealed interface Connection : EntryUiEvent
 
-    data object ChangeGatewayCredentialClicked : EntryUiEvent
+    data object AddGatewayConnectionClicked : Connection
 
-    data object CancelGatewayCredentialChangeClicked : EntryUiEvent
+    data object ChangeGatewayCredentialClicked : Connection
+
+    data object CancelGatewayCredentialChangeClicked : Connection
 
     data class EndpointChanged(
         val value: String,
-    ) : EntryUiEvent
+    ) : Connection
 
     data class BearerCredentialChanged(
         val value: String,
-    ) : EntryUiEvent
+    ) : Connection
 
     data class SaveCredentialChanged(
         val value: Boolean,
-    ) : EntryUiEvent
+    ) : Connection
 
-    data object VerifyGatewayConnectionClicked : EntryUiEvent
+    data object VerifyGatewayConnectionClicked : Connection
 
-    data object TryAgainClicked : EntryUiEvent
+    data object TryAgainClicked : Connection
 
-    data object RefreshSessionsClicked : EntryUiEvent
+    data object RemoveGatewayConnectionClicked : Connection
 
-    data object RefreshSessionListClicked : EntryUiEvent
+    data object RunStatusNotificationsToggleClicked : Connection
+
+    data class RunStatusNotificationPermissionResult(
+        val granted: Boolean,
+    ) : Connection
+
+    sealed interface SessionNavigation : EntryUiEvent
+
+    data object RefreshSessionsClicked : SessionNavigation
+
+    data object RefreshSessionListClicked : SessionNavigation
 
     data class SessionSearchQueryChanged(
         val value: String,
-    ) : EntryUiEvent
+    ) : SessionNavigation
 
-    data object ClearSessionSearchClicked : EntryUiEvent
+    data object ClearSessionSearchClicked : SessionNavigation
 
-    data object LoadMoreSessionsClicked : EntryUiEvent
+    data object LoadMoreSessionsClicked : SessionNavigation
 
-    data object CreateSessionClicked : EntryUiEvent
+    data class SessionClicked(
+        val sessionId: SessionId,
+    ) : SessionNavigation
+
+    data object ReturnToSessionListClicked : SessionNavigation
+
+    sealed interface SessionMutation : EntryUiEvent
+
+    data object CreateSessionClicked : SessionMutation
 
     data class CreateSessionTitleChanged(
         val value: String,
-    ) : EntryUiEvent
+    ) : SessionMutation
 
-    data object ConfirmCreateSessionClicked : EntryUiEvent
+    data object ConfirmCreateSessionClicked : SessionMutation
 
-    data object CancelCreateSessionClicked : EntryUiEvent
+    data object CancelCreateSessionClicked : SessionMutation
 
     data class RenameSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionMutation
 
     data class RenameSessionTitleChanged(
         val sessionId: SessionId,
         val value: String,
-    ) : EntryUiEvent
+    ) : SessionMutation
 
     data class ConfirmRenameSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionMutation
 
     data class CancelRenameSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionMutation
+
+    sealed interface SessionPinAndDelete : EntryUiEvent
 
     data class PinSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionPinAndDelete
 
     data class UnpinSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionPinAndDelete
 
     data class DeleteSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionPinAndDelete
 
     data class ConfirmDeleteSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionPinAndDelete
 
     data class CancelDeleteSessionClicked(
         val sessionId: SessionId,
-    ) : EntryUiEvent
+    ) : SessionPinAndDelete
 
-    data class SessionClicked(
-        val sessionId: SessionId,
-    ) : EntryUiEvent
-
-    data object ReturnToSessionListClicked : EntryUiEvent
+    sealed interface Run : EntryUiEvent
 
     data class ComposerTextChanged(
         val value: String,
-    ) : EntryUiEvent
+    ) : Run
 
-    data object SendMessageClicked : EntryUiEvent
+    data object SendMessageClicked : Run
 
     data class RetryRunClicked(
         val runId: RunId,
-    ) : EntryUiEvent
+    ) : Run
 
-    data object RemoveGatewayConnectionClicked : EntryUiEvent
+    sealed interface Diagnostics : EntryUiEvent
 
-    data object RunStatusNotificationsToggleClicked : EntryUiEvent
+    data object OpenLocalDiagnosticsClicked : Diagnostics
 
-    data class RunStatusNotificationPermissionResult(
-        val granted: Boolean,
-    ) : EntryUiEvent
+    data object CloseLocalDiagnosticsClicked : Diagnostics
 
-    data object OpenLocalDiagnosticsClicked : EntryUiEvent
+    data object ExportDiagnosticsClicked : Diagnostics
 
-    data object CloseLocalDiagnosticsClicked : EntryUiEvent
+    data object ClearDiagnosticsClicked : Diagnostics
 
-    data object ExportDiagnosticsClicked : EntryUiEvent
+    data object ConfirmClearDiagnosticsClicked : Diagnostics
 
-    data object ClearDiagnosticsClicked : EntryUiEvent
-
-    data object ConfirmClearDiagnosticsClicked : EntryUiEvent
-
-    data object CancelClearDiagnosticsClicked : EntryUiEvent
+    data object CancelClearDiagnosticsClicked : Diagnostics
 }
 
 enum class EntryErrorCategory(
@@ -265,11 +277,6 @@ enum class RunStatusNotificationExplanation(
     ),
 }
 
-private inline fun handled(block: () -> Unit): Boolean {
-    block()
-    return true
-}
-
 internal data class ReleasedConnectionState(
     val jobs: List<Job>,
     val observations: List<RunEventObservation>,
@@ -383,87 +390,86 @@ class EntryStateHolder(
     internal val notifiedTerminalRunIds = mutableSetOf<RunId>()
 
     fun onEvent(event: EntryUiEvent) {
-        when {
-            dispatchConnectionEvent(event) -> Unit
-            dispatchSessionNavigationEvent(event) -> Unit
-            dispatchSessionMutationEvent(event) -> Unit
-            dispatchSessionPinDeleteEvent(event) -> Unit
-            dispatchRunEvent(event) -> Unit
-            dispatchDiagnosticsEvent(event) -> Unit
+        when (event) {
+            is EntryUiEvent.Connection -> dispatchConnectionEvent(event)
+            is EntryUiEvent.SessionNavigation -> dispatchSessionNavigationEvent(event)
+            is EntryUiEvent.SessionMutation -> dispatchSessionMutationEvent(event)
+            is EntryUiEvent.SessionPinAndDelete -> dispatchSessionPinDeleteEvent(event)
+            is EntryUiEvent.Run -> dispatchRunEvent(event)
+            is EntryUiEvent.Diagnostics -> dispatchDiagnosticsEvent(event)
         }
     }
 
-    private fun dispatchConnectionEvent(event: EntryUiEvent): Boolean =
-        when {
-            event is EntryUiEvent.AddGatewayConnectionClicked -> handled { showConnectionSetup() }
-            event is EntryUiEvent.ChangeGatewayCredentialClicked -> handled { showCredentialRotation() }
-            event is EntryUiEvent.CancelGatewayCredentialChangeClicked -> handled { cancelCredentialRotation() }
-            event is EntryUiEvent.EndpointChanged -> handled { updateEndpoint(event.value) }
-            event is EntryUiEvent.BearerCredentialChanged -> handled { updateBearerCredential(event.value) }
-            event is EntryUiEvent.SaveCredentialChanged -> handled { updateSaveCredential(event.value) }
-            event is EntryUiEvent.VerifyGatewayConnectionClicked -> handled { verifyConnection() }
-            event is EntryUiEvent.TryAgainClicked -> handled { verifyConnection() }
-            event is EntryUiEvent.RemoveGatewayConnectionClicked -> handled { removeGatewayConnection() }
-            event is EntryUiEvent.RunStatusNotificationsToggleClicked -> handled { toggleRunStatusNotifications() }
-            event is EntryUiEvent.RunStatusNotificationPermissionResult ->
-                handled { applyRunStatusNotificationPermissionResult(event.granted) }
-            else -> false
+    private fun dispatchConnectionEvent(event: EntryUiEvent.Connection) {
+        when (event) {
+            is EntryUiEvent.AddGatewayConnectionClicked -> showConnectionSetup()
+            is EntryUiEvent.ChangeGatewayCredentialClicked -> showCredentialRotation()
+            is EntryUiEvent.CancelGatewayCredentialChangeClicked -> cancelCredentialRotation()
+            is EntryUiEvent.EndpointChanged -> updateEndpoint(event.value)
+            is EntryUiEvent.BearerCredentialChanged -> updateBearerCredential(event.value)
+            is EntryUiEvent.SaveCredentialChanged -> updateSaveCredential(event.value)
+            is EntryUiEvent.VerifyGatewayConnectionClicked -> verifyConnection()
+            is EntryUiEvent.TryAgainClicked -> verifyConnection()
+            is EntryUiEvent.RemoveGatewayConnectionClicked -> removeGatewayConnection()
+            is EntryUiEvent.RunStatusNotificationsToggleClicked -> toggleRunStatusNotifications()
+            is EntryUiEvent.RunStatusNotificationPermissionResult ->
+                applyRunStatusNotificationPermissionResult(event.granted)
         }
+    }
 
-    private fun dispatchSessionNavigationEvent(event: EntryUiEvent): Boolean =
-        when {
-            event is EntryUiEvent.RefreshSessionsClicked -> handled { refreshSessions() }
-            event is EntryUiEvent.RefreshSessionListClicked -> handled { refreshSessionList() }
-            event is EntryUiEvent.SessionSearchQueryChanged -> handled { updateSearchQuery(event.value) }
-            event is EntryUiEvent.ClearSessionSearchClicked -> handled { clearSearch() }
-            event is EntryUiEvent.LoadMoreSessionsClicked -> handled { loadMoreSessions() }
-            event is EntryUiEvent.SessionClicked -> handled { openSession(event.sessionId) }
-            event is EntryUiEvent.ReturnToSessionListClicked -> handled { returnToSessionList() }
-            else -> false
+    private fun dispatchSessionNavigationEvent(event: EntryUiEvent.SessionNavigation) {
+        when (event) {
+            is EntryUiEvent.RefreshSessionsClicked -> refreshSessions()
+            is EntryUiEvent.RefreshSessionListClicked -> refreshSessionList()
+            is EntryUiEvent.SessionSearchQueryChanged -> updateSearchQuery(event.value)
+            is EntryUiEvent.ClearSessionSearchClicked -> clearSearch()
+            is EntryUiEvent.LoadMoreSessionsClicked -> loadMoreSessions()
+            is EntryUiEvent.SessionClicked -> openSession(event.sessionId)
+            is EntryUiEvent.ReturnToSessionListClicked -> returnToSessionList()
         }
+    }
 
-    private fun dispatchSessionMutationEvent(event: EntryUiEvent): Boolean =
-        when {
-            event is EntryUiEvent.CreateSessionClicked -> handled { showCreateSession() }
-            event is EntryUiEvent.CreateSessionTitleChanged -> handled { updateCreateSessionTitle(event.value) }
-            event is EntryUiEvent.ConfirmCreateSessionClicked -> handled { confirmCreateSession() }
-            event is EntryUiEvent.CancelCreateSessionClicked -> handled { cancelCreateSession() }
-            event is EntryUiEvent.RenameSessionClicked -> handled { showRenameSession(event.sessionId) }
-            event is EntryUiEvent.RenameSessionTitleChanged ->
-                handled { updateRenameSessionTitle(event.sessionId, event.value) }
-            event is EntryUiEvent.ConfirmRenameSessionClicked -> handled { confirmRenameSession(event.sessionId) }
-            event is EntryUiEvent.CancelRenameSessionClicked -> handled { cancelRenameSession(event.sessionId) }
-            else -> false
+    private fun dispatchSessionMutationEvent(event: EntryUiEvent.SessionMutation) {
+        when (event) {
+            is EntryUiEvent.CreateSessionClicked -> showCreateSession()
+            is EntryUiEvent.CreateSessionTitleChanged -> updateCreateSessionTitle(event.value)
+            is EntryUiEvent.ConfirmCreateSessionClicked -> confirmCreateSession()
+            is EntryUiEvent.CancelCreateSessionClicked -> cancelCreateSession()
+            is EntryUiEvent.RenameSessionClicked -> showRenameSession(event.sessionId)
+            is EntryUiEvent.RenameSessionTitleChanged -> updateRenameSessionTitle(event.sessionId, event.value)
+            is EntryUiEvent.ConfirmRenameSessionClicked -> confirmRenameSession(event.sessionId)
+            is EntryUiEvent.CancelRenameSessionClicked -> cancelRenameSession(event.sessionId)
         }
+    }
 
-    private fun dispatchSessionPinDeleteEvent(event: EntryUiEvent): Boolean =
-        when {
-            event is EntryUiEvent.PinSessionClicked -> handled { pinSession(event.sessionId) }
-            event is EntryUiEvent.UnpinSessionClicked -> handled { unpinSession(event.sessionId) }
-            event is EntryUiEvent.DeleteSessionClicked -> handled { showDeleteSession(event.sessionId) }
-            event is EntryUiEvent.ConfirmDeleteSessionClicked -> handled { confirmDeleteSession(event.sessionId) }
-            event is EntryUiEvent.CancelDeleteSessionClicked -> handled { cancelDeleteSession(event.sessionId) }
-            else -> false
+    private fun dispatchSessionPinDeleteEvent(event: EntryUiEvent.SessionPinAndDelete) {
+        when (event) {
+            is EntryUiEvent.PinSessionClicked -> pinSession(event.sessionId)
+            is EntryUiEvent.UnpinSessionClicked -> unpinSession(event.sessionId)
+            is EntryUiEvent.DeleteSessionClicked -> showDeleteSession(event.sessionId)
+            is EntryUiEvent.ConfirmDeleteSessionClicked -> confirmDeleteSession(event.sessionId)
+            is EntryUiEvent.CancelDeleteSessionClicked -> cancelDeleteSession(event.sessionId)
         }
+    }
 
-    private fun dispatchRunEvent(event: EntryUiEvent): Boolean =
-        when {
-            event is EntryUiEvent.ComposerTextChanged -> handled { updateComposerText(event.value) }
-            event is EntryUiEvent.SendMessageClicked -> handled { retryUncertainSubmissionOrSend() }
-            event is EntryUiEvent.RetryRunClicked -> handled { retryRun(event.runId) }
-            else -> false
+    private fun dispatchRunEvent(event: EntryUiEvent.Run) {
+        when (event) {
+            is EntryUiEvent.ComposerTextChanged -> updateComposerText(event.value)
+            is EntryUiEvent.SendMessageClicked -> retryUncertainSubmissionOrSend()
+            is EntryUiEvent.RetryRunClicked -> retryRun(event.runId)
         }
+    }
 
-    private fun dispatchDiagnosticsEvent(event: EntryUiEvent): Boolean =
-        when {
-            event is EntryUiEvent.OpenLocalDiagnosticsClicked -> handled { openLocalDiagnostics() }
-            event is EntryUiEvent.CloseLocalDiagnosticsClicked -> handled { closeLocalDiagnostics() }
-            event is EntryUiEvent.ExportDiagnosticsClicked -> handled { exportLocalDiagnostics() }
-            event is EntryUiEvent.ClearDiagnosticsClicked -> handled { requestClearLocalDiagnostics() }
-            event is EntryUiEvent.ConfirmClearDiagnosticsClicked -> handled { confirmClearLocalDiagnostics() }
-            event is EntryUiEvent.CancelClearDiagnosticsClicked -> handled { cancelClearLocalDiagnostics() }
-            else -> false
+    private fun dispatchDiagnosticsEvent(event: EntryUiEvent.Diagnostics) {
+        when (event) {
+            is EntryUiEvent.OpenLocalDiagnosticsClicked -> openLocalDiagnostics()
+            is EntryUiEvent.CloseLocalDiagnosticsClicked -> closeLocalDiagnostics()
+            is EntryUiEvent.ExportDiagnosticsClicked -> exportLocalDiagnostics()
+            is EntryUiEvent.ClearDiagnosticsClicked -> requestClearLocalDiagnostics()
+            is EntryUiEvent.ConfirmClearDiagnosticsClicked -> confirmClearLocalDiagnostics()
+            is EntryUiEvent.CancelClearDiagnosticsClicked -> cancelClearLocalDiagnostics()
         }
+    }
 
     fun close() {
         val released = releaseConnectionState()
