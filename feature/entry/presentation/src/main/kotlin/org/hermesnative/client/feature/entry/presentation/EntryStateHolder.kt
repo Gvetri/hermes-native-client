@@ -4696,191 +4696,294 @@ class EntryStateHolder(
             val opened =
                 current.openedSession?.takeIf { it.session.id == sessionId }
                     ?: return@synchronized TimedOutSendReconciliationOutcome(applied = false)
-            val pendingRecovery = pendingTimedOutSends[sessionId]
-            val recoveryDraft = pendingRecovery?.draft
-            val pendingKey = pendingRunSubmissionKey(sessionId)
-            val uncertaintySnapshot = runSubmissionUncertaintyStore.snapshot(pendingKey)
-            val attemptId =
-                pendingRecovery?.attemptId ?: uncertaintySnapshot?.attemptId ?: LEGACY_ATTEMPT_ID
-            val authoritativeRuns =
-                mergeRuns(reconciliation.history.runs(), reconciliation.discoveredRuns)
-            val authoritativeRunIds = authoritativeRuns.mapTo(mutableSetOf()) { it.id }
-            val retainedAuthoritativeRuns =
-                authoritativeSessionRuns[sessionId]
-                    .orEmpty()
-                    .filter { existing -> existing.id !in authoritativeRunIds }
-            val authoritativeMessages =
-                reconciliation.history.toMessageUiStates()
-            val uncertaintyBelongsToThisSubmission =
-                uncertaintySnapshot == null ||
-                    (
-                        uncertaintySnapshot.attemptId == attemptId &&
-                            uncertaintySnapshot.knownRunIds == pendingRecovery?.knownRunIds.orEmpty()
-                    )
-            val durableBoundRunId =
-                uncertaintySnapshot
-                    ?.boundRunId
-                    ?.takeIf { uncertaintyBelongsToThisSubmission }
-            val localBoundRunId =
-                uncertainSubmissionRunIds[sessionId]
-                    ?.takeIf {
-                        uncertaintySnapshot == null &&
-                            uncertainSubmissionAttemptIds[sessionId] == attemptId
-                    }
-            val existingBoundSubmissionRun =
-                (durableBoundRunId ?: localBoundRunId)?.let { runId ->
-                    reconciliation.discoveredRuns.lastOrNull { it.id == runId }
-                        ?: visibleSessionRuns(sessionId).lastOrNull { it.id == runId && it.isActive() }
-                }
-            val discoveredLocalRun: Run? = null
-            val discoveredUnattributedRun =
-                existingBoundSubmissionRun == null &&
-                    reconciliation.discoveredRuns.isNotEmpty() &&
-                    uncertaintyBelongsToThisSubmission
-            val submissionRun = existingBoundSubmissionRun ?: discoveredLocalRun
-            val terminalRunIds =
-                reconciliation.discoveredRuns
-                    .filter { run ->
-                        decideRunReconciliation(run) ==
-                            RunReconciliationDecision.CONFIRMED
-                    }
-                    .map { it.id }
-                    .plus(
-                        submissionRun
-                            ?.takeIf { run -> decideRunReconciliation(run) == RunReconciliationDecision.CONFIRMED }
-                            ?.id,
-                    )
-                    .filterNotNull()
-                    .toSet()
-            val submissionConfirmed =
-                submissionRun != null &&
-                    decideRunReconciliation(submissionRun) ==
-                    RunReconciliationDecision.CONFIRMED &&
-                    uncertaintyBelongsToThisSubmission
-            val recoveryStoreAllowsNoNewRun =
-                uncertaintySnapshot == null ||
-                    (
-                        uncertaintyBelongsToThisSubmission &&
-                            uncertaintySnapshot.settled &&
-                            !uncertaintySnapshot.requiresRunMatch
-                    )
-            val noNewRunConfirmsNoSubmission =
-                resolveWhenNoNewRun &&
-                    sessionId !in ambiguousSubmissionSessions &&
-                    !discoveredUnattributedRun &&
-                    recoveryStoreAllowsNoNewRun &&
-                    uncertainSubmissionRunIds[sessionId] == null
-            val canResolveUncertainty =
-                uncertaintyBelongsToThisSubmission &&
-                    (submissionConfirmed || noNewRunConfirmsNoSubmission)
-            val uncertaintyRemoved =
-                !canResolveUncertainty ||
-                    !runSubmissionUncertaintyStore.contains(pendingKey) ||
-                    runCatching {
-                        uncertaintySnapshot != null &&
-                            runSubmissionUncertaintyStore.removeIfSnapshotMatches(
-                                pendingKey,
-                                uncertaintySnapshot,
-                            )
-                    }.getOrDefault(false)
-            val canClearUncertainty = canResolveUncertainty && uncertaintyRemoved
-            val currentUncertaintySnapshot = runSubmissionUncertaintyStore.snapshot(pendingKey)
-            val uncertaintyIdentityIsStable =
-                uncertaintyBelongsToThisSubmission &&
-                    if (canClearUncertainty) {
-                        currentUncertaintySnapshot == null
-                    } else {
-                        if (uncertaintySnapshot == null) {
-                            currentUncertaintySnapshot == null
-                        } else {
-                            currentUncertaintySnapshot?.let { currentSnapshot ->
-                                currentSnapshot.attemptId == uncertaintySnapshot.attemptId &&
-                                    currentSnapshot.knownRunIds == uncertaintySnapshot.knownRunIds &&
-                                    currentSnapshot.boundRunId == uncertaintySnapshot.boundRunId
-                            } ?: false
-                        }
-                    }
-            if (!uncertaintyIdentityIsStable) {
-                return@synchronized TimedOutSendReconciliationOutcome(applied = false)
-            }
+            val evaluation =
+                evaluateTimedOutSendUncertainty(sessionId, reconciliation, resolveWhenNoNewRun)
+                    ?: return@synchronized TimedOutSendReconciliationOutcome(applied = false)
             authoritativeSessionRuns[sessionId] =
-                mergeRuns(retainedAuthoritativeRuns, authoritativeRuns)
-            durableBoundRunId?.let { boundRunId -> uncertainSubmissionRunIds[sessionId] = boundRunId }
-            if (discoveredUnattributedRun) {
+                mergeRuns(evaluation.retainedAuthoritativeRuns, evaluation.authoritativeRuns)
+            evaluation.durableBoundRunId?.let { boundRunId -> uncertainSubmissionRunIds[sessionId] = boundRunId }
+            if (evaluation.discoveredUnattributedRun) {
                 ambiguousSubmissionSessions += sessionId
-                runCatching { runSubmissionUncertaintyStore.markAmbiguous(pendingKey, attemptId) }
-            }
-            terminalRunIds.forEach { runId -> forgetUnresolvedLocalRun(sessionId, runId) }
-            if (canClearUncertainty) {
-                unresolvedSubmissionSessions.remove(sessionId)
-                ambiguousSubmissionSessions.remove(sessionId)
-                uncertainSubmissionRunIds.remove(sessionId)
-                uncertainSubmissionAttemptIds.remove(sessionId)
-                if (submissionRun != null) {
-                    forgetObservationState(sessionId, submissionRun.id)
+                runCatching {
+                    runSubmissionUncertaintyStore.markAmbiguous(evaluation.pendingKey, evaluation.attemptId)
                 }
-                uncertainSendDrafts.remove(sessionId)
-                val clearedSendErrorCategory =
-                    if (resolveWhenNoNewRun) {
-                        MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
-                    } else {
-                        pendingRecovery?.errorCategory ?: MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
-                    }
-                sessionSendErrors[sessionId] =
-                    clearedSendErrorCategory
-                val knownRuns = visibleSessionRuns(sessionId)
-                val latestObservation = latestObservationState(sessionId, knownRuns)
-                _uiState.value =
-                    _uiState.value.copy(
-                        sessionList =
-                            current.copy(
-                                openedSession =
-                                    opened.copy(
-                                        messages = authoritativeMessages,
-                                        composerText = sessionDrafts[sessionId].orEmpty(),
-                                        isSending = false,
-                                        latestRun = knownRuns.latestRun(),
-                                        activeRuns = knownRuns.activeRuns(),
-                                        latestRunState =
-                                            latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
-                                        latestRunRetryAvailable =
-                                            latestRunRetryAvailable(
-                                                knownRuns,
-                                                latestObservation?.state
-                                                    ?: knownRuns.latestRun()?.toRunPresentationState(),
-                                            ),
-                                        activeResponse = observedMessageUiState(latestObservation),
-                                        sendErrorCategory = clearedSendErrorCategory,
-                                        hasUnresolvedSubmission = false,
-                                        errorCategory = null,
-                                        isStale = false,
-                                    ),
-                            ),
-                    )
+            }
+            evaluation.terminalRunIds.forEach { runId -> forgetUnresolvedLocalRun(sessionId, runId) }
+            if (evaluation.canClearUncertainty) {
+                clearTimedOutSendUncertainty(sessionId, current, opened, evaluation, resolveWhenNoNewRun)
             } else {
                 markTimedOutSendUncertain(
                     sessionId = sessionId,
                     current = current,
                     opened = opened,
-                    recoveryDraft = recoveryDraft,
-                    authoritativeMessages = authoritativeMessages,
-                    errorCategory = pendingRecovery?.errorCategory ?: MessageSendErrorCategory.UNCERTAIN,
+                    recoveryDraft = evaluation.recoveryDraft,
+                    authoritativeMessages = evaluation.authoritativeMessages,
+                    errorCategory = evaluation.pendingRecovery?.errorCategory ?: MessageSendErrorCategory.UNCERTAIN,
                 )
             }
             pendingTimedOutSends.remove(sessionId)
             TimedOutSendReconciliationOutcome(
                 applied = true,
-                runToObserve = (existingBoundSubmissionRun ?: discoveredLocalRun)?.takeIf(Run::isActive),
+                runToObserve = evaluation.boundSubmissionRun?.takeIf(Run::isActive),
                 runToPersist =
-                    discoveredLocalRun
+                    evaluation.discoveredLocalRun
                         ?.takeIf(Run::isActive)
                         ?.let { RunRecoveryEntry(sessionId, it.id) },
                 runToRemove =
-                    submissionRun
-                        ?.takeIf { canClearUncertainty && !it.isActive() }
+                    evaluation.submissionRun
+                        ?.takeIf { evaluation.canClearUncertainty && !it.isActive() }
                         ?.let { RunRecoveryEntry(sessionId, it.id) },
             )
         }
+
+    private fun evaluateTimedOutSendUncertainty(
+        sessionId: SessionId,
+        reconciliation: SessionReconciliation,
+        resolveWhenNoNewRun: Boolean,
+    ): TimedOutSendUncertainty? {
+        val pendingRecovery = pendingTimedOutSends[sessionId]
+        val pendingKey = pendingRunSubmissionKey(sessionId)
+        val uncertaintySnapshot = runSubmissionUncertaintyStore.snapshot(pendingKey)
+        val attemptId =
+            pendingRecovery?.attemptId ?: uncertaintySnapshot?.attemptId ?: LEGACY_ATTEMPT_ID
+        val authoritativeRuns = authoritativeRunsFor(reconciliation)
+        val retainedAuthoritativeRuns = retainedAuthoritativeRuns(sessionId, authoritativeRuns)
+        val belongsToThisSubmission =
+            uncertaintyBelongsToSubmission(uncertaintySnapshot, pendingRecovery, attemptId)
+        val durableBoundRunId =
+            uncertaintySnapshot
+                ?.boundRunId
+                ?.takeIf { belongsToThisSubmission }
+        val localBoundRunId = localBoundRunIdFor(sessionId, attemptId, uncertaintySnapshot)
+        val boundSubmissionRun = boundSubmissionRun(sessionId, durableBoundRunId, localBoundRunId, reconciliation)
+        val discoveredLocalRun: Run? = null
+        val discoveredUnattributedRun =
+            discoveredUnattributedRun(boundSubmissionRun, reconciliation, belongsToThisSubmission)
+        val submissionRun = boundSubmissionRun ?: discoveredLocalRun
+        val terminalRunIds = confirmedTerminalRunIds(reconciliation, submissionRun)
+        val recoveryAllowsNoNewRun =
+            recoveryStoreAllowsNoNewRun(uncertaintySnapshot, belongsToThisSubmission)
+        val noNewRunConfirms =
+            noNewRunConfirmsNoSubmission(
+                sessionId = sessionId,
+                resolveWhenNoNewRun = resolveWhenNoNewRun,
+                discoveredUnattributedRun = discoveredUnattributedRun,
+                recoveryStoreAllowsNoNewRun = recoveryAllowsNoNewRun,
+            )
+        val submissionConfirms = submissionConfirmed(submissionRun, belongsToThisSubmission)
+        val canResolveUncertainty = belongsToThisSubmission && (submissionConfirms || noNewRunConfirms)
+        val uncertaintyRemoved = uncertaintyCanBeRemoved(pendingKey, uncertaintySnapshot, canResolveUncertainty)
+        val canClearUncertainty = canResolveUncertainty && uncertaintyRemoved
+        val identityIsStable =
+            uncertaintyIdentityIsStable(pendingKey, uncertaintySnapshot, canClearUncertainty, belongsToThisSubmission)
+        return if (identityIsStable) {
+            TimedOutSendUncertainty(
+                pendingKey = pendingKey,
+                pendingRecovery = pendingRecovery,
+                recoveryDraft = pendingRecovery?.draft,
+                attemptId = attemptId,
+                authoritativeMessages = reconciliation.history.toMessageUiStates(),
+                retainedAuthoritativeRuns = retainedAuthoritativeRuns,
+                authoritativeRuns = authoritativeRuns,
+                durableBoundRunId = durableBoundRunId,
+                discoveredUnattributedRun = discoveredUnattributedRun,
+                boundSubmissionRun = boundSubmissionRun,
+                discoveredLocalRun = discoveredLocalRun,
+                submissionRun = submissionRun,
+                terminalRunIds = terminalRunIds,
+                canClearUncertainty = canClearUncertainty,
+            )
+        } else {
+            null
+        }
+    }
+
+    private fun authoritativeRunsFor(reconciliation: SessionReconciliation): List<Run> =
+        mergeRuns(reconciliation.history.runs(), reconciliation.discoveredRuns)
+
+    private fun retainedAuthoritativeRuns(
+        sessionId: SessionId,
+        incoming: List<Run>,
+    ): List<Run> {
+        val incomingRunIds = incoming.mapTo(mutableSetOf()) { it.id }
+        return authoritativeSessionRuns[sessionId]
+            .orEmpty()
+            .filter { existing -> existing.id !in incomingRunIds }
+    }
+
+    private fun uncertaintyBelongsToSubmission(
+        uncertaintySnapshot: RunSubmissionUncertaintySnapshot?,
+        pendingRecovery: TimedOutSendRecovery?,
+        attemptId: String,
+    ): Boolean =
+        uncertaintySnapshot == null ||
+            (
+                uncertaintySnapshot.attemptId == attemptId &&
+                    uncertaintySnapshot.knownRunIds == pendingRecovery?.knownRunIds.orEmpty()
+            )
+
+    private fun localBoundRunIdFor(
+        sessionId: SessionId,
+        attemptId: String,
+        uncertaintySnapshot: RunSubmissionUncertaintySnapshot?,
+    ): RunId? =
+        uncertainSubmissionRunIds[sessionId]
+            ?.takeIf {
+                uncertaintySnapshot == null && uncertainSubmissionAttemptIds[sessionId] == attemptId
+            }
+
+    private fun boundSubmissionRun(
+        sessionId: SessionId,
+        durableBoundRunId: RunId?,
+        localBoundRunId: RunId?,
+        reconciliation: SessionReconciliation,
+    ): Run? =
+        (durableBoundRunId ?: localBoundRunId)?.let { runId ->
+            reconciliation.discoveredRuns.lastOrNull { it.id == runId }
+                ?: visibleSessionRuns(sessionId).lastOrNull { it.id == runId && it.isActive() }
+        }
+
+    private fun discoveredUnattributedRun(
+        boundSubmissionRun: Run?,
+        reconciliation: SessionReconciliation,
+        belongsToThisSubmission: Boolean,
+    ): Boolean =
+        boundSubmissionRun == null &&
+            reconciliation.discoveredRuns.isNotEmpty() &&
+            belongsToThisSubmission
+
+    private fun confirmedTerminalRunIds(
+        reconciliation: SessionReconciliation,
+        submissionRun: Run?,
+    ): Set<RunId> =
+        reconciliation.discoveredRuns
+            .filter { run ->
+                decideRunReconciliation(run) ==
+                    RunReconciliationDecision.CONFIRMED
+            }
+            .map { it.id }
+            .plus(
+                submissionRun
+                    ?.takeIf { run -> decideRunReconciliation(run) == RunReconciliationDecision.CONFIRMED }
+                    ?.id,
+            )
+            .filterNotNull()
+            .toSet()
+
+    private fun submissionConfirmed(
+        submissionRun: Run?,
+        belongsToThisSubmission: Boolean,
+    ): Boolean =
+        submissionRun != null &&
+            decideRunReconciliation(submissionRun) == RunReconciliationDecision.CONFIRMED &&
+            belongsToThisSubmission
+
+    private fun recoveryStoreAllowsNoNewRun(
+        uncertaintySnapshot: RunSubmissionUncertaintySnapshot?,
+        belongsToThisSubmission: Boolean,
+    ): Boolean =
+        uncertaintySnapshot == null ||
+            (
+                belongsToThisSubmission &&
+                    uncertaintySnapshot.settled &&
+                    !uncertaintySnapshot.requiresRunMatch
+            )
+
+    private fun noNewRunConfirmsNoSubmission(
+        sessionId: SessionId,
+        resolveWhenNoNewRun: Boolean,
+        discoveredUnattributedRun: Boolean,
+        recoveryStoreAllowsNoNewRun: Boolean,
+    ): Boolean =
+        resolveWhenNoNewRun &&
+            sessionId !in ambiguousSubmissionSessions &&
+            !discoveredUnattributedRun &&
+            recoveryStoreAllowsNoNewRun &&
+            uncertainSubmissionRunIds[sessionId] == null
+
+    private fun uncertaintyCanBeRemoved(
+        pendingKey: PendingRunSubmissionKey,
+        uncertaintySnapshot: RunSubmissionUncertaintySnapshot?,
+        canResolveUncertainty: Boolean,
+    ): Boolean =
+        !canResolveUncertainty ||
+            !runSubmissionUncertaintyStore.contains(pendingKey) ||
+            runCatching {
+                uncertaintySnapshot != null &&
+                    runSubmissionUncertaintyStore.removeIfSnapshotMatches(pendingKey, uncertaintySnapshot)
+            }.getOrDefault(false)
+
+    private fun uncertaintyIdentityIsStable(
+        pendingKey: PendingRunSubmissionKey,
+        uncertaintySnapshot: RunSubmissionUncertaintySnapshot?,
+        canClearUncertainty: Boolean,
+        belongsToThisSubmission: Boolean,
+    ): Boolean {
+        val currentSnapshot = runSubmissionUncertaintyStore.snapshot(pendingKey)
+        val stable =
+            if (canClearUncertainty) {
+                currentSnapshot == null
+            } else if (uncertaintySnapshot == null) {
+                currentSnapshot == null
+            } else {
+                currentSnapshot?.let { current ->
+                    current.attemptId == uncertaintySnapshot.attemptId &&
+                        current.knownRunIds == uncertaintySnapshot.knownRunIds &&
+                        current.boundRunId == uncertaintySnapshot.boundRunId
+                } ?: false
+            }
+        return belongsToThisSubmission && stable
+    }
+
+    private fun clearTimedOutSendUncertainty(
+        sessionId: SessionId,
+        current: SessionListUiState,
+        opened: OpenSessionUiState,
+        evaluation: TimedOutSendUncertainty,
+        resolveWhenNoNewRun: Boolean,
+    ) {
+        unresolvedSubmissionSessions.remove(sessionId)
+        ambiguousSubmissionSessions.remove(sessionId)
+        uncertainSubmissionRunIds.remove(sessionId)
+        uncertainSubmissionAttemptIds.remove(sessionId)
+        evaluation.submissionRun?.let { run -> forgetObservationState(sessionId, run.id) }
+        uncertainSendDrafts.remove(sessionId)
+        val clearedSendErrorCategory =
+            if (resolveWhenNoNewRun) {
+                MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            } else {
+                evaluation.pendingRecovery?.errorCategory ?: MessageSendErrorCategory.GATEWAY_REQUEST_FAILED
+            }
+        sessionSendErrors[sessionId] = clearedSendErrorCategory
+        val knownRuns = visibleSessionRuns(sessionId)
+        val latestObservation = latestObservationState(sessionId, knownRuns)
+        _uiState.value =
+            _uiState.value.copy(
+                sessionList =
+                    current.copy(
+                        openedSession =
+                            opened.copy(
+                                messages = evaluation.authoritativeMessages,
+                                composerText = sessionDrafts[sessionId].orEmpty(),
+                                isSending = false,
+                                latestRun = knownRuns.latestRun(),
+                                activeRuns = knownRuns.activeRuns(),
+                                latestRunState =
+                                    latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                latestRunRetryAvailable =
+                                    latestRunRetryAvailable(
+                                        knownRuns,
+                                        latestObservation?.state ?: knownRuns.latestRun()?.toRunPresentationState(),
+                                    ),
+                                activeResponse = observedMessageUiState(latestObservation),
+                                sendErrorCategory = clearedSendErrorCategory,
+                                hasUnresolvedSubmission = false,
+                                errorCategory = null,
+                                isStale = false,
+                            ),
+                    ),
+            )
+    }
 
     private fun showTimedOutSendFailure(
         sessionId: SessionId,
@@ -6314,6 +6417,23 @@ private data class TimedOutSendAttempt(
     val requestEndpoint: String,
     val request: ReconciliationRequest,
     val resolveWhenNoNewRun: Boolean,
+)
+
+private data class TimedOutSendUncertainty(
+    val pendingKey: PendingRunSubmissionKey,
+    val pendingRecovery: TimedOutSendRecovery?,
+    val recoveryDraft: PendingDraft?,
+    val attemptId: String,
+    val authoritativeMessages: List<SessionMessageUiState>,
+    val retainedAuthoritativeRuns: List<Run>,
+    val authoritativeRuns: List<Run>,
+    val durableBoundRunId: RunId?,
+    val discoveredUnattributedRun: Boolean,
+    val boundSubmissionRun: Run?,
+    val discoveredLocalRun: Run?,
+    val submissionRun: Run?,
+    val terminalRunIds: Set<RunId>,
+    val canClearUncertainty: Boolean,
 )
 
 private data class TimedOutSendRecovery(
