@@ -13,7 +13,21 @@ data class RunSubmissionUncertaintySnapshot(
     val requiresRunMatch: Boolean,
 )
 
-interface RunSubmissionUncertaintyStore {
+interface RunSubmissionUncertaintyReader {
+    fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = emptySet()
+
+    fun attemptId(key: PendingRunSubmissionKey): String? = null
+
+    fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? = null
+
+    fun boundRunId(key: PendingRunSubmissionKey): RunId? = null
+
+    fun isSettled(key: PendingRunSubmissionKey): Boolean = false
+
+    fun requiresRunMatch(key: PendingRunSubmissionKey): Boolean = false
+}
+
+interface RunSubmissionUncertaintyStore : RunSubmissionUncertaintyReader {
     fun add(
         key: PendingRunSubmissionKey,
         knownRunIds: Set<RunId> = emptySet(),
@@ -29,33 +43,21 @@ interface RunSubmissionUncertaintyStore {
 
     fun clearEndpoint(endpoint: String) = Unit
 
-    fun knownRunIds(key: PendingRunSubmissionKey): Set<RunId> = emptySet()
-
-    fun attemptId(key: PendingRunSubmissionKey): String? = null
-
-    fun snapshot(key: PendingRunSubmissionKey): RunSubmissionUncertaintySnapshot? = null
-
     fun bindRun(
         key: PendingRunSubmissionKey,
         runId: RunId,
         attemptId: String? = null,
     ): Boolean = true
 
-    fun boundRunId(key: PendingRunSubmissionKey): RunId? = null
-
     fun markSettled(
         key: PendingRunSubmissionKey,
         attemptId: String? = null,
     ): Boolean = true
 
-    fun isSettled(key: PendingRunSubmissionKey): Boolean = false
-
     fun markAmbiguous(
         key: PendingRunSubmissionKey,
         attemptId: String? = null,
     ): Boolean = true
-
-    fun requiresRunMatch(key: PendingRunSubmissionKey): Boolean = false
 
     fun removeIfKnownRunIdsMatch(
         key: PendingRunSubmissionKey,

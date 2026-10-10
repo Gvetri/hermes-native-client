@@ -25,11 +25,11 @@ class EndpointScopedRunRecoveryRegistry(
         try {
             synchronized(RunRecoveryStorageTransactions.lock) {
                 registry(endpoint).save(entry)
-                removeFallbackEntry(endpoint, entry)
+                FallbackRecoveryEntries.remove(endpoint, entry)
             }
         } catch (error: Exception) {
             synchronized(RunRecoveryStorageTransactions.lock) {
-                fallbackEntries(endpoint).add(entry)
+                FallbackRecoveryEntries.forEndpoint(endpoint).add(entry)
             }
             throw error
         }
@@ -45,14 +45,14 @@ class EndpointScopedRunRecoveryRegistry(
     ) {
         synchronized(RunRecoveryStorageTransactions.lock) {
             registry(endpoint).remove(entry)
-            removeFallbackEntry(endpoint, entry)
+            FallbackRecoveryEntries.remove(endpoint, entry)
         }
     }
 
     fun clearForEndpoint(endpoint: String?) {
         synchronized(RunRecoveryStorageTransactions.lock) {
             registry(endpoint).clear()
-            pendingEntries.remove(endpoint)
+            FallbackRecoveryEntries.clear(endpoint)
         }
     }
 
@@ -75,7 +75,7 @@ class EndpointScopedRunRecoveryRegistry(
 
     private fun loadForEndpoint(endpoint: String?): List<RunRecoveryEntry> =
         synchronized(RunRecoveryStorageTransactions.lock) {
-            (registry(endpoint).load() + fallbackEntries(endpoint))
+            (registry(endpoint).load() + FallbackRecoveryEntries.forEndpoint(endpoint))
                 .distinct()
                 .sortedWith(compareBy({ it.sessionId.value }, { it.runId.value }))
         }
@@ -86,20 +86,22 @@ class EndpointScopedRunRecoveryRegistry(
                 DefaultRunRecoveryRegistry(storageForEndpoint(endpoint))
             }
         }
+}
 
-    private fun fallbackEntries(endpoint: String?): MutableSet<RunRecoveryEntry> {
-        return pendingEntries.getOrPut(endpoint) { mutableSetOf() }
-    }
+private object FallbackRecoveryEntries {
+    private val pending = mutableMapOf<String?, MutableSet<RunRecoveryEntry>>()
 
-    private fun removeFallbackEntry(
+    fun forEndpoint(endpoint: String?): MutableSet<RunRecoveryEntry> = pending.getOrPut(endpoint) { mutableSetOf() }
+
+    fun remove(
         endpoint: String?,
         entry: RunRecoveryEntry,
     ) {
-        fallbackEntries(endpoint).remove(entry)
-        if (pendingEntries[endpoint].isNullOrEmpty()) pendingEntries.remove(endpoint)
+        forEndpoint(endpoint).remove(entry)
+        if (pending[endpoint].isNullOrEmpty()) pending.remove(endpoint)
     }
 
-    private companion object {
-        val pendingEntries = mutableMapOf<String?, MutableSet<RunRecoveryEntry>>()
+    fun clear(endpoint: String?) {
+        pending.remove(endpoint)
     }
 }

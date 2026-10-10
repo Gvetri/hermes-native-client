@@ -44,12 +44,13 @@ internal object GatewayJsonParser {
         operation: String,
         root: JsonObject,
     ): Map<String, GatewayEndpoint> {
-        val endpoints = requiredObject(root, "endpoints", operation)
+        val endpoints = GatewayJsonFields.requiredObject(root, "endpoints", operation)
         return endpoints.mapValues { (name, value) ->
-            val endpoint = value as? JsonObject ?: invalid(operation, "field 'endpoints.$name' must be an object")
+            val endpoint =
+                value as? JsonObject ?: invalid(operation, "field 'endpoints.$name' must be an object")
             GatewayEndpoint(
-                method = requiredNonBlankString(endpoint, "method", operation),
-                path = requiredNonBlankString(endpoint, "path", operation),
+                method = GatewayJsonFields.requiredNonBlankString(endpoint, "method", operation),
+                path = GatewayJsonFields.requiredNonBlankString(endpoint, "path", operation),
             )
         }
     }
@@ -58,16 +59,16 @@ internal object GatewayJsonParser {
         operation: String,
         root: JsonObject,
     ): SessionPage {
-        requireObjectField(root, "object", LIST_OBJECT, operation)
-        val limit = requiredInt(root, "limit", operation)
-        val offset = requiredInt(root, "offset", operation)
+        GatewayJsonFields.requireObjectField(root, "object", LIST_OBJECT, operation)
+        val limit = GatewayJsonFields.requiredInt(root, "limit", operation)
+        val offset = GatewayJsonFields.requiredInt(root, "offset", operation)
         if (limit <= 0) invalid(operation, "field 'limit' must be positive")
         if (offset < 0) invalid(operation, "field 'offset' must be non-negative")
         val sessions =
-            requiredArray(root, "data", operation).mapIndexed { index, value ->
-                parseSession(value, "$operation.data[$index]")
+            GatewayJsonFields.requiredArray(root, "data", operation).mapIndexed { index, value ->
+                GatewayJsonElements.parseSession(value, "$operation.data[$index]")
             }
-        val hasMore = requiredBoolean(root, "has_more", operation)
+        val hasMore = GatewayJsonFields.requiredBoolean(root, "has_more", operation)
         return SessionPage(
             sessions = sessions,
             nextOffset = if (hasMore) offset + limit else null,
@@ -78,28 +79,28 @@ internal object GatewayJsonParser {
         operation: String,
         root: JsonObject,
     ): Session {
-        requireObjectField(root, "object", SESSION_OBJECT, operation)
-        val session = requiredObject(root, "session", operation)
-        return parseSession(session, "$operation.session")
+        GatewayJsonFields.requireObjectField(root, "object", SESSION_OBJECT, operation)
+        val session = GatewayJsonFields.requiredObject(root, "session", operation)
+        return GatewayJsonElements.parseSession(session, "$operation.session")
     }
 
     fun parseHistory(
         operation: String,
         root: JsonObject,
     ): SessionHistory {
-        requireObjectField(root, "object", LIST_OBJECT, operation)
-        requiredObject(root, "pagination", operation)
+        GatewayJsonFields.requireObjectField(root, "object", LIST_OBJECT, operation)
+        GatewayJsonFields.requiredObject(root, "pagination", operation)
         val messageIds = mutableSetOf<String>()
         val messages =
-            requiredArray(root, "data", operation).mapIndexed { index, value ->
-                parseMessage(value, "$operation.data[$index]").also { message ->
+            GatewayJsonFields.requiredArray(root, "data", operation).mapIndexed { index, value ->
+                GatewayJsonElements.parseMessage(value, "$operation.data[$index]").also { message ->
                     if (!messageIds.add(message.id)) {
                         invalid(operation, "field 'data[$index].id' duplicates another message ID")
                     }
                 }
             }
         return SessionHistory(
-            sessionId = SessionId(requiredNonBlankString(root, "session_id", operation)),
+            sessionId = SessionId(GatewayJsonFields.requiredNonBlankString(root, "session_id", operation)),
             messages = messages,
         )
     }
@@ -109,12 +110,12 @@ internal object GatewayJsonParser {
         root: JsonObject,
         expectedSessionId: SessionId,
     ) {
-        requireObjectField(root, "object", SESSION_DELETED_OBJECT, operation)
-        val deletedId = requiredNonBlankString(root, "id", operation)
+        GatewayJsonFields.requireObjectField(root, "object", SESSION_DELETED_OBJECT, operation)
+        val deletedId = GatewayJsonFields.requiredNonBlankString(root, "id", operation)
         if (deletedId != expectedSessionId.value) {
             invalid(operation, "field 'id' does not match the requested Session")
         }
-        if (!requiredBoolean(root, "deleted", operation)) {
+        if (!GatewayJsonFields.requiredBoolean(root, "deleted", operation)) {
             invalid(operation, "field 'deleted' must confirm the Session deletion")
         }
     }
@@ -129,10 +130,10 @@ internal object GatewayJsonParser {
         operation: String,
         root: JsonObject,
     ): RunAdmission {
-        val runId = RunId(requiredNonBlankString(root, "run_id", operation))
-        val status = requiredNonBlankString(root, "status", operation)
+        val runId = RunId(GatewayJsonFields.requiredNonBlankString(root, "run_id", operation))
+        val status = GatewayJsonFields.requiredNonBlankString(root, "status", operation)
         if (root.containsKey("replayed")) {
-            requiredBoolean(root, "replayed", operation)
+            GatewayJsonFields.requiredBoolean(root, "replayed", operation)
         }
         return RunAdmission(runId = runId, status = status)
     }
@@ -141,11 +142,11 @@ internal object GatewayJsonParser {
         operation: String,
         root: JsonObject,
     ): Run {
-        requireObjectField(root, "object", RUN_OBJECT, operation)
+        GatewayJsonFields.requireObjectField(root, "object", RUN_OBJECT, operation)
         return Run(
-            id = RunId(requiredNonBlankString(root, "run_id", operation)),
-            sessionId = SessionId(requiredNonBlankString(root, "session_id", operation)),
-            status = requiredNonBlankString(root, "status", operation),
+            id = RunId(GatewayJsonFields.requiredNonBlankString(root, "run_id", operation)),
+            sessionId = SessionId(GatewayJsonFields.requiredNonBlankString(root, "session_id", operation)),
+            status = GatewayJsonFields.requiredNonBlankString(root, "status", operation),
         )
     }
 
@@ -154,11 +155,11 @@ internal object GatewayJsonParser {
         frame: GatewaySseFrame,
     ): RunEvent? {
         val root = parseObject(operation, frame.data)
-        val eventName = requiredNonBlankString(root, "event", operation)
-        val eventType = eventTypeFor(eventName) ?: return null
-        val runId = RunId(requiredNonBlankString(root, "run_id", operation))
+        val eventName = GatewayJsonFields.requiredNonBlankString(root, "event", operation)
+        val eventType = GatewayJsonElements.eventTypeFor(eventName) ?: return null
+        val runId = RunId(GatewayJsonFields.requiredNonBlankString(root, "run_id", operation))
         val status =
-            optionalString(root, "status", operation)
+            GatewayJsonFields.optionalString(root, "status", operation)
                 ?: when (eventType) {
                     RunEventType.RUNNING, RunEventType.MESSAGE_DELTA -> "running"
                     RunEventType.COMPLETING -> "completing"
@@ -173,7 +174,7 @@ internal object GatewayJsonParser {
                 }
         val text =
             if (eventType == RunEventType.MESSAGE_DELTA) {
-                optionalString(root, "delta", operation)
+                GatewayJsonFields.optionalString(root, "delta", operation)
                     ?: invalid("$operation.$eventName", "missing required field 'delta'")
             } else {
                 null
@@ -185,8 +186,10 @@ internal object GatewayJsonParser {
             text = text,
         )
     }
+}
 
-    private fun eventTypeFor(eventName: String): RunEventType? =
+private object GatewayJsonElements {
+    fun eventTypeFor(eventName: String): RunEventType? =
         when (eventName) {
             "message.delta" -> RunEventType.MESSAGE_DELTA
             "run.completed" -> RunEventType.COMPLETED
@@ -199,31 +202,34 @@ internal object GatewayJsonParser {
             else -> null
         }
 
-    private fun parseSession(
+    fun parseSession(
         value: JsonElement,
         operation: String,
     ): Session {
         val session = value as? JsonObject ?: invalid(operation, "session must be a JSON object")
         return Session(
-            id = SessionId(requiredNonBlankString(session, "id", operation)),
-            title = requiredNullableString(session, "title", operation),
-            preview = optionalString(session, "preview", operation),
-            pinned = requiredBoolean(session, "pinned", operation),
+            id = SessionId(GatewayJsonFields.requiredNonBlankString(session, "id", operation)),
+            title = GatewayJsonFields.requiredNullableString(session, "title", operation),
+            preview = GatewayJsonFields.optionalString(session, "preview", operation),
+            pinned = GatewayJsonFields.requiredBoolean(session, "pinned", operation),
         )
     }
 
-    private fun parseMessage(
+    fun parseMessage(
         value: JsonElement,
         operation: String,
     ): GatewayHistoryMessage {
         val message = value as? JsonObject ?: invalid(operation, "message must be a JSON object")
         return GatewayHistoryMessage(
             id = messageIdentity(message, operation),
-            role = optionalString(message, "role", operation),
-            content = optionalString(message, "content", operation),
-            runId = optionalString(message, "run_id", operation)?.takeIf(String::isNotBlank)?.let(::RunId),
-            runStatus = optionalString(message, "run_status", operation),
-            runResult = optionalString(message, "run_result", operation),
+            role = GatewayJsonFields.optionalString(message, "role", operation),
+            content = GatewayJsonFields.optionalString(message, "content", operation),
+            runId =
+                GatewayJsonFields.optionalString(message, "run_id", operation)
+                    ?.takeIf(String::isNotBlank)
+                    ?.let(::RunId),
+            runStatus = GatewayJsonFields.optionalString(message, "run_status", operation),
+            runResult = GatewayJsonFields.optionalString(message, "run_result", operation),
             timestamp = messageTimestamp(message, operation),
         )
     }
@@ -232,9 +238,9 @@ internal object GatewayJsonParser {
         message: JsonObject,
         operation: String,
     ): String {
-        val value = requiredValue(message, "id", operation)
+        val value = GatewayJsonFields.requiredValue(message, "id", operation)
         if (value !is JsonPrimitive || value == JsonNull) invalid(operation, "invalid message identity")
-        if (value.isString) return requiredNonBlankString(message, "id", operation)
+        if (value.isString) return GatewayJsonFields.requiredNonBlankString(message, "id", operation)
         if (value.content.toLongOrNull() == null) invalid(operation, "message identity must be an integer or string")
         return value.content
     }
@@ -251,8 +257,10 @@ internal object GatewayJsonParser {
         }
         return value.content
     }
+}
 
-    private fun requireObjectField(
+private object GatewayJsonFields {
+    fun requireObjectField(
         root: JsonObject,
         path: String,
         expected: String,
@@ -264,7 +272,7 @@ internal object GatewayJsonParser {
         }
     }
 
-    private fun requiredInt(
+    fun requiredInt(
         root: JsonObject,
         path: String,
         operation: String,
@@ -276,7 +284,7 @@ internal object GatewayJsonParser {
         return value.content.toIntOrNull() ?: invalid(operation, "field '$path' must be an integer")
     }
 
-    private fun requiredArray(
+    fun requiredArray(
         root: JsonObject,
         path: String,
         operation: String,
@@ -285,7 +293,7 @@ internal object GatewayJsonParser {
         return value as? JsonArray ?: invalid(operation, "field '$path' must be an array")
     }
 
-    private fun requiredObject(
+    fun requiredObject(
         root: JsonObject,
         path: String,
         operation: String,
@@ -294,7 +302,7 @@ internal object GatewayJsonParser {
         return value as? JsonObject ?: invalid(operation, "field '$path' must be an object")
     }
 
-    private fun requiredNullableString(
+    fun requiredNullableString(
         root: JsonObject,
         path: String,
         operation: String,
@@ -304,7 +312,7 @@ internal object GatewayJsonParser {
         return stringValue(value, path, operation)
     }
 
-    private fun requiredNonBlankString(
+    fun requiredNonBlankString(
         root: JsonObject,
         path: String,
         operation: String,
@@ -314,7 +322,7 @@ internal object GatewayJsonParser {
         return value
     }
 
-    private fun requiredBoolean(
+    fun requiredBoolean(
         root: JsonObject,
         path: String,
         operation: String,
@@ -326,7 +334,7 @@ internal object GatewayJsonParser {
         return value.content == "true"
     }
 
-    private fun optionalString(
+    fun optionalString(
         root: JsonObject,
         path: String,
         operation: String,
@@ -336,7 +344,7 @@ internal object GatewayJsonParser {
         return stringValue(value, path, operation)
     }
 
-    private fun stringValue(
+    fun stringValue(
         value: JsonElement,
         path: String,
         operation: String,
@@ -347,7 +355,7 @@ internal object GatewayJsonParser {
         return value.content
     }
 
-    private fun requiredValue(
+    fun requiredValue(
         root: JsonObject,
         path: String,
         operation: String,
@@ -360,16 +368,16 @@ internal object GatewayJsonParser {
         }
         return current
     }
-
-    private fun invalid(
-        operation: String,
-        detail: String,
-    ): Nothing =
-        throw GatewayException(
-            category = GatewayErrorCategory.INVALID_RESPONSE,
-            message = "Invalid Gateway response for $operation: $detail.",
-        )
 }
+
+private fun invalid(
+    operation: String,
+    detail: String,
+): Nothing =
+    throw GatewayException(
+        category = GatewayErrorCategory.INVALID_RESPONSE,
+        message = "Invalid Gateway response for $operation: $detail.",
+    )
 
 internal data class RunAdmission(
     val runId: RunId,
