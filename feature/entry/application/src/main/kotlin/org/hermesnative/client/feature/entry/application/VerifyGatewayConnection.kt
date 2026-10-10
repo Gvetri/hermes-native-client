@@ -49,8 +49,8 @@ class VerifyGatewayConnection(
             gatewayConnectionRepository.save(connection)
         } catch (error: GatewayConnectionPersistenceException) {
             throw error
-        } catch (error: Exception) {
-            throw GatewayConnectionPersistenceException(error)
+        } catch (expectedError: Exception) {
+            throw GatewayConnectionPersistenceException(expectedError)
         }
     }
 

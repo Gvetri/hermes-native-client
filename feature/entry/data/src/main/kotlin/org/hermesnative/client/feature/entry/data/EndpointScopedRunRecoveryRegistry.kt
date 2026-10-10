@@ -27,11 +27,11 @@ class EndpointScopedRunRecoveryRegistry(
                 registry(endpoint).save(entry)
                 FallbackRecoveryEntries.remove(endpoint, entry)
             }
-        } catch (error: Exception) {
+        } catch (expectedError: Exception) {
             synchronized(RunRecoveryStorageTransactions.lock) {
                 FallbackRecoveryEntries.forEndpoint(endpoint).add(entry)
             }
-            throw error
+            throw expectedError
         }
     }
 

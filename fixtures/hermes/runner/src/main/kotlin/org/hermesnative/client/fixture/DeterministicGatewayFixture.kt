@@ -121,8 +121,8 @@ class DeterministicGatewayFixture(
             lifecycleState = FixtureLifecycleState.STARTED
         } catch (error: FixtureStartupException) {
             failStartup(error)
-        } catch (error: Throwable) {
-            failStartup(FixtureStartupException("Deterministic Gateway fixture startup failed.", error))
+        } catch (expectedError: Throwable) {
+            failStartup(FixtureStartupException("Deterministic Gateway fixture startup failed.", expectedError))
         }
     }
 
@@ -132,9 +132,9 @@ class DeterministicGatewayFixture(
             var stopFailed = false
             try {
                 startedProcess.stop()
-            } catch (stopError: Throwable) {
+            } catch (expectedStopError: Throwable) {
                 stopFailed = true
-                startupFailure.addSuppressed(stopError)
+                startupFailure.addSuppressed(expectedStopError)
             }
             if (!stopFailed && !startedProcess.isRunning) {
                 process = null
@@ -156,10 +156,10 @@ class DeterministicGatewayFixture(
             lifecycleState = FixtureLifecycleState.READY
         } catch (error: FixtureReadinessException) {
             throw error
-        } catch (error: Throwable) {
+        } catch (expectedError: Throwable) {
             throw FixtureReadinessException(
-                "Deterministic Gateway fixture readiness failed: ${error.message}",
-                error,
+                "Deterministic Gateway fixture readiness failed: ${expectedError.message}",
+                expectedError,
             )
         }
     }
@@ -192,10 +192,10 @@ class DeterministicGatewayFixture(
         try {
             resetAndVerifySyntheticState()
             null
-        } catch (error: Throwable) {
+        } catch (expectedError: Throwable) {
             FixtureCleanupException(
                 "Synthetic state reset after the fixture test failed.",
-                listOf(error),
+                listOf(expectedError),
             )
         }
 
@@ -234,8 +234,8 @@ class DeterministicGatewayFixture(
         val cleanupFailures = mutableListOf<Throwable>()
         try {
             resetAndVerifySyntheticState()
-        } catch (error: Throwable) {
-            cleanupFailures += error
+        } catch (expectedError: Throwable) {
+            cleanupFailures += expectedError
         }
 
         val activeProcess = process
@@ -243,9 +243,9 @@ class DeterministicGatewayFixture(
             var stopFailed = false
             try {
                 activeProcess.stop()
-            } catch (error: Throwable) {
+            } catch (expectedError: Throwable) {
                 stopFailed = true
-                cleanupFailures += error
+                cleanupFailures += expectedError
             }
             if (activeProcess.isRunning) {
                 cleanupFailures += IllegalStateException("Deterministic Gateway process did not stop.")

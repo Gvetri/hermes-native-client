@@ -127,8 +127,8 @@ internal class GatewayClientCalls(
             block()
         } catch (error: GatewayException) {
             throw error
-        } catch (error: Exception) {
-            throw mapTransportFailure(error)
+        } catch (expectedError: Exception) {
+            throw mapTransportFailure(expectedError)
         }
 }
 

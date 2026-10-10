@@ -11,19 +11,19 @@ class RemoveGatewayConnection(
         val endpoint =
             try {
                 gatewayConnectionRepository.load()?.endpoint
-            } catch (error: Exception) {
-                failure = error
+            } catch (expectedError: Exception) {
+                failure = expectedError
                 null
             }
         try {
             gatewayConnectionRepository.clear()
-        } catch (error: Exception) {
-            failure = error
+        } catch (expectedError: Exception) {
+            failure = expectedError
         }
         try {
             clearConnectionSpecificData(endpoint)
-        } catch (error: Exception) {
-            failure = failure ?: error
+        } catch (expectedError: Exception) {
+            failure = failure ?: expectedError
         }
         failure?.let { throw it }
     }

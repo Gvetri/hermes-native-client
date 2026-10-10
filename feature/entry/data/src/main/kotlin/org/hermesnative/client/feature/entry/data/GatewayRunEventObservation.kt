@@ -29,9 +29,9 @@ internal class GatewayRunEventObservation(
             } catch (error: GatewayException) {
                 synchronized(lifecycleLock) { closed = true }
                 throw error
-            } catch (error: Exception) {
+            } catch (expectedError: Exception) {
                 synchronized(lifecycleLock) { closed = true }
-                throw mapTransportFailure(error)
+                throw mapTransportFailure(expectedError)
             }
         val published =
             synchronized(lifecycleLock) {
@@ -61,9 +61,9 @@ internal class GatewayRunEventObservation(
                     } catch (error: GatewayException) {
                         close()
                         throw error
-                    } catch (error: Exception) {
+                    } catch (expectedError: Exception) {
                         close()
-                        throw mapTransportFailure(error)
+                        throw mapTransportFailure(expectedError)
                     }
                 if (!available) close()
                 return available
@@ -76,9 +76,9 @@ internal class GatewayRunEventObservation(
                 } catch (error: GatewayException) {
                     close()
                     throw error
-                } catch (error: Exception) {
+                } catch (expectedError: Exception) {
                     close()
-                    throw mapTransportFailure(error)
+                    throw mapTransportFailure(expectedError)
                 }
             }
         }
