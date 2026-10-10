@@ -1016,6 +1016,10 @@ class QualityGateConfigurationTest {
             detektJob.contains("./gradlew detekt detektVerify --no-daemon --console=plain"),
         )
         assertTrue(
+            "The detekt job must not fetch a base reference: the baseline ratchet is gone.",
+            !detektJob.contains("git fetch"),
+        )
+        assertTrue(
             "The detekt job must pin setup-java to the repository-approved commit.",
             detektJob.contains("actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3"),
         )

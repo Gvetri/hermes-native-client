@@ -101,8 +101,8 @@ jobs:
       - run: ./gradlew :app:lintDebug --no-daemon
 
   # The detekt analysis runs with type resolution for every Kotlin module, and its verification
-  # enforces the committed baseline's ledger and the shrink-only ratchet against main, so the
-  # fetch step brings the base reference into the shallow checkout.
+  # fails closed: the analysis tasks must execute, and no baseline may absorb a finding, so the
+  # job needs no fetch step.
   detekt:
     name: detekt
     if: ${{ always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !github.event.pull_request.head.repo.fork)) }}
@@ -112,8 +112,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Fetch the main reference for the shrink-only baseline ratchet
-        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
