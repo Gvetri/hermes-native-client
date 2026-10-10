@@ -67,75 +67,96 @@ internal fun LocalDiagnosticsContent(
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(16.dp))
-        if (state.isLoadingRecords) {
-            CircularProgressIndicator(
-                modifier =
-                    Modifier.semantics {
-                        contentDescription = READING_DIAGNOSTICS_DESCRIPTION
-                    },
-            )
-        } else {
-            Text(
-                text =
-                    if (state.hasRecords) {
-                        if (state.recordCount == 1) {
-                            "1 diagnostic record stored on this device."
-                        } else {
-                            "${state.recordCount} diagnostic records stored on this device."
-                        }
-                    } else {
-                        "No diagnostics available"
-                    },
-                style = MaterialTheme.typography.titleMedium,
-                modifier =
-                    Modifier.semantics {
-                        liveRegion = LiveRegionMode.Polite
-                    },
-            )
-        }
+        DiagnosticsRecordSummary(state = state)
         Spacer(modifier = Modifier.height(16.dp))
-        Button(
-            onClick = { onEvent(EntryUiEvent.ExportDiagnosticsClicked) },
-            enabled = state.isExportEnabled,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(text = "Export diagnostics")
-        }
-        if (state.isExporting) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Exporting diagnostics…",
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
-        }
-        state.exportFailure?.let { failure ->
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = failure.safeMessage,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
-            )
-        }
+        DiagnosticsExportControls(state = state, onEvent = onEvent)
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
-        if (state.isClearConfirmationOpen) {
-            ClearDiagnosticsConfirmation(onEvent = onEvent)
-        } else {
-            OutlinedButton(
-                onClick = { onEvent(EntryUiEvent.ClearDiagnosticsClicked) },
-                enabled = state.hasRecords,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) {
-                Text(text = "Clear diagnostics")
-            }
-        }
+        DiagnosticsClearControls(state = state, onEvent = onEvent)
         Spacer(modifier = Modifier.height(16.dp))
         TextButton(
             onClick = { onEvent(EntryUiEvent.CloseLocalDiagnosticsClicked) },
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             Text(text = "Back to Sessions")
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticsRecordSummary(state: LocalDiagnosticsUiState) {
+    if (state.isLoadingRecords) {
+        CircularProgressIndicator(
+            modifier =
+                Modifier.semantics {
+                    contentDescription = READING_DIAGNOSTICS_DESCRIPTION
+                },
+        )
+    } else {
+        Text(
+            text =
+                if (state.hasRecords) {
+                    if (state.recordCount == 1) {
+                        "1 diagnostic record stored on this device."
+                    } else {
+                        "${state.recordCount} diagnostic records stored on this device."
+                    }
+                } else {
+                    "No diagnostics available"
+                },
+            style = MaterialTheme.typography.titleMedium,
+            modifier =
+                Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                },
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticsExportControls(
+    state: LocalDiagnosticsUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    Button(
+        onClick = { onEvent(EntryUiEvent.ExportDiagnosticsClicked) },
+        enabled = state.isExportEnabled,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+    ) {
+        Text(text = "Export diagnostics")
+    }
+    if (state.isExporting) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Exporting diagnostics…",
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    state.exportFailure?.let { failure ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = failure.safeMessage,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticsClearControls(
+    state: LocalDiagnosticsUiState,
+    onEvent: (EntryUiEvent) -> Unit,
+) {
+    if (state.isClearConfirmationOpen) {
+        ClearDiagnosticsConfirmation(onEvent = onEvent)
+    } else {
+        OutlinedButton(
+            onClick = { onEvent(EntryUiEvent.ClearDiagnosticsClicked) },
+            enabled = state.hasRecords,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) {
+            Text(text = "Clear diagnostics")
         }
     }
 }

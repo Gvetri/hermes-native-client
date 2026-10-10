@@ -229,3 +229,30 @@ internal fun List<SessionMessageUiState>.chronological(): List<SessionMessageUiS
         }
     }
 }
+
+internal data class SessionDetailState(
+    val content: OpenSessionUiState,
+    val mutation: SessionMutationUiState?,
+    val actionsEnabled: Boolean,
+    val listRequestActive: Boolean,
+    val listIsStale: Boolean,
+    val listErrorCategory: SessionListErrorCategory?,
+) {
+    fun retryEnabled(canSubmit: Boolean): Boolean =
+        actionsEnabled &&
+            canSubmit &&
+            !content.isRefreshing &&
+            mutation?.pendingAction == null &&
+            !content.isSending &&
+            !content.isReconciliationInProgress &&
+            !content.hasUnresolvedSubmission &&
+            !listRequestActive
+}
+
+internal data class SessionRowUiState(
+    val session: SessionItemUiState,
+    val mutation: SessionMutationUiState?,
+    val selected: Boolean,
+    val enabled: Boolean,
+    val onClick: () -> Unit,
+)
