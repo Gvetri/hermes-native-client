@@ -21,10 +21,7 @@ internal fun EntryStateHolder.changeSessionPin(
     val action = if (pinned) SessionMutationAction.PIN else SessionMutationAction.UNPIN
     val job =
         synchronized(sessionRequestLock) {
-            val current =
-                mutableUiState.value.sessionList
-                    ?.takeIf { it.allowsSessionMutation() && sessionGateway === gateway }
-                    ?: return@synchronized null
+            val current = mutationSessionFor(gateway) ?: return@synchronized null
             val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
             val blocked =
                 current.sessionForMutation(sessionId) == null ||
@@ -126,11 +123,8 @@ internal fun EntryStateHolder.showPinFailure(
     action: SessionMutationAction,
 ) {
     synchronized(sessionRequestLock) {
-        if (!isCurrentSessionMutation(request)) return
+        val (current, mutation) = mutationFailureTarget(request) ?: return
         val sessionId = request.sessionId
-        val current = mutableUiState.value.sessionList
-        val mutation = current?.sessionMutations?.get(sessionId)
-        if (current == null || mutation == null) return
         mutableUiState.value =
             mutableUiState.value.copy(
                 sessionList =

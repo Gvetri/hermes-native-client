@@ -19,6 +19,10 @@ internal fun SessionListUiState.sessionForMutation(sessionId: SessionId): Sessio
     sessions.firstOrNull { it.id == sessionId }
         ?: openedSession?.session?.takeIf { it.id == sessionId }
 
+internal fun EntryStateHolder.mutationSessionFor(gateway: SessionGatewayPort): SessionListUiState? =
+    mutableUiState.value.sessionList
+        ?.takeIf { it.allowsSessionMutation() && sessionGateway === gateway }
+
 internal fun EntryStateHolder.rememberSessionRuns(
     sessionId: SessionId,
     openedSession: OpenedSession,

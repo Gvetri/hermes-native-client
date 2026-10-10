@@ -56,3 +56,12 @@ internal fun EntryStateHolder.blocksRunSubmission(
         sessionId in recoverySessionCounts ||
         recoveryLoadPending ||
         recoveryLoadFailed
+
+internal typealias MutationFailureTarget = Pair<SessionListUiState, SessionMutationUiState>
+
+internal fun EntryStateHolder.mutationFailureTarget(request: SessionMutationRequest): MutationFailureTarget? {
+    if (!isCurrentSessionMutation(request)) return null
+    val current = mutableUiState.value.sessionList
+    val mutation = current?.sessionMutations?.get(request.sessionId)
+    return if (current == null || mutation == null) null else current to mutation
+}

@@ -54,10 +54,7 @@ internal fun EntryStateHolder.confirmDeleteSession(sessionId: SessionId) {
     val gateway = sessionGateway ?: return
     val job =
         synchronized(sessionRequestLock) {
-            val current =
-                mutableUiState.value.sessionList
-                    ?.takeIf { it.allowsSessionMutation() && sessionGateway === gateway }
-                    ?: return@synchronized null
+            val current = mutationSessionFor(gateway) ?: return@synchronized null
             val mutation = current.sessionMutations[sessionId]
             val delete = mutation?.delete
             if (mutation == null || delete == null) return@synchronized null
@@ -97,12 +94,9 @@ internal fun EntryStateHolder.confirmDeleteSession(sessionId: SessionId) {
 
 internal fun EntryStateHolder.showDeleteFailure(request: SessionMutationRequest) {
     synchronized(sessionRequestLock) {
-        if (!isCurrentSessionMutation(request)) return
+        val (current, mutation) = mutationFailureTarget(request) ?: return
         val sessionId = request.sessionId
-        val current = mutableUiState.value.sessionList
-        val mutation = current?.sessionMutations?.get(sessionId)
-        val delete = mutation?.delete
-        if (current == null || mutation == null || delete == null) return
+        val delete = mutation.delete ?: return
         mutableUiState.value =
             mutableUiState.value.copy(
                 sessionList =

@@ -83,10 +83,7 @@ internal fun EntryStateHolder.confirmRenameSession(sessionId: SessionId) {
     val gateway = sessionGateway ?: return
     val job =
         synchronized(sessionRequestLock) {
-            val current =
-                mutableUiState.value.sessionList
-                    ?.takeIf { it.allowsSessionMutation() && sessionGateway === gateway }
-                    ?: return@synchronized null
+            val current = mutationSessionFor(gateway) ?: return@synchronized null
             val mutation = current.sessionMutations[sessionId]
             val rename = mutation?.rename
             if (mutation == null || rename == null) return@synchronized null
@@ -157,12 +154,9 @@ internal fun EntryStateHolder.submitRenameSession(
 
 internal fun EntryStateHolder.showRenameFailure(request: SessionMutationRequest) {
     synchronized(sessionRequestLock) {
-        if (!isCurrentSessionMutation(request)) return
+        val (current, mutation) = mutationFailureTarget(request) ?: return
         val sessionId = request.sessionId
-        val current = mutableUiState.value.sessionList
-        val mutation = current?.sessionMutations?.get(sessionId)
-        val rename = mutation?.rename
-        if (current == null || mutation == null || rename == null) return
+        val rename = mutation.rename ?: return
         mutableUiState.value =
             mutableUiState.value.copy(
                 sessionList =
