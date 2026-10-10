@@ -248,11 +248,11 @@ private object JourneySessionLifecycleInvariants {
             "history" to 1,
             "list" to 1,
             "history" to 1,
-            "list" to LIST_CHECKPOINT_WRITE_COUNT_3,
-            "list" to LIST_CHECKPOINT_WRITE_COUNT_4,
-            "list" to LIST_CHECKPOINT_WRITE_COUNT_5,
-            "list" to LIST_CHECKPOINT_WRITE_COUNT_7,
-            "list" to LIST_CHECKPOINT_WRITE_COUNT_8,
+            "list" to LIST_CHECKPOINT_AFTER_CREATED_SESSION_PIN,
+            "list" to LIST_CHECKPOINT_AFTER_CREATED_SESSION_UNPIN,
+            "list" to LIST_CHECKPOINT_AFTER_CREATED_SESSION_DELETE,
+            "list" to LIST_CHECKPOINT_AFTER_ALPHA_SESSION_PIN,
+            "list" to LIST_CHECKPOINT_AFTER_ALPHA_SESSION_UNPIN,
         )
 
     internal fun verifySessionLifecycle(telemetry: JsonObject) {
@@ -365,8 +365,8 @@ private const val MAX_ARGUMENT_COUNT = 4
 private const val KEYSTORE_PASSWORD_ARG_INDEX = 3
 private const val TELEMETRY_TIMEOUT_MILLIS = 5_000
 private const val HTTP_OK = 200
-private const val LIST_CHECKPOINT_WRITE_COUNT_3 = 3
-private const val LIST_CHECKPOINT_WRITE_COUNT_4 = 4
-private const val LIST_CHECKPOINT_WRITE_COUNT_5 = 5
-private const val LIST_CHECKPOINT_WRITE_COUNT_7 = 7
-private const val LIST_CHECKPOINT_WRITE_COUNT_8 = 8
+private const val LIST_CHECKPOINT_AFTER_CREATED_SESSION_PIN = 3
+private const val LIST_CHECKPOINT_AFTER_CREATED_SESSION_UNPIN = 4
+private const val LIST_CHECKPOINT_AFTER_CREATED_SESSION_DELETE = 5
+private const val LIST_CHECKPOINT_AFTER_ALPHA_SESSION_PIN = 7
+private const val LIST_CHECKPOINT_AFTER_ALPHA_SESSION_UNPIN = 8
