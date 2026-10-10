@@ -67,7 +67,7 @@ internal suspend fun EntryStateHolder.loadOpenedSession(
                 applyRefreshedSessionResult(current, openedSession, sessionId)
             }
         if (applied) {
-            continueRefreshedSessionRecovery(
+            continueSessionRecovery(
                 gateway = gateway,
                 request = request,
                 requestConnectionGeneration = requestConnectionGeneration,
@@ -117,12 +117,12 @@ internal fun EntryStateHolder.applyRefreshedSessionResult(
     )
 }
 
-internal suspend fun EntryStateHolder.continueRefreshedSessionRecovery(
+internal suspend fun EntryStateHolder.continueSessionRecovery(
     gateway: SessionGatewayPort,
     request: SessionRequestContext,
     requestConnectionGeneration: Long,
     openedSession: OpenedSession,
-    runIdToReconcile: RunId?,
+    runIdToReconcile: RunId? = null,
 ) {
     val sessionId = openedSession.session.id
     val pendingTimeoutRecovery =

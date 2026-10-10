@@ -142,40 +142,12 @@ internal suspend fun EntryStateHolder.applyOpenedSessionOutcome(
         released.job?.cancel()
         released.observation?.close()
     }
-    val sessionId = openedSession.session.id
-    val pendingTimeoutRecovery =
-        synchronized(sessionRequestLock) {
-            pendingTimedOutSends[sessionId]
-        }
-    if (pendingTimeoutRecovery != null) {
-        reconcileTimedOutSendNow(
-            sessionId = sessionId,
-            request = ReconciliationRequest(requestConnectionGeneration, request.generation),
-            knownRunIds = pendingTimeoutRecovery.knownRunIds,
-        )
-    } else {
-        val pendingSettledRecovery = prepareSettledSubmissionRecovery(sessionId)
-        if (pendingSettledRecovery != null) {
-            reconcileTimedOutSendNow(
-                sessionId = sessionId,
-                request = ReconciliationRequest(requestConnectionGeneration, request.generation),
-                knownRunIds = pendingSettledRecovery.knownRunIds,
-                resolveWhenNoNewRun = true,
-            )
-        } else {
-            reconcileOpenedRun(
-                OpenedRunReconcileContext(
-                    sessionId = sessionId,
-                    requestSessionGeneration = request.generation,
-                    requestConnectionGeneration = requestConnectionGeneration,
-                    sessionGateway = gateway,
-                    runIdToReconcile = historyRunIdToReconcile(sessionId, openedSession),
-                    restartObservation = true,
-                    clearRefreshWhenNoRun = true,
-                ),
-            )
-        }
-    }
+    continueSessionRecovery(
+        gateway = gateway,
+        request = request,
+        requestConnectionGeneration = requestConnectionGeneration,
+        openedSession = openedSession,
+    )
 }
 
 internal fun EntryStateHolder.showSessionOpenFailure(
