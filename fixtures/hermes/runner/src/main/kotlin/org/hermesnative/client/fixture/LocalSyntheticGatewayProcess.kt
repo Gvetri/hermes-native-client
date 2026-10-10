@@ -306,76 +306,106 @@ class LocalSyntheticGatewayProcess private constructor(
                         segments[1] == "messages" -> respond(exchange, HTTP_OK, historyJson(session))
                         else -> respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
                     }
-                "PATCH" -> {
-                    if (segments.size != 1) {
-                        respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
-                    } else {
-                        when {
-                            bodyContainsField(body, "pinned") -> {
-                                val pinned = bodyBoolean(body, "pinned")
-                                if (pinned == null) {
-                                    respond(exchange, HTTP_BAD_REQUEST, "{\"error\":\"invalid-session-field\"}")
-                                    return
-                                }
-                                if (pinned && behavior.failNextSessionPin) {
-                                    behavior.failNextSessionPin = false
-                                    respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-pin-failure\"}")
-                                    return
-                                }
-                                if (!pinned && behavior.failNextSessionUnpin) {
-                                    behavior.failNextSessionUnpin = false
-                                    respond(
-                                        exchange,
-                                        HTTP_SERVICE_UNAVAILABLE,
-                                        "{\"error\":\"synthetic-unpin-failure\"}",
-                                    )
-                                    return
-                                }
-                                val updated = session.copy(pinned = pinned)
-                                replaceSession(behavior, updated)
-                                respond(
-                                    exchange,
-                                    HTTP_OK,
-                                    "{\"object\":\"hermes.session\",\"session\":${sessionJson(updated)}}",
-                                )
-                            }
-                            else -> {
-                                if (behavior.failNextSessionRename) {
-                                    behavior.failNextSessionRename = false
-                                    respond(
-                                        exchange,
-                                        HTTP_SERVICE_UNAVAILABLE,
-                                        "{\"error\":\"synthetic-rename-failure\"}",
-                                    )
-                                    return
-                                }
-                                val renamed = session.copy(title = parseTitle(body))
-                                replaceSession(behavior, renamed)
-                                respond(
-                                    exchange,
-                                    HTTP_OK,
-                                    "{\"object\":\"hermes.session\",\"session\":${sessionJson(renamed)}}",
-                                )
-                            }
-                        }
-                    }
-                }
-                "DELETE" -> {
-                    if (segments.size != 1) {
-                        respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
-                    } else if (behavior.failNextSessionDelete) {
-                        behavior.failNextSessionDelete = false
-                        respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-delete-failure\"}")
-                    } else {
-                        behavior.sessions.removeIf { it.id == sessionId }
-                        respond(
-                            exchange,
-                            HTTP_OK,
-                            "{\"object\":\"hermes.session.deleted\",\"id\":${quote(sessionId)},\"deleted\":true}",
-                        )
-                    }
-                }
+                "PATCH" -> handleSessionPatch(exchange, behavior, session, body, segments)
+                "DELETE" -> handleSessionDelete(exchange, behavior, sessionId, segments)
                 else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, "{\"error\":\"method-not-allowed\"}")
+            }
+        }
+
+        private fun handleSessionPatch(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+            session: SyntheticGatewaySession,
+            body: String?,
+            segments: List<String>,
+        ) {
+            if (segments.size != 1) {
+                respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
+            } else if (bodyContainsField(body, "pinned")) {
+                applyPinnedPatch(exchange, behavior, session, body)
+            } else {
+                applyRenamePatch(exchange, behavior, session, body)
+            }
+        }
+
+        private fun applyPinnedPatch(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+            session: SyntheticGatewaySession,
+            body: String?,
+        ) {
+            val pinned = bodyBoolean(body, "pinned")
+            when {
+                pinned == null ->
+                    respond(exchange, HTTP_BAD_REQUEST, "{\"error\":\"invalid-session-field\"}")
+                pinned && behavior.failNextSessionPin -> {
+                    behavior.failNextSessionPin = false
+                    respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-pin-failure\"}")
+                }
+                !pinned && behavior.failNextSessionUnpin -> {
+                    behavior.failNextSessionUnpin = false
+                    respond(
+                        exchange,
+                        HTTP_SERVICE_UNAVAILABLE,
+                        "{\"error\":\"synthetic-unpin-failure\"}",
+                    )
+                }
+                else -> {
+                    val updated = session.copy(pinned = pinned)
+                    replaceSession(behavior, updated)
+                    respond(
+                        exchange,
+                        HTTP_OK,
+                        "{\"object\":\"hermes.session\",\"session\":${sessionJson(updated)}}",
+                    )
+                }
+            }
+        }
+
+        private fun applyRenamePatch(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+            session: SyntheticGatewaySession,
+            body: String?,
+        ) {
+            if (behavior.failNextSessionRename) {
+                behavior.failNextSessionRename = false
+                respond(
+                    exchange,
+                    HTTP_SERVICE_UNAVAILABLE,
+                    "{\"error\":\"synthetic-rename-failure\"}",
+                )
+            } else {
+                val renamed = session.copy(title = parseTitle(body))
+                replaceSession(behavior, renamed)
+                respond(
+                    exchange,
+                    HTTP_OK,
+                    "{\"object\":\"hermes.session\",\"session\":${sessionJson(renamed)}}",
+                )
+            }
+        }
+
+        private fun handleSessionDelete(
+            exchange: HttpExchange,
+            behavior: SyntheticGatewayBehavior,
+            sessionId: String,
+            segments: List<String>,
+        ) {
+            when {
+                segments.size != 1 -> respond(exchange, HTTP_NOT_FOUND, "{\"error\":\"not-found\"}")
+                behavior.failNextSessionDelete -> {
+                    behavior.failNextSessionDelete = false
+                    respond(exchange, HTTP_SERVICE_UNAVAILABLE, "{\"error\":\"synthetic-delete-failure\"}")
+                }
+                else -> {
+                    behavior.sessions.removeIf { it.id == sessionId }
+                    respond(
+                        exchange,
+                        HTTP_OK,
+                        "{\"object\":\"hermes.session.deleted\",\"id\":${quote(sessionId)},\"deleted\":true}",
+                    )
+                }
             }
         }
 

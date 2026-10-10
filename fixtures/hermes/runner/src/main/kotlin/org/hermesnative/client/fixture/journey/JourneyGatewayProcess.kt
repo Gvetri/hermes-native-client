@@ -214,35 +214,7 @@ class JourneyGatewayProcess private constructor(
                 return
             }
             when (exchange.requestMethod) {
-                "GET" -> {
-                    if (behavior.consumeFailNextSessionList()) {
-                        respond(exchange, HTTP_SERVICE_UNAVAILABLE, """{"error":"synthetic-refresh-failure"}""")
-                        return
-                    }
-                    val query = GatewayHttpSupport.queryParameters(exchange.requestURI)
-                    val requestedLimit = query["limit"]?.toIntOrNull() ?: DEFAULT_PAGE_LIMIT
-                    val offset = query["offset"]?.toIntOrNull() ?: 0
-                    if (requestedLimit <= 0 || offset < 0) {
-                        respond(exchange, HTTP_BAD_REQUEST, """{"error":"invalid-pagination"}""")
-                        return
-                    }
-                    val matching = behavior.sessions.toList()
-                    if (offset > matching.size) {
-                        respond(exchange, HTTP_BAD_REQUEST, """{"error":"offset-out-of-range"}""")
-                        return
-                    }
-                    val serverCap = behavior.scenario.sessionPageSize ?: requestedLimit
-                    val effectiveLimit = minOf(requestedLimit, serverCap)
-                    val page = matching.drop(offset).take(effectiveLimit)
-                    val hasMore = offset + page.size < matching.size
-                    val sessionsJson = page.joinToString(",") { sessionJson(it) }
-                    respond(
-                        exchange,
-                        HTTP_OK,
-                        """{"object":"list","data":[$sessionsJson],""" +
-                            """"limit":$effectiveLimit,"offset":$offset,"has_more":$hasMore}""",
-                    )
-                }
+                "GET" -> respondSessionListPage(exchange, behavior)
                 "POST" -> {
                     val created =
                         JourneySession(
@@ -258,6 +230,37 @@ class JourneyGatewayProcess private constructor(
                     respond(exchange, HTTP_CREATED, """{"object":"hermes.session","session":${sessionJson(created)}}""")
                 }
                 else -> respond(exchange, HTTP_METHOD_NOT_ALLOWED, """{"error":"method-not-allowed"}""")
+            }
+        }
+
+        private fun respondSessionListPage(
+            exchange: HttpExchange,
+            behavior: JourneyGatewayBehavior,
+        ) {
+            val query = GatewayHttpSupport.queryParameters(exchange.requestURI)
+            val requestedLimit = query["limit"]?.toIntOrNull() ?: DEFAULT_PAGE_LIMIT
+            val offset = query["offset"]?.toIntOrNull() ?: 0
+            val matching = behavior.sessions.toList()
+            when {
+                behavior.consumeFailNextSessionList() ->
+                    respond(exchange, HTTP_SERVICE_UNAVAILABLE, """{"error":"synthetic-refresh-failure"}""")
+                requestedLimit <= 0 || offset < 0 ->
+                    respond(exchange, HTTP_BAD_REQUEST, """{"error":"invalid-pagination"}""")
+                offset > matching.size ->
+                    respond(exchange, HTTP_BAD_REQUEST, """{"error":"offset-out-of-range"}""")
+                else -> {
+                    val serverCap = behavior.scenario.sessionPageSize ?: requestedLimit
+                    val effectiveLimit = minOf(requestedLimit, serverCap)
+                    val page = matching.drop(offset).take(effectiveLimit)
+                    val hasMore = offset + page.size < matching.size
+                    val sessionsJson = page.joinToString(",") { sessionJson(it) }
+                    respond(
+                        exchange,
+                        HTTP_OK,
+                        """{"object":"list","data":[$sessionsJson],""" +
+                            """"limit":$effectiveLimit,"offset":$offset,"has_more":$hasMore}""",
+                    )
+                }
             }
         }
 

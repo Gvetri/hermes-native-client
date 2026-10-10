@@ -329,8 +329,8 @@ object ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
             val current = keys[key]
             if (
                 current == null ||
-                (attemptId != null && current.attemptId != attemptId) ||
-                current.knownRunIds.toSet() != knownRunIds
+                current.knownRunIds.toSet() != knownRunIds ||
+                !current.matchesAttempt(attemptId)
             ) {
                 false
             } else {
@@ -339,25 +339,30 @@ object ProcessRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
             }
         }
 
+    private fun UncertaintyRecord.matchesAttempt(attemptId: String?): Boolean {
+        return attemptId == null || this.attemptId == attemptId
+    }
+
     override fun removeIfSnapshotMatches(
         key: PendingRunSubmissionKey,
         snapshot: RunSubmissionUncertaintySnapshot,
     ): Boolean =
         synchronized(lock) {
             val current = keys[key] ?: return@synchronized false
-            if (
-                current.attemptId != snapshot.attemptId ||
-                current.knownRunIds.toSet() != snapshot.knownRunIds ||
-                current.boundRunId != snapshot.boundRunId ||
-                current.settled != snapshot.settled ||
-                current.requiresRunMatch != snapshot.requiresRunMatch
-            ) {
-                false
-            } else {
+            if (current.matchesSnapshot(snapshot)) {
                 keys.remove(key)
                 true
+            } else {
+                false
             }
         }
+
+    private fun UncertaintyRecord.matchesSnapshot(snapshot: RunSubmissionUncertaintySnapshot): Boolean =
+        attemptId == snapshot.attemptId &&
+            knownRunIds.toSet() == snapshot.knownRunIds &&
+            boundRunId == snapshot.boundRunId &&
+            settled == snapshot.settled &&
+            requiresRunMatch == snapshot.requiresRunMatch
 }
 
 object NoOpRunSubmissionUncertaintyStore : RunSubmissionUncertaintyStore {
@@ -464,6 +469,9 @@ enum class RunStatusNotificationExplanation(
             "then enable this option again.",
     ),
 }
+
+private fun SessionMutationUiState.hasNoPendingWork(): Boolean =
+    rename == null && delete == null && pendingAction == null && errorCategory == null && retryAction == null
 
 class EntryStateHolder(
     initialState: EntryState,
@@ -961,12 +969,15 @@ class EntryStateHolder(
 
     private fun restoredRunStatusNotificationState(): RunStatusNotificationsUiState {
         val store = runStatusNotificationSettingsStore ?: return RunStatusNotificationsUiState()
-        if (!store.loadEnabled()) return RunStatusNotificationsUiState()
-        if (runStatusNotificationPermission?.canPost() == true) {
-            return RunStatusNotificationsUiState(enabled = true)
+        return when {
+            !store.loadEnabled() -> RunStatusNotificationsUiState()
+            runStatusNotificationPermission?.canPost() == true ->
+                RunStatusNotificationsUiState(enabled = true)
+            else -> {
+                store.saveEnabled(false)
+                deniedRunStatusNotificationsUiState()
+            }
         }
-        store.saveEnabled(false)
-        return deniedRunStatusNotificationsUiState()
     }
 
     private fun toggleRunStatusNotifications() {
@@ -976,26 +987,20 @@ class EntryStateHolder(
             store.saveEnabled(false)
             _uiState.value =
                 _uiState.value.copy(runStatusNotifications = RunStatusNotificationsUiState())
-            return
-        }
-        val permission = runStatusNotificationPermission
-        if (permission?.requiresRuntimePermissionRequest() == true) {
+        } else if (runStatusNotificationPermission?.requiresRuntimePermissionRequest() == true) {
             requestRunStatusNotificationPermission?.invoke()
-            return
-        }
-        val canPost = permission?.canPost() ?: true
-        if (!canPost) {
+        } else if (runStatusNotificationPermission?.canPost() == false) {
             _uiState.value =
                 _uiState.value.copy(
                     runStatusNotifications = deniedRunStatusNotificationsUiState(),
                 )
-            return
+        } else {
+            store.saveEnabled(true)
+            _uiState.value =
+                _uiState.value.copy(
+                    runStatusNotifications = RunStatusNotificationsUiState(enabled = true),
+                )
         }
-        store.saveEnabled(true)
-        _uiState.value =
-            _uiState.value.copy(
-                runStatusNotifications = RunStatusNotificationsUiState(enabled = true),
-            )
     }
 
     private fun applyRunStatusNotificationPermissionResult(granted: Boolean) {
@@ -1081,8 +1086,11 @@ class EntryStateHolder(
     private fun confirmClearLocalDiagnostics() {
         val store = localDiagnostics?.store ?: return
         val current = _uiState.value.localDiagnostics
-        if (!current.isOpen || !current.isClearConfirmationOpen) return
-        if (!localDiagnosticsClearInFlight.compareAndSet(false, true)) return
+        val canClear =
+            current.isOpen &&
+                current.isClearConfirmationOpen &&
+                localDiagnosticsClearInFlight.compareAndSet(false, true)
+        if (!canClear) return
         scope.launch {
             try {
                 val cleared = runCatching { store.clear() }.isSuccess
@@ -1321,17 +1329,20 @@ class EntryStateHolder(
         }
     }
 
-    private fun clearRecoveryUiIfIdle(sessionId: SessionId) {
-        if (
-            sessionId in connectionRecoverySessionCounts ||
+    private fun hasPendingRecoveryWork(sessionId: SessionId): Boolean =
+        sessionId in connectionRecoverySessionCounts ||
             sessionId in recoverySessionCounts ||
             sessionId in reconcilingSessions ||
             recoveryLoadPending
-        ) {
-            return
+
+    private fun openedSessionFor(sessionId: SessionId): Pair<SessionListUiState, OpenSessionUiState>? =
+        _uiState.value.sessionList?.let { current ->
+            current.openedSession?.takeIf { it.session.id == sessionId }?.let { opened -> current to opened }
         }
-        val current = _uiState.value.sessionList ?: return
-        val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+
+    private fun clearRecoveryUiIfIdle(sessionId: SessionId) {
+        if (hasPendingRecoveryWork(sessionId)) return
+        val (current, opened) = openedSessionFor(sessionId) ?: return
         _uiState.value =
             _uiState.value.copy(
                 sessionList =
@@ -1352,9 +1363,12 @@ class EntryStateHolder(
         entry: RunRecoveryEntry,
         expectedConnectionGeneration: Long,
     ): RecoveryClaim? {
-        if (connectionGeneration != expectedConnectionGeneration) return null
         val key = RecoveryEntryKey(endpoint, entry.sessionId, entry.runId)
-        if (key in recoveryHandledEntries || key in recoveryClaims) return null
+        val canClaim =
+            connectionGeneration == expectedConnectionGeneration &&
+                key !in recoveryHandledEntries &&
+                key !in recoveryClaims
+        if (!canClaim) return null
         return RecoveryClaim(
             key = key,
             connectionGeneration = expectedConnectionGeneration,
@@ -1607,9 +1621,11 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             val state = _uiState.value
             val sessionList = state.sessionList ?: return
-            if (sessionList.searchQuery == value) return
-            if (sessionList.createSession?.isSubmitting == true) return
-            if (sessionList.sessionMutations.isNotEmpty()) return
+            val searchIsBlocked =
+                sessionList.searchQuery == value ||
+                    sessionList.createSession?.isSubmitting == true ||
+                    sessionList.sessionMutations.isNotEmpty()
+            if (searchIsBlocked) return
 
             sessionList.openedSession?.session?.id?.let { openedSessionId ->
                 val released = releaseRunObservation(openedSessionId)
@@ -1686,6 +1702,27 @@ class EntryStateHolder(
             hasPendingMutation ||
             openedSession?.isRefreshing == true ||
             openedSession?.isReconciliationInProgress == true
+
+    private fun SessionListUiState.blocksLoadingMore(): Boolean =
+        isLoading ||
+            isRefreshing ||
+            isSearching ||
+            isLoadingMore ||
+            isUnavailable ||
+            openedSession?.isRefreshing == true ||
+            openedSession?.isReconciliationInProgress == true ||
+            openingSessionId != null ||
+            createSession != null ||
+            sessionMutations.isNotEmpty()
+
+    private fun SessionListUiState.blocksCreateSession(): Boolean =
+        isLoading ||
+            isRefreshing ||
+            isLoadingMore ||
+            openingSessionId != null ||
+            isUnavailable ||
+            createSession != null ||
+            sessionMutations.isNotEmpty()
 
     private fun refreshOpenedSession(gateway: SessionGatewayPort): Job? =
         synchronized(sessionRequestLock) {
@@ -1971,10 +2008,9 @@ class EntryStateHolder(
                 connectionGeneration != requestConnectionGeneration ||
                 sessionRequestGeneration != requestSessionGeneration
             ) {
-                return
+                return@synchronized
             }
-            val current = _uiState.value.sessionList ?: return
-            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+            val (current, opened) = openedSessionFor(sessionId) ?: return@synchronized
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2080,10 +2116,9 @@ class EntryStateHolder(
                 connectionGeneration != requestConnectionGeneration ||
                 sessionRequestGeneration != requestSessionGeneration
             ) {
-                return
+                return@synchronized
             }
-            val current = _uiState.value.sessionList ?: return
-            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+            val (current, opened) = openedSessionFor(sessionId) ?: return@synchronized
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2329,10 +2364,9 @@ class EntryStateHolder(
                 connectionGeneration != requestConnectionGeneration ||
                 sessionRequestGeneration != requestSessionGeneration
             ) {
-                return
+                return@synchronized
             }
-            val current = _uiState.value.sessionList ?: return
-            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+            val (current, opened) = openedSessionFor(sessionId) ?: return@synchronized
             val knownRun =
                 visibleSessionRuns(sessionId).lastOrNull { it.id == runId }
                     ?: Run(runId, sessionId, UNCERTAIN_RUN_STATUS)
@@ -2485,26 +2519,12 @@ class EntryStateHolder(
         val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
-                val sessionList = state.sessionList ?: return
-                val offset = sessionList.nextOffset ?: return
-                if (
-                    sessionList.isLoading ||
-                    sessionList.isRefreshing ||
-                    sessionList.isSearching ||
-                    sessionList.isLoadingMore ||
-                    sessionList.isUnavailable ||
-                    sessionList.openedSession?.isRefreshing == true ||
-                    sessionList.openedSession?.isReconciliationInProgress == true ||
-                    sessionList.openingSessionId != null ||
-                    sessionList.createSession != null ||
-                    sessionList.sessionMutations.isNotEmpty()
-                ) {
-                    return
-                }
+                val sessionList = state.sessionList ?: return@synchronized null
+                val offset = sessionList.nextOffset ?: return@synchronized null
+                if (sessionList.blocksLoadingMore()) return@synchronized null
 
-                val query = sessionList.searchQuery
-                val requestGeneration = beginSessionRequest()
-                val request = SessionRequestContext(requestGeneration, query, offset)
+                val request =
+                    SessionRequestContext(beginSessionRequest(), sessionList.searchQuery, offset)
                 _uiState.value =
                     state.copy(
                         sessionList =
@@ -2513,55 +2533,49 @@ class EntryStateHolder(
                                 errorCategory = null,
                             ),
                     )
-                createSessionJob {
-                    try {
-                        val page = LoadSessionList(gateway).execute(sessionListRequest(request.offset))
-                        updateCurrentSessionRequest(request.generation, request.offset) { current ->
-                            current.copy(
-                                sessions =
-                                    mergeSessions(
-                                        current.sessions,
-                                        page.sessions.map { it.toSessionItemUiState() },
-                                    ),
-                                openedSession = current.openedSession?.withSessionMetadata(page.sessions),
-                                nextOffset = page.nextOffset,
-                                isLoadingMore = false,
-                                isStale = false,
-                                isUnavailable = false,
-                                errorCategory = null,
-                            )
-                        }
-                        recordDiagnostic(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (_: GatewayException) {
-                        showSessionListFailure(request.generation, request.offset, preserveSessions = true)
-                    } catch (_: Exception) {
-                        showSessionListFailure(request.generation, request.offset, preserveSessions = true)
-                    }
-                }
-            }
+                loadMorePageJob(gateway, request)
+            } ?: return
         job.start()
     }
 
-    private fun showCreateSession() {
-        val state = _uiState.value
-        val sessionList = state.sessionList ?: return
-        if (
-            sessionList.isLoading ||
-            sessionList.isRefreshing ||
-            sessionList.isLoadingMore ||
-            sessionList.openingSessionId != null ||
-            sessionList.isUnavailable ||
-            sessionList.createSession != null ||
-            sessionList.sessionMutations.isNotEmpty()
-        ) {
-            return
+    private fun loadMorePageJob(
+        gateway: SessionGatewayPort,
+        request: SessionRequestContext,
+    ): Job =
+        createSessionJob {
+            try {
+                val page = LoadSessionList(gateway).execute(sessionListRequest(request.offset))
+                updateCurrentSessionRequest(request.generation, request.offset) { current ->
+                    current.copy(
+                        sessions =
+                            mergeSessions(
+                                current.sessions,
+                                page.sessions.map { it.toSessionItemUiState() },
+                            ),
+                        openedSession = current.openedSession?.withSessionMetadata(page.sessions),
+                        nextOffset = page.nextOffset,
+                        isLoadingMore = false,
+                        isStale = false,
+                        isUnavailable = false,
+                        errorCategory = null,
+                    )
+                }
+                recordDiagnostic(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: GatewayException) {
+                showSessionListFailure(request.generation, request.offset, preserveSessions = true)
+            } catch (_: Exception) {
+                showSessionListFailure(request.generation, request.offset, preserveSessions = true)
+            }
         }
+
+    private fun showCreateSession() {
         var observationToClose: RunEventObservation? = null
         var observationJobToCancel: Job? = null
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
+            if (current.blocksCreateSession()) return
             current.openedSession?.session?.id?.let { sessionId ->
                 val released = releaseRunObservation(sessionId)
                 observationJobToCancel = released.job
@@ -2584,8 +2598,7 @@ class EntryStateHolder(
 
     private fun updateCreateSessionTitle(value: String) {
         val current = _uiState.value.sessionList ?: return
-        val creation = current.createSession ?: return
-        if (creation.isSubmitting) return
+        val creation = current.createSession?.takeIf { !it.isSubmitting } ?: return
         _uiState.value =
             _uiState.value.copy(
                 sessionList =
@@ -2618,11 +2631,10 @@ class EntryStateHolder(
 
     private fun showRenameSession(sessionId: SessionId) {
         synchronized(sessionRequestLock) {
-            val current = _uiState.value.sessionList ?: return
-            if (!current.allowsSessionMutation()) return
+            val current = _uiState.value.sessionList?.takeIf { it.allowsSessionMutation() } ?: return
             val mutation = current.sessionMutations[sessionId]
-            if (mutation?.pendingAction != null || mutation?.delete != null) return
-            val session = current.sessionForMutation(sessionId) ?: return
+            val session = current.sessionForMutation(sessionId)
+            if (mutation?.pendingAction != null || mutation?.delete != null || session == null) return
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2646,9 +2658,9 @@ class EntryStateHolder(
     ) {
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
-            val mutation = current.sessionMutations[sessionId] ?: return
-            val rename = mutation.rename ?: return
-            if (mutation.pendingAction != null || rename.isSubmitting) return
+            val mutation = current.sessionMutations[sessionId]?.takeIf { it.pendingAction == null }
+            val rename = mutation?.rename?.takeIf { !it.isSubmitting }
+            if (mutation == null || rename == null) return
             val updated =
                 mutation.copy(
                     rename = rename.copy(titleDraft = value, errorCategory = null),
@@ -2672,8 +2684,7 @@ class EntryStateHolder(
     private fun cancelRenameSession(sessionId: SessionId) {
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
-            val mutation = current.sessionMutations[sessionId] ?: return
-            if (mutation.pendingAction != null) return
+            val mutation = current.sessionMutations[sessionId]?.takeIf { it.pendingAction == null } ?: return
             val remaining = mutation.copy(rename = null)
             unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
             _uiState.value =
@@ -2695,12 +2706,15 @@ class EntryStateHolder(
         val gateway = sessionGateway ?: return
         val job =
             synchronized(sessionRequestLock) {
-                val current = _uiState.value.sessionList ?: return
-                if (!current.allowsSessionMutation()) return
-                if (sessionGateway !== gateway) return
-                val mutation = current.sessionMutations[sessionId] ?: return
-                val rename = mutation.rename ?: return
-                if (mutation.pendingAction != null || rename.isSubmitting) return
+                val current =
+                    _uiState.value.sessionList
+                        ?.takeIf { it.allowsSessionMutation() && sessionGateway === gateway }
+                        ?: return@synchronized null
+                val mutation = current.sessionMutations[sessionId]
+                val rename = mutation?.rename
+                if (mutation == null || rename == null || mutation.pendingAction != null || rename.isSubmitting) {
+                    return@synchronized null
+                }
                 val title = rename.titleDraft.trim()
                 val validationError = rename.titleDraft.validateRenameTitle()
                 if (validationError != null) {
@@ -2718,7 +2732,7 @@ class EntryStateHolder(
                                             ),
                                 ),
                         )
-                    return
+                    return@synchronized null
                 }
                 _uiState.value =
                     _uiState.value.copy(
@@ -2743,27 +2757,36 @@ class EntryStateHolder(
                     )
                 val request = beginSessionMutation(sessionId, gateway)
                 unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
-                createMutationJob(request) {
-                    try {
-                        val confirmed = RenameSession(gateway).execute(sessionId, title)
-                        applyConfirmedSession(confirmed, request)
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (_: Exception) {
-                        showRenameFailure(request)
-                    }
-                }
-            }
+                submitRenameSession(gateway, sessionId, title, request)
+            } ?: return
         job.start()
     }
+
+    private fun submitRenameSession(
+        gateway: SessionGatewayPort,
+        sessionId: SessionId,
+        title: String,
+        request: SessionMutationRequest,
+    ): Job =
+        createMutationJob(request) {
+            try {
+                val confirmed = RenameSession(gateway).execute(sessionId, title)
+                applyConfirmedSession(confirmed, request)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                showRenameFailure(request)
+            }
+        }
 
     private fun showRenameFailure(request: SessionMutationRequest) {
         synchronized(sessionRequestLock) {
             if (!isCurrentSessionMutation(request)) return
             val sessionId = request.sessionId
-            val current = _uiState.value.sessionList ?: return
-            val mutation = current.sessionMutations[sessionId] ?: return
-            val rename = mutation.rename ?: return
+            val current = _uiState.value.sessionList
+            val mutation = current?.sessionMutations?.get(sessionId)
+            val rename = mutation?.rename
+            if (current == null || mutation == null || rename == null) return
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -2895,8 +2918,8 @@ class EntryStateHolder(
     ) {
         synchronized(sessionRequestLock) {
             if (!isCurrentSessionMutation(request)) return
-            val current = _uiState.value.sessionList ?: return
-            if (current.sessionForMutation(session.id) == null) return
+            val current =
+                _uiState.value.sessionList?.takeIf { it.sessionForMutation(session.id) != null } ?: return
             val updated = session.toSessionItemUiState()
             _uiState.value =
                 _uiState.value.copy(
@@ -2934,12 +2957,17 @@ class EntryStateHolder(
         val action = if (pinned) SessionMutationAction.PIN else SessionMutationAction.UNPIN
         val job =
             synchronized(sessionRequestLock) {
-                val current = _uiState.value.sessionList ?: return
-                if (!current.allowsSessionMutation()) return
-                if (sessionGateway !== gateway) return
-                if (current.sessionForMutation(sessionId) == null) return
+                val current =
+                    _uiState.value.sessionList
+                        ?.takeIf { it.allowsSessionMutation() && sessionGateway === gateway }
+                        ?: return@synchronized null
                 val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
-                if (mutation.pendingAction != null || mutation.rename != null || mutation.delete != null) return
+                val blocked =
+                    current.sessionForMutation(sessionId) == null ||
+                        mutation.pendingAction != null ||
+                        mutation.rename != null ||
+                        mutation.delete != null
+                if (blocked) return@synchronized null
                 _uiState.value =
                     _uiState.value.copy(
                         sessionList =
@@ -2973,7 +3001,7 @@ class EntryStateHolder(
                         showPinFailure(request, action)
                     }
                 }
-            }
+            } ?: return
         job.start()
     }
 
@@ -3036,8 +3064,9 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             if (!isCurrentSessionMutation(request)) return
             val sessionId = request.sessionId
-            val current = _uiState.value.sessionList ?: return
-            val mutation = current.sessionMutations[sessionId] ?: return
+            val current = _uiState.value.sessionList
+            val mutation = current?.sessionMutations?.get(sessionId)
+            if (current == null || mutation == null) return
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -3059,9 +3088,10 @@ class EntryStateHolder(
 
     private fun showDeleteSession(sessionId: SessionId) {
         synchronized(sessionRequestLock) {
-            val current = _uiState.value.sessionList ?: return
-            if (!current.allowsSessionMutation()) return
-            if (current.sessionForMutation(sessionId) == null) return
+            val current =
+                _uiState.value.sessionList
+                    ?.takeIf { it.allowsSessionMutation() && it.sessionForMutation(sessionId) != null }
+                    ?: return
             val mutation = current.sessionMutations[sessionId] ?: SessionMutationUiState()
             if (mutation.pendingAction != null || mutation.rename != null) return
             _uiState.value =
@@ -3086,8 +3116,7 @@ class EntryStateHolder(
     private fun cancelDeleteSession(sessionId: SessionId) {
         synchronized(sessionRequestLock) {
             val current = _uiState.value.sessionList ?: return
-            val mutation = current.sessionMutations[sessionId] ?: return
-            if (mutation.pendingAction != null) return
+            val mutation = current.sessionMutations[sessionId]?.takeIf { it.pendingAction == null } ?: return
             val remaining = mutation.copy(delete = null, errorCategory = null, retryAction = null)
             unresolvedSessionMutations.remove(recoverySessionKey(sessionId))
             _uiState.value =
@@ -3104,12 +3133,15 @@ class EntryStateHolder(
         val gateway = sessionGateway ?: return
         val job =
             synchronized(sessionRequestLock) {
-                val current = _uiState.value.sessionList ?: return
-                if (!current.allowsSessionMutation()) return
-                if (sessionGateway !== gateway) return
-                val mutation = current.sessionMutations[sessionId] ?: return
-                val delete = mutation.delete ?: return
-                if (mutation.pendingAction != null || delete.isSubmitting) return
+                val current =
+                    _uiState.value.sessionList
+                        ?.takeIf { it.allowsSessionMutation() && sessionGateway === gateway }
+                        ?: return@synchronized null
+                val mutation = current.sessionMutations[sessionId]
+                val delete = mutation?.delete
+                if (mutation == null || delete == null || mutation.pendingAction != null || delete.isSubmitting) {
+                    return@synchronized null
+                }
                 _uiState.value =
                     _uiState.value.copy(
                         sessionList =
@@ -3139,7 +3171,7 @@ class EntryStateHolder(
                         showDeleteFailure(request)
                     }
                 }
-            }
+            } ?: return
         job.start()
     }
 
@@ -3147,9 +3179,10 @@ class EntryStateHolder(
         synchronized(sessionRequestLock) {
             if (!isCurrentSessionMutation(request)) return
             val sessionId = request.sessionId
-            val current = _uiState.value.sessionList ?: return
-            val mutation = current.sessionMutations[sessionId] ?: return
-            val delete = mutation.delete ?: return
+            val current = _uiState.value.sessionList
+            val mutation = current?.sessionMutations?.get(sessionId)
+            val delete = mutation?.delete
+            if (current == null || mutation == null || delete == null) return
             _uiState.value =
                 _uiState.value.copy(
                     sessionList =
@@ -3221,26 +3254,16 @@ class EntryStateHolder(
         mutation: SessionMutationUiState,
         mutations: Map<SessionId, SessionMutationUiState>,
     ): Map<SessionId, SessionMutationUiState> =
-        if (
-            mutation.rename == null &&
-            mutation.delete == null &&
-            mutation.pendingAction == null &&
-            mutation.errorCategory == null &&
-            mutation.retryAction == null
-        ) {
-            mutations - sessionId
-        } else {
-            mutations + (sessionId to mutation)
-        }
+        if (mutation.hasNoPendingWork()) mutations - sessionId else mutations + (sessionId to mutation)
 
     private fun confirmCreateSession() {
         val gateway = sessionGateway ?: return
         val job =
             synchronized(sessionRequestLock) {
                 val state = _uiState.value
-                val sessionList = state.sessionList ?: return
-                val creation = sessionList.createSession ?: return
-                if (creation.isSubmitting || sessionList.isUnavailable) return
+                val sessionList = state.sessionList ?: return@synchronized null
+                val creation = sessionList.createSession ?: return@synchronized null
+                if (creation.isSubmitting || sessionList.isUnavailable) return@synchronized null
 
                 val title = creation.titleDraft.trim().takeIf(String::isNotEmpty)
                 val query = sessionList.searchQuery
@@ -3262,7 +3285,7 @@ class EntryStateHolder(
                             ),
                     )
                 createSessionJob(gateway, request)
-            }
+            } ?: return
         job.start()
     }
 
@@ -4168,15 +4191,17 @@ class EntryStateHolder(
                 _uiState.value.sessionList?.openedSession
                     ?.takeIf { it.session.id == sessionId }
                     ?.let { sessionRequestGeneration }
-            } ?: return true
-        return reconcileTimedOutSendNow(
-            sessionId = sessionId,
-            requestConnectionGeneration = requestConnectionGeneration,
-            requestSessionGeneration = currentSessionGeneration,
-            knownRunIds = knownRunIds,
-            resolveWhenNoNewRun = resolveWhenNoNewRun,
-            requestEndpoint = requestEndpoint,
-        )
+            }
+        return currentSessionGeneration?.let { generation ->
+            reconcileTimedOutSendNow(
+                sessionId = sessionId,
+                requestConnectionGeneration = requestConnectionGeneration,
+                requestSessionGeneration = generation,
+                knownRunIds = knownRunIds,
+                resolveWhenNoNewRun = resolveWhenNoNewRun,
+                requestEndpoint = requestEndpoint,
+            )
+        } ?: true
     }
 
     private suspend fun reconcileTimedOutSendNow(
@@ -4495,10 +4520,9 @@ class EntryStateHolder(
                 connectionGeneration != requestConnectionGeneration ||
                 sessionRequestGeneration != requestSessionGeneration
             ) {
-                return
+                return@synchronized
             }
-            val current = _uiState.value.sessionList ?: return
-            val opened = current.openedSession?.takeIf { it.session.id == sessionId } ?: return
+            val (current, opened) = openedSessionFor(sessionId) ?: return@synchronized
             val recoveryDraft = pendingTimedOutSends[sessionId]?.draft
             markTimedOutSendUncertain(
                 sessionId,
