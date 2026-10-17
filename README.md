@@ -107,3 +107,7 @@ The connection flow requires the user to provide one explicit profile-specific H
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
+## Reviewer bot
+
+PRs authored by code owners are reviewed automatically. For any other PR, a code owner can request a review by commenting `@reviewerbot review`.
