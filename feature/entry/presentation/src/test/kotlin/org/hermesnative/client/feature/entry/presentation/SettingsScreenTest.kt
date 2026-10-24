@@ -68,6 +68,7 @@ class SettingsScreenTest {
             .assertIsOff()
         composeTestRule.onNodeWithText("Local diagnostics").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Change Gateway credential").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Clear cached conversations").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Remove Gateway Connection").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Back to Sessions").performScrollTo().assertIsDisplayed()
         assertTrue(events.isEmpty())
@@ -234,6 +235,106 @@ class SettingsScreenTest {
         composeTestRule.waitForIdle()
 
         assertEquals(listOf<EntryUiEvent>(EntryUiEvent.CancelGatewayCredentialChangeClicked), events)
+    }
+
+    @Test
+    fun settings_clear_cache_control_joins_the_privacy_explanation_column() {
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(state = connectedListState(isSettingsOpen = true), onEvent = {})
+            }
+        }
+
+        composeTestRule
+            .onNodeWithText(
+                "Clearing removes cached conversations from this device only. " +
+                    "Remote Sessions and Runs are not deleted, " +
+                    "and diagnostic files you already exported are not removed.",
+            ).performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText("Clear cached conversations")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertHasClickAction()
+    }
+
+    @Test
+    fun the_clear_cache_control_routes_the_request_event() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(state = connectedListState(isSettingsOpen = true), onEvent = events::add)
+            }
+        }
+
+        composeTestRule.onNodeWithText("Clear cached conversations").performScrollTo().performClick()
+
+        assertEquals(listOf<EntryUiEvent>(EntryUiEvent.ClearHistoryCacheClicked), events)
+    }
+
+    @Test
+    fun the_clear_cache_confirmation_distinguishes_cached_conversations_remote_content_and_exports() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        connectedListState(isSettingsOpen = true).copy(isClearHistoryCacheConfirmationOpen = true),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Clear cached conversations?").assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(
+                "Remove the cached conversations stored on this device. " +
+                    "Remote Sessions and Runs are not deleted or changed. " +
+                    "Diagnostic files you already exported are not removed.",
+            ).assertIsDisplayed()
+
+        composeTestRule.onNodeWithText("Cancel").performClick()
+        assertEquals(listOf<EntryUiEvent>(EntryUiEvent.CancelClearHistoryCacheClicked), events)
+    }
+
+    @Test
+    fun the_clear_cache_confirmation_fires_only_the_confirm_event_from_its_confirm_button() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        connectedListState(isSettingsOpen = true).copy(isClearHistoryCacheConfirmationOpen = true),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Clear").performClick()
+
+        assertEquals(listOf<EntryUiEvent>(EntryUiEvent.ConfirmClearHistoryCacheClicked), events)
+    }
+
+    @Test
+    fun system_back_cancels_the_clear_cache_confirmation_before_closing_settings() {
+        val events = mutableListOf<EntryUiEvent>()
+        composeTestRule.setContent {
+            HermesTheme {
+                EntryScreen(
+                    state =
+                        connectedListState(isSettingsOpen = true).copy(isClearHistoryCacheConfirmationOpen = true),
+                    onEvent = events::add,
+                )
+            }
+        }
+
+        composeTestRule.runOnUiThread {
+            composeTestRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf<EntryUiEvent>(EntryUiEvent.CancelClearHistoryCacheClicked), events)
     }
 
     @Test

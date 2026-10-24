@@ -123,6 +123,26 @@ private fun SettingsGatewayControls(
         Text(text = "Change Gateway credential")
     }
     Spacer(modifier = Modifier.height(16.dp))
+    Text(
+        text =
+            "Clearing removes cached conversations from this device only. " +
+                "Remote Sessions and Runs are not deleted, and diagnostic files you already exported are not removed.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = { onEvent(EntryUiEvent.ClearHistoryCacheClicked) },
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("settings-clear-history-cache"),
+    ) {
+        Text(text = "Clear cached conversations")
+    }
+    Spacer(modifier = Modifier.height(16.dp))
     OutlinedButton(
         onClick = { onEvent(EntryUiEvent.RemoveGatewayConnectionClicked) },
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -139,6 +159,8 @@ internal fun SettingsBackHandling(
     when {
         state.isRemoveConfirmationOpen ->
             ShellBackHandler { onEvent(EntryUiEvent.CancelRemoveGatewayConnectionClicked) }
+        state.isClearHistoryCacheConfirmationOpen ->
+            ShellBackHandler { onEvent(EntryUiEvent.CancelClearHistoryCacheClicked) }
         state.isChangingCredential ->
             ShellBackHandler { onEvent(EntryUiEvent.CancelGatewayCredentialChangeClicked) }
         else -> ShellBackHandler { onEvent(EntryUiEvent.CloseSettingsClicked) }

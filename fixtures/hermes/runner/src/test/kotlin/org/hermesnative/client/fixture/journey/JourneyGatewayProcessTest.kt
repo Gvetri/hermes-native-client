@@ -362,6 +362,73 @@ class JourneyGatewayProcessTest {
     }
 
     @Test
+    fun offline_gate_recovers_the_session_list_after_the_pinned_blocked_request_count() {
+        val revision = pinnedDescriptor.provenance.value
+        val file =
+            tempScenario(
+                """{"name":"offline-recovery","hermes_revision":"$revision","port":18443,"tls":false,""" +
+                    """"capabilities":["sessions","session"],"fail_after_first_session_list":true,""" +
+                    """"offline_recovers_after_blocked_session_lists":2,""" +
+                    """"sessions":[{"id":"session-alpha","title":"Alpha Session","preview":null,"pinned":false}]}""",
+            )
+        val scenario = JourneyScenarioParser.parse(file, revision)
+        val process = JourneyGatewayProcess.start(scenario.copy(port = freePort(), tls = false))
+        try {
+            val endpoint = process.endpoint
+            assertEquals(200, get(endpoint, "/api/sessions"))
+            assertEquals(503, get(endpoint, "/api/sessions"))
+            assertEquals(503, get(endpoint, "/api/sessions"))
+            assertEquals(503, get(endpoint, "/api/sessions/session-alpha"))
+            assertEquals(200, get(endpoint, "/api/sessions"))
+            assertEquals(200, get(endpoint, "/api/sessions/session-alpha"))
+            assertEquals(200, get(endpoint, "/api/sessions"))
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
+    fun offline_recovery_requires_the_offline_gate_to_be_armed() {
+        val revision = pinnedDescriptor.provenance.value
+        val file =
+            tempScenario(
+                """{"name":"recovery-without-gate","hermes_revision":"$revision","port":18443,"tls":false,""" +
+                    """"capabilities":["sessions"],""" +
+                    """"offline_recovers_after_blocked_session_lists":2,"sessions":[]}""",
+            )
+        val error =
+            runCatching { JourneyScenarioParser.parse(file, revision) }.exceptionOrNull()
+        assertTrue(error is JourneyScenarioFormatException)
+    }
+
+    @Test
+    fun open_gate_blocks_transcript_reads_after_the_first_and_recovers_after_the_pinned_blocked_count() {
+        val revision = pinnedDescriptor.provenance.value
+        val file =
+            tempScenario(
+                """{"name":"open-gate","hermes_revision":"$revision","port":18443,"tls":false,""" +
+                    """"capabilities":["sessions","session","session_messages"],""" +
+                    """"fail_after_first_session_open":true,""" +
+                    """"offline_recovers_after_blocked_session_opens":1,""" +
+                    """"sessions":[{"id":"session-alpha","title":"Alpha Session","preview":null,"pinned":false,""" +
+                    """"history":[{"id":"message-alpha-1","role":"user",""" +
+                    """"content":"Synthetic cached conversation"}]}]}""",
+            )
+        val scenario = JourneyScenarioParser.parse(file, revision)
+        val process = JourneyGatewayProcess.start(scenario.copy(port = freePort(), tls = false))
+        try {
+            val endpoint = process.endpoint
+            assertEquals(200, get(endpoint, "/api/sessions/session-alpha/messages"))
+            assertEquals(503, get(endpoint, "/api/sessions/session-alpha/messages"))
+            assertEquals(200, get(endpoint, "/api/sessions/session-alpha"))
+            assertEquals(200, get(endpoint, "/api/sessions"))
+            assertEquals(200, get(endpoint, "/api/sessions/session-alpha/messages"))
+        } finally {
+            process.stop()
+        }
+    }
+
+    @Test
     fun held_create_response_is_recorded_before_the_bounded_release() {
         val revision = pinnedDescriptor.provenance.value
         val file =

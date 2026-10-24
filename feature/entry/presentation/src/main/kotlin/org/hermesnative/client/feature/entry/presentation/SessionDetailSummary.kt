@@ -136,6 +136,14 @@ private fun SessionSummaryStatusTexts(
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
         )
     }
+    if (state.isCached) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "The displayed Session history is cached on this device. It is not live.",
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
     state.errorCategory?.let { category ->
         Spacer(modifier = Modifier.height(8.dp))
         Text(

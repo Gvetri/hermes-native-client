@@ -1,0 +1,53 @@
+appId: org.hermesnative.client
+name: settings-cache-clear
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Alpha Session"
+    timeout: 30000
+- tapOn: "Alpha Session"
+- extendedWaitUntil:
+    visible: "Synthetic cached conversation"
+    timeout: 30000
+- assertNotVisible: "The displayed Session history is cached on this device. It is not live."
+- tapOn: "Back to Sessions"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*App version.*"
+    timeout: 30000
+- assertVisible: "Clearing removes cached conversations from this device only. Remote Sessions and Runs are not deleted, and diagnostic files you already exported are not removed."
+- takeScreenshot: settings-cache-clear-explanation
+- tapOn: "Clear cached conversations"
+- assertVisible: 'Clear cached conversations\?'
+- assertVisible: "Remove the cached conversations stored on this device. Remote Sessions and Runs are not deleted or changed. Diagnostic files you already exported are not removed."
+- takeScreenshot: settings-cache-clear-confirmation
+- tapOn: "Cancel"
+- assertVisible: ".*App version.*"
+- extendedWaitUntil:
+    notVisible: 'Clear cached conversations\?'
+    timeout: 30000
+- tapOn: "Clear cached conversations"
+- tapOn: '^Clear$'
+- assertVisible: ".*App version.*"
+- extendedWaitUntil:
+    notVisible: 'Clear cached conversations\?'
+    timeout: 30000
+- takeScreenshot: settings-cache-clear-confirmed
+- tapOn: "Back to Sessions"
+- extendedWaitUntil:
+    visible: "Alpha Session"
+    timeout: 30000
+- assertNotVisible: "The displayed Sessions are cached on this device. They are not live."
+- takeScreenshot: settings-cache-clear-authoritative

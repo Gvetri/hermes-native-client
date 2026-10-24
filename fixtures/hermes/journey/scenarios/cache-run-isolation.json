@@ -1,0 +1,57 @@
+{
+  "name": "cache-run-isolation",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "sessions",
+    "session",
+    "session_messages",
+    "session_create",
+    "session_update",
+    "session_delete",
+    "runs",
+    "run_status",
+    "run_events"
+  ],
+  "sessions": [
+    {
+      "id": "session-offline",
+      "title": "Offline Session",
+      "preview": "Synthetic preview",
+      "pinned": false,
+      "history": [
+        {
+          "id": "message-isolation-seed",
+          "role": "user",
+          "content": "Synthetic cached conversation"
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run-offline-refused",
+      "session_id": "session-offline",
+      "refuse_create": true
+    },
+    {
+      "run_id": "run-offline-recovered",
+      "session_id": "session-offline",
+      "create_status": "started",
+      "observation": [
+        {
+          "type": "run.completed"
+        }
+      ],
+      "final_status": "completed",
+      "terminal_history": [
+        {
+          "id": "message-offline-recovered",
+          "role": "assistant",
+          "content": "Offline send recovered"
+        }
+      ]
+    }
+  ]
+}

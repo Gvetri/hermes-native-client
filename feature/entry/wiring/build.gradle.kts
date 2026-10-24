@@ -42,3 +42,7 @@ dependencies {
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)
 }
+
+tasks.withType<Test>().configureEach {
+    systemProperty("fixture.repositoryRoot", rootProject.projectDir.absolutePath)
+}

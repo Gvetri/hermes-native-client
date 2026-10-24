@@ -45,6 +45,7 @@ internal fun EntryStateHolder.markTimedOutSendUncertain(
                             hasUnresolvedSubmission = true,
                             errorCategory = SessionHistoryErrorCategory.RECONCILIATION_FAILED,
                             isStale = true,
+                            isCached = ui.authoritativeMessages == null && ui.opened.isCached,
                         ),
                 ),
         )
@@ -389,6 +390,7 @@ internal fun EntryStateHolder.clearTimedOutSendUncertainty(
                             hasUnresolvedSubmission = false,
                             errorCategory = null,
                             isStale = false,
+                            isCached = false,
                         ),
                 ),
         )

@@ -62,6 +62,7 @@ internal suspend fun EntryStateHolder.loadOpenedSession(
 ) {
     try {
         val openedSession = OpenSession(gateway).execute(sessionId)
+        cacheOpenedSessionTranscript(openedSession)
         val applied =
             updateCurrentSessionRequest(request.generation) { current ->
                 applyRefreshedSessionResult(current, openedSession, sessionId)
@@ -209,6 +210,7 @@ internal fun EntryStateHolder.loadMorePageJob(
                     errorCategory = null,
                 )
             }
+            cacheSessionListPage(page.sessions)
             recordDiagnostic(LocalDiagnosticEventType.SESSION_LIST_LOAD, LocalDiagnosticStatus.SUCCEEDED)
         } catch (error: CancellationException) {
             throw error

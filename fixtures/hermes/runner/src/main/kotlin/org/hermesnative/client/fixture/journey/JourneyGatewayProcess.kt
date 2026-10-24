@@ -318,6 +318,9 @@ private object JourneyGatewayRoutes {
                     """{"object":"hermes.session","session":${JourneyGatewayJson.sessionJson(session)}}""",
                 )
 
+            segments[1] == "messages" && behavior.offlineOpenGate.onSessionHistoryRequest() ->
+                respond(exchange, HTTP_SERVICE_UNAVAILABLE, """{"error":"synthetic-offline-failure"}""")
+
             segments[1] == "messages" ->
                 respond(exchange, HTTP_OK, JourneyGatewayJson.historyJson(behavior, session))
 
@@ -726,22 +729,74 @@ private object JourneyGatewayBodyJson {
     }
 }
 
+/**
+ * Blocks every Session list and Session resource request once one list has succeeded.
+ * With a [recoversAfterBlockedSessionLists] bound, the gate stops blocking after that
+ * many blocked list requests, so a journey can script offline content followed by a
+ * recovered authoritative read.
+ */
 internal class OfflineAfterFirstSessionListGate(
     private val enabled: Boolean,
+    private val recoversAfterBlockedSessionLists: Int? = null,
 ) {
     private val sessionListRequests = AtomicInteger(0)
+    private val blockedSessionListRequests = AtomicInteger(0)
 
     @Volatile
     private var armed = false
 
+    @Volatile
+    private var recovered = false
+
     val blocking: Boolean
-        get() = enabled && armed
+        get() = enabled && armed && !recovered
 
     fun onSessionListRequest(): Boolean {
-        if (!enabled) return false
-        val request = sessionListRequests.incrementAndGet()
-        armed = armed || request > 1
-        return request > 1
+        if (!enabled || sessionListRequests.incrementAndGet() <= 1) {
+            return false
+        }
+        armed = true
+        val blocked = if (recovered) null else blockedSessionListRequests.incrementAndGet()
+        val shouldBlock =
+            blocked != null &&
+                (recoversAfterBlockedSessionLists == null || blocked <= recoversAfterBlockedSessionLists)
+        if (!shouldBlock) {
+            recovered = true
+        }
+        return shouldBlock
+    }
+}
+
+/**
+ * Blocks every Session transcript read once one has succeeded, leaving the Session list and
+ * the companion Session resource reads untouched. With a [recoversAfterBlockedSessionOpens]
+ * bound, the gate stops blocking after that many blocked transcript reads, so a journey can
+ * script a cached-transcript arm followed by a recovered authoritative re-open. The recovery
+ * arm must stay reachable from the same route the gate blocks, which is why the companion
+ * Session read is deliberately not blocked while this gate is armed.
+ */
+internal class OfflineAfterFirstSessionOpenGate(
+    private val enabled: Boolean,
+    private val recoversAfterBlockedSessionOpens: Int? = null,
+) {
+    private val sessionHistoryRequests = AtomicInteger(0)
+    private val blockedSessionHistoryRequests = AtomicInteger(0)
+
+    @Volatile
+    private var recovered = false
+
+    fun onSessionHistoryRequest(): Boolean {
+        if (!enabled || sessionHistoryRequests.incrementAndGet() <= 1) {
+            return false
+        }
+        val blocked = if (recovered) null else blockedSessionHistoryRequests.incrementAndGet()
+        val shouldBlock =
+            blocked != null &&
+                (recoversAfterBlockedSessionOpens == null || blocked <= recoversAfterBlockedSessionOpens)
+        if (!shouldBlock) {
+            recovered = true
+        }
+        return shouldBlock
     }
 }
 
@@ -763,7 +818,17 @@ internal class JourneyGatewayBehavior(
     @Volatile
     private var failNextSessionList = scenario.failNextSessionList
 
-    val offlineGate = OfflineAfterFirstSessionListGate(enabled = scenario.failAfterFirstSessionList)
+    val offlineGate =
+        OfflineAfterFirstSessionListGate(
+            enabled = scenario.failAfterFirstSessionList,
+            recoversAfterBlockedSessionLists = scenario.offlineRecoversAfterBlockedSessionLists,
+        )
+
+    val offlineOpenGate =
+        OfflineAfterFirstSessionOpenGate(
+            enabled = scenario.failAfterFirstSessionOpen,
+            recoversAfterBlockedSessionOpens = scenario.offlineRecoversAfterBlockedSessionOpens,
+        )
 
     val sseOpened: ConcurrentHashMap<String, AtomicInteger> = ConcurrentHashMap()
     val sseClosed: ConcurrentHashMap<String, AtomicInteger> = ConcurrentHashMap()

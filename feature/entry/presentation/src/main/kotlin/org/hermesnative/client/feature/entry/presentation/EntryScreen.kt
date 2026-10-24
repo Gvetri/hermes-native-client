@@ -78,6 +78,9 @@ fun EntryScreen(
             if (state.isRemoveConfirmationOpen) {
                 RemoveGatewayConnectionConfirmation(onEvent = onEvent)
             }
+            if (state.isClearHistoryCacheConfirmationOpen) {
+                ClearHistoryCacheConfirmation(onEvent = onEvent)
+            }
             if (sessionList?.openedSession?.isDiscardUnresolvedSendConfirmationOpen == true) {
                 UnresolvedSendDiscardConfirmation(onEvent = onEvent)
             }

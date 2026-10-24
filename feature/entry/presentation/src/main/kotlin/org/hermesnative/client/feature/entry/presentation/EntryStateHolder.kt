@@ -11,12 +11,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.hermesnative.client.feature.entry.application.EntryState
 import org.hermesnative.client.feature.entry.application.RemoveGatewayConnection
 import org.hermesnative.client.feature.entry.application.VerifyGatewayConnection
+import org.hermesnative.client.feature.entry.domain.HistoryCacheStore
 import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsExporter
 import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsRecorder
 import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsStore
 import org.hermesnative.client.feature.entry.domain.ModelGatewayPort
 import org.hermesnative.client.feature.entry.domain.ModelSelection
 import org.hermesnative.client.feature.entry.domain.ModelSelectionStore
+import org.hermesnative.client.feature.entry.domain.NoOpHistoryCacheStore
 import org.hermesnative.client.feature.entry.domain.NoOpModelSelectionStore
 import org.hermesnative.client.feature.entry.domain.NoOpSessionDraftStore
 import org.hermesnative.client.feature.entry.domain.PendingRunSubmissionKey
@@ -190,6 +192,12 @@ sealed interface EntryUiEvent {
 
     data object CloseSettingsClicked : Settings
 
+    data object ClearHistoryCacheClicked : Settings
+
+    data object ConfirmClearHistoryCacheClicked : Settings
+
+    data object CancelClearHistoryCacheClicked : Settings
+
     sealed interface Diagnostics : EntryUiEvent
 
     data object OpenLocalDiagnosticsClicked : Diagnostics
@@ -261,6 +269,7 @@ data class EntryUiState(
     val isConnected: Boolean = false,
     val errorCategory: EntryErrorCategory? = null,
     val isRemoveConfirmationOpen: Boolean = false,
+    val isClearHistoryCacheConfirmationOpen: Boolean = false,
     val isSettingsOpen: Boolean = false,
     val clientVersion: String = "unknown",
     val sessionList: SessionListUiState? = null,
@@ -336,6 +345,7 @@ data class EntryStateHolderDependencies(
     val runSubmissionUncertaintyStore: RunSubmissionUncertaintyStore = NoOpRunSubmissionUncertaintyStore,
     val sessionDraftStore: SessionDraftStore = NoOpSessionDraftStore,
     val modelSelectionStore: ModelSelectionStore = NoOpModelSelectionStore,
+    val historyCacheStore: HistoryCacheStore = NoOpHistoryCacheStore,
     val onRunSubmissionCompleted: (() -> Unit)? = null,
     val onRunSubmissionSettled: (() -> Unit)? = null,
     val runStatusNotificationSettingsStore: RunStatusNotificationSettingsStore? = null,
@@ -361,6 +371,7 @@ class EntryStateHolder(
     internal val runSubmissionUncertaintyStore = dependencies.runSubmissionUncertaintyStore
     internal val sessionDraftStore = dependencies.sessionDraftStore
     internal val modelSelectionStore = dependencies.modelSelectionStore
+    internal val historyCacheStore = dependencies.historyCacheStore
     internal val onRunSubmissionCompleted = dependencies.onRunSubmissionCompleted
     internal val onRunSubmissionSettled = dependencies.onRunSubmissionSettled
     internal val runStatusNotificationSettingsStore = dependencies.runStatusNotificationSettingsStore
@@ -522,6 +533,9 @@ class EntryStateHolder(
         when (event) {
             is EntryUiEvent.OpenSettingsClicked -> openSettings()
             is EntryUiEvent.CloseSettingsClicked -> closeSettings()
+            is EntryUiEvent.ClearHistoryCacheClicked -> requestClearHistoryCache()
+            is EntryUiEvent.ConfirmClearHistoryCacheClicked -> confirmClearHistoryCache()
+            is EntryUiEvent.CancelClearHistoryCacheClicked -> cancelClearHistoryCache()
         }
     }
 

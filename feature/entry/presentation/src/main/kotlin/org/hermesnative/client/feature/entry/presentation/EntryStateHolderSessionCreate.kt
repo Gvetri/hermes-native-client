@@ -140,13 +140,10 @@ internal fun EntryStateHolder.createSessionJob(
                         isSearching = false,
                         isLoadingMore = false,
                         isStale = refreshedPage == null,
+                        isCached = refreshedPage == null && current.isCached,
                         isUnavailable = refreshedPage == null,
                         errorCategory =
-                            if (refreshedPage == null) {
-                                SessionListErrorCategory.GATEWAY_UNAVAILABLE
-                            } else {
-                                null
-                            },
+                            if (refreshedPage == null) SessionListErrorCategory.GATEWAY_UNAVAILABLE else null,
                         createSession = null,
                         openedSession = openedSessionUiState,
                     )

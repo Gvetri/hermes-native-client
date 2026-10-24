@@ -1,0 +1,60 @@
+appId: org.hermesnative.client
+name: cache-run-isolation
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- takeScreenshot: cache-run-isolation-form-filled
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- tapOn: "Offline Session"
+- extendedWaitUntil:
+    visible: "Synthetic cached conversation"
+    timeout: 30000
+- assertNotVisible: "The displayed Session history is cached on this device. It is not live."
+- takeScreenshot: cache-run-isolation-populated
+- tapOn: "Message"
+- inputText: "Recover this offline draft"
+- hideKeyboard
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: "Refresh history to resolve"
+    timeout: 30000
+- assertVisible: "Recover this offline draft"
+- assertNotVisible: "The displayed Session history is cached on this device. It is not live."
+- takeScreenshot: cache-run-isolation-unresolved
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Verify your Hermes Gateway"
+    timeout: 30000
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Sessions"
+    timeout: 30000
+- assertNotVisible: "The displayed Sessions are cached on this device. They are not live."
+- tapOn: "Offline Session"
+- extendedWaitUntil:
+    visible: "Recover this offline draft"
+    timeout: 30000
+- assertNotVisible: "The displayed Session history is cached on this device. It is not live."
+- takeScreenshot: cache-run-isolation-draft-restored
+- tapOn:
+    text: "Try again"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Offline send recovered"
+    timeout: 30000
+- assertVisible: "Offline send recovered"
+- assertNotVisible: "Discard unsent record"
+- assertNotVisible: "The displayed Session history is cached on this device. It is not live."
+- takeScreenshot: cache-run-isolation-recovered

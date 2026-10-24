@@ -1,0 +1,36 @@
+{
+  "name": "offline-cache-read",
+  "hermes_revision": "d9833c5615b80e199a174cd67d90ab430695a972",
+  "port": 18443,
+  "tls": true,
+  "capabilities": [
+    "sessions",
+    "session_create",
+    "session",
+    "session_update",
+    "session_delete",
+    "session_messages",
+    "runs",
+    "run_status",
+    "run_events"
+  ],
+  "fail_after_first_session_list": true,
+  "offline_recovers_after_blocked_session_lists": 1,
+  "fail_after_first_session_open": true,
+  "offline_recovers_after_blocked_session_opens": 1,
+  "sessions": [
+    {
+      "id": "session-alpha",
+      "title": "Alpha Session",
+      "preview": "Synthetic preview",
+      "pinned": false,
+      "history": [
+        {
+          "id": "message-alpha-1",
+          "role": "user",
+          "content": "Synthetic cached conversation"
+        }
+      ]
+    }
+  ]
+}

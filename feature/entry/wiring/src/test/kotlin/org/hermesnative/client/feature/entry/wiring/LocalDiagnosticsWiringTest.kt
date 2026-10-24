@@ -13,6 +13,7 @@ import org.hermesnative.client.feature.entry.domain.LocalDiagnosticEvent
 import org.hermesnative.client.feature.entry.domain.LocalDiagnosticEventType
 import org.hermesnative.client.feature.entry.domain.LocalDiagnosticStatus
 import org.hermesnative.client.feature.entry.domain.LocalDiagnosticsExportResult
+import org.hermesnative.client.feature.entry.domain.NoOpHistoryCacheStore
 import org.hermesnative.client.feature.entry.presentation.EntryStateHolder
 import org.hermesnative.client.feature.entry.presentation.EntryUiEvent
 import org.junit.After
@@ -233,6 +234,7 @@ class LocalDiagnosticsWiringTest {
                 overrides =
                     EntryWiringOverrides(
                         coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                        historyCacheStore = NoOpHistoryCacheStore,
                     ),
                 clientVersion = "0.1.0",
             )

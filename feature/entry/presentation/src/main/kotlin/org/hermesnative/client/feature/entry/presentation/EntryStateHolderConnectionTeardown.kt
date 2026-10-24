@@ -19,6 +19,7 @@ internal fun EntryStateHolder.clearSessionDraftsAndRuns(endpoint: String) {
     pendingRunDrafts.clear()
     sessionDraftStore.clearEndpoint(endpoint)
     modelSelectionStore.clearEndpoint(endpoint)
+    historyCacheStore.clearEndpoint(endpoint)
     sessionRuns.clear()
     submittedRunInputs.clear()
     submittedRunModelSelections.clear()

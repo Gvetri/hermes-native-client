@@ -76,6 +76,14 @@ internal fun SessionListStatusTexts(state: SessionListUiState) {
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
         )
     }
+    if (state.isCached) {
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "The displayed Sessions are cached on this device. They are not live.",
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive },
+        )
+    }
     state.errorCategory?.let { category ->
         Spacer(modifier = Modifier.height(8.dp))
         Text(

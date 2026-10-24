@@ -1,0 +1,57 @@
+appId: org.hermesnative.client
+name: offline-cache-read
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Alpha Session"
+    timeout: 30000
+- tapOn: "Alpha Session"
+- extendedWaitUntil:
+    visible: "Synthetic cached conversation"
+    timeout: 30000
+- assertNotVisible: "The displayed Session history is cached on this device. It is not live."
+- takeScreenshot: offline-cache-read-authoritative-transcript
+- tapOn: "Back to Sessions"
+- tapOn: "Alpha Session"
+- extendedWaitUntil:
+    visible: "The displayed Session history is cached on this device. It is not live."
+    timeout: 30000
+- assertVisible: "Synthetic cached conversation"
+- takeScreenshot: offline-cache-read-cached-transcript
+- tapOn: "Back to Sessions"
+- tapOn: "Alpha Session"
+- extendedWaitUntil:
+    visible: "Synthetic cached conversation"
+    timeout: 30000
+- assertNotVisible: "The displayed Session history is cached on this device. It is not live."
+- takeScreenshot: offline-cache-read-recovered-transcript
+- tapOn: "Back to Sessions"
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Verify your Hermes Gateway"
+    timeout: 30000
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "The displayed Sessions are cached on this device. They are not live."
+    timeout: 30000
+- assertVisible: "Alpha Session"
+- assertVisible: "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
+- takeScreenshot: offline-cache-read-cached-list
+- tapOn: "Try again"
+- extendedWaitUntil:
+    notVisible: "The displayed Sessions are cached on this device. They are not live."
+    timeout: 30000
+- assertVisible: "Alpha Session"
+- assertNotVisible: "The displayed Session data may be stale. Gateway actions are unavailable until the connection recovers."
+- takeScreenshot: offline-cache-read-recovered-list

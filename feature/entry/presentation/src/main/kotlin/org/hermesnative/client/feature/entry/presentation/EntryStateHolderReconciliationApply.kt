@@ -234,6 +234,7 @@ internal fun EntryStateHolder.updateConfirmedRunSessionUi(
                             hasUnresolvedSubmission = hasUnresolvedSubmission(sessionId),
                             errorCategory = null,
                             isStale = false,
+                            isCached = false,
                         ),
                 ),
         )

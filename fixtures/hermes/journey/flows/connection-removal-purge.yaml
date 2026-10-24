@@ -1,0 +1,46 @@
+appId: org.hermesnative.client
+name: connection-removal-purge
+---
+- launchApp:
+    clearState: true
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Alpha Session"
+    timeout: 30000
+- tapOn: "Alpha Session"
+- extendedWaitUntil:
+    visible: "Synthetic cached conversation"
+    timeout: 30000
+- tapOn: "Back to Sessions"
+- tapOn: "Settings"
+- extendedWaitUntil:
+    visible: ".*App version.*"
+    timeout: 30000
+- tapOn: "Remove Gateway Connection"
+- assertVisible: "Remove the saved endpoint and credential from this device. Remote Sessions and Runs are not deleted or cancelled."
+- takeScreenshot: connection-removal-purge-confirmation
+- tapOn: "Remove"
+- extendedWaitUntil:
+    visible: "Add Gateway Connection"
+    timeout: 30000
+- takeScreenshot: connection-removal-purge-disconnected
+- tapOn: "Add Gateway Connection"
+- tapOn: "Gateway HTTPS endpoint"
+- inputText: "https://10.0.2.2:18443"
+- hideKeyboard
+- tapOn: "Bearer credential"
+- inputText: "synthetic-token"
+- hideKeyboard
+- tapOn: "Verify Gateway Connection"
+- extendedWaitUntil:
+    visible: "Alpha Session"
+    timeout: 30000
+- assertNotVisible: "The displayed Sessions are cached on this device. They are not live."
+- takeScreenshot: connection-removal-purge-reconnected
